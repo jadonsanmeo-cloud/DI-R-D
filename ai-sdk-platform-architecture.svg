@@ -1,0 +1,199 @@
+<svg xmlns="&#104;ttp://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" role="img" aria-labelledby="title desc">
+  <title id="title">DataIntelligenceSDK architecture diagram</title>
+  <desc id="desc">A minimal left-to-right AI SDK Platform architecture diagram showing user query, data source, intent, spec, engine registry, selected engine, engine output, evidence, synthesis, final response, runtime, sandbox, and pluggable engines.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#9AA8BA" />
+    </marker>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0F172A" flood-opacity="0.08" />
+    </filter>
+
+    <style>
+      .label { fill: #1F2A44; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 17px; font-weight: 650; text-anchor: middle; dominant-baseline: middle; }
+      .small-label { fill: #1F2A44; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 650; text-anchor: middle; dominant-baseline: middle; }
+      .container-label { fill: #1F2A44; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 18px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }
+      .node { stroke: #D6DEE8; stroke-width: 1.5; filter: url(#softShadow); }
+      .chip { stroke: #D6DEE8; stroke-width: 1; }
+      .connector { stroke: #9AA8BA; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; fill: none; marker-end: url(#arrow); }
+      .plugin-line { stroke: #B8C2D0; stroke-width: 1.4; stroke-dasharray: 5 7; stroke-linecap: round; fill: none; }
+      .icon-blue { stroke: #4B8FD9; }
+      .icon-green { stroke: #39A36B; }
+      .icon-orange { stroke: #D58A28; }
+      .icon-purple { stroke: #7C61D9; }
+      .icon { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1000" fill="#FFFFFF" />
+
+  <!-- Pluggable engine connectors -->
+  <path class="plugin-line" d="M 637 129 C 660 150 690 184 713 235" />
+  <path class="plugin-line" d="M 755 130 C 748 160 736 194 727 235" />
+  <path class="plugin-line" d="M 927 154 C 895 180 845 216 804 247" />
+  <path class="plugin-line" d="M 582 419 C 603 389 631 351 663 329" />
+  <path class="plugin-line" d="M 771 429 C 765 397 757 359 749 329" />
+
+  <!-- Input connectors -->
+  <path class="connector" marker-end="url(#arrow)" d="M 220 217 C 242 217 254 252 280 267" />
+  <path class="connector" marker-end="url(#arrow)" d="M 220 347 C 244 347 255 315 280 297" />
+
+  <!-- Main pipeline connectors -->
+  <path class="connector" marker-end="url(#arrow)" d="M 415 282 H 455" />
+  <path class="connector" marker-end="url(#arrow)" d="M 580 282 H 625" />
+  <path class="connector" marker-end="url(#arrow)" d="M 805 282 H 885" />
+  <path class="connector" marker-end="url(#arrow)" d="M 1035 282 H 1085" />
+  <path class="connector" marker-end="url(#arrow)" d="M 1230 282 H 1285" />
+  <path class="connector" marker-end="url(#arrow)" d="M 1420 282 H 1460" />
+  <path class="connector" marker-end="url(#arrow)" d="M 1615 282 C 1644 282 1653 307 1658 335" />
+
+  <!-- Support layer connectors -->
+  <path class="connector" marker-end="url(#arrow)" d="M 960 430 V 324" />
+  <path class="connector" marker-end="url(#arrow)" d="M 960 710 V 630" />
+
+  <!-- Pluggable engines -->
+  <g>
+    <rect x="515" y="105" width="125" height="48" rx="24" fill="#EAF3FF" stroke="#D7E9FF" stroke-width="1.2" />
+    <circle cx="538" cy="129" r="5" fill="#4B8FD9" opacity="0.7" />
+    <text class="small-label" x="586" y="129">SQL Engine</text>
+  </g>
+  <g>
+    <rect x="680" y="82" width="150" height="48" rx="24" fill="#FFF4E6" stroke="#FFE2B8" stroke-width="1.2" />
+    <path class="icon icon-orange" d="M 704 120 h 12 m -10 -12 h 8 m -8 4 h 8" />
+    <text class="small-label" x="759" y="106">Python Engine</text>
+  </g>
+  <g>
+    <rect x="865" y="118" width="125" height="48" rx="24" fill="#EAF8F1" stroke="#D9F3E5" stroke-width="1.2" />
+    <circle cx="888" cy="142" r="7" fill="none" stroke="#39A36B" stroke-width="1.5" />
+    <path d="M 894 148 L 900 154" stroke="#39A36B" stroke-width="1.5" stroke-linecap="round" />
+    <text class="small-label" x="937" y="142">RAG Engine</text>
+  </g>
+  <g>
+    <rect x="500" y="395" width="165" height="48" rx="24" fill="#F3EDFF" stroke="#E3D7FF" stroke-width="1.2" />
+    <path class="icon icon-purple" d="M 525 419 h 14 m -7 -7 v 14 m 18 -14 h 12 m -6 0 v 14" />
+    <text class="small-label" x="589" y="419">Workflow Engine</text>
+  </g>
+  <g>
+    <rect x="700" y="405" width="145" height="48" rx="24" fill="#FFF4E6" stroke="#FFE2B8" stroke-width="1.2" />
+    <path class="icon icon-orange" d="M 724 429 l 7 -7 l 7 7 l -7 7 Z" />
+    <text class="small-label" x="779" y="429">Custom Engine</text>
+  </g>
+
+  <!-- Inputs -->
+  <g>
+    <rect class="node" x="70" y="185" width="150" height="64" rx="18" fill="#EAF3FF" />
+    <path class="icon icon-blue" d="M 100 212 h 36 a 10 10 0 0 1 10 10 v 4 a 10 10 0 0 1 -10 10 h -18 l -14 11 v -11 h -4 a 10 10 0 0 1 -10 -10 v -4 a 10 10 0 0 1 10 -10 Z" />
+    <text class="label" x="156" y="217">User Query</text>
+  </g>
+  <g>
+    <rect class="node" x="70" y="315" width="150" height="64" rx="18" fill="#EAF8F1" />
+    <ellipse cx="116" cy="337" rx="20" ry="8" fill="none" stroke="#39A36B" stroke-width="1.8" />
+    <path d="M 96 337 v 22 c 0 4 9 8 20 8 s 20 -4 20 -8 v -22" fill="none" stroke="#39A36B" stroke-width="1.8" />
+    <path d="M 96 348 c 0 4 9 8 20 8 s 20 -4 20 -8" fill="none" stroke="#39A36B" stroke-width="1.8" />
+    <text class="label" x="160" y="347">Data Source</text>
+  </g>
+
+  <!-- Main pipeline nodes -->
+  <g>
+    <rect class="node" x="280" y="245" width="135" height="74" rx="20" fill="#EAF3FF" />
+    <circle cx="313" cy="282" r="15" fill="none" stroke="#4B8FD9" stroke-width="1.8" />
+    <circle cx="313" cy="282" r="5" fill="none" stroke="#4B8FD9" stroke-width="1.8" />
+    <path class="icon-blue" d="M 313 261 v 8 M 313 295 v 8 M 292 282 h 8 M 326 282 h 8" stroke-width="1.8" stroke-linecap="round" />
+    <text class="label" x="357" y="282">Intent SDK</text>
+  </g>
+
+  <g>
+    <rect class="node" x="455" y="245" width="125" height="74" rx="20" fill="#F3EDFF" />
+    <path class="icon icon-purple" d="M 486 263 h 23 l 12 12 v 27 h -35 Z M 509 263 v 13 h 12" />
+    <path class="icon-purple" d="M 494 286 h 18 M 494 294 h 14" stroke-width="1.6" stroke-linecap="round" />
+    <text class="label" x="535" y="282">Spec SDK</text>
+  </g>
+
+  <g>
+    <rect class="node" x="625" y="235" width="180" height="94" rx="22" fill="#F3EDFF" />
+    <rect x="657" y="259" width="17" height="17" rx="4" fill="none" stroke="#7C61D9" stroke-width="1.7" />
+    <rect x="682" y="259" width="17" height="17" rx="4" fill="none" stroke="#7C61D9" stroke-width="1.7" />
+    <rect x="657" y="284" width="17" height="17" rx="4" fill="none" stroke="#7C61D9" stroke-width="1.7" />
+    <rect x="682" y="284" width="17" height="17" rx="4" fill="none" stroke="#7C61D9" stroke-width="1.7" />
+    <text class="label" x="742" y="282">Engine Registry SDK</text>
+  </g>
+
+  <g>
+    <rect class="node" x="885" y="245" width="150" height="74" rx="20" fill="#FFF4E6" />
+    <circle cx="922" cy="282" r="13" fill="none" stroke="#D58A28" stroke-width="1.8" />
+    <path class="icon-orange" d="M 922 262 v 7 M 922 295 v 7 M 902 282 h 7 M 935 282 h 7 M 908 268 l 5 5 M 931 291 l 5 5 M 936 268 l -5 5 M 913 291 l -5 5" stroke-width="1.8" stroke-linecap="round" />
+    <text class="label" x="976" y="282">Selected Engine</text>
+  </g>
+
+  <g>
+    <rect class="node" x="1085" y="245" width="145" height="74" rx="20" fill="#FFF4E6" />
+    <path class="icon icon-orange" d="M 1115 265 h 42 a 7 7 0 0 1 7 7 v 24 a 7 7 0 0 1 -7 7 h -42 a 7 7 0 0 1 -7 -7 v -24 a 7 7 0 0 1 7 -7 Z" />
+    <path class="icon-orange" d="M 1118 282 l 8 7 l -8 7 M 1132 296 h 15" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    <text class="label" x="1179" y="282">Engine Output</text>
+  </g>
+
+  <g>
+    <rect class="node" x="1285" y="245" width="135" height="74" rx="20" fill="#EAF8F1" />
+    <path class="icon icon-green" d="M 1318 263 h 25 l 10 10 v 30 h -35 Z M 1343 263 v 11 h 10" />
+    <path d="M 1326 290 l 8 8 l 15 -18" fill="none" stroke="#39A36B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+    <text class="label" x="1374" y="282">Evidence SDK</text>
+  </g>
+
+  <g>
+    <rect class="node" x="1460" y="245" width="155" height="74" rx="20" fill="#F3EDFF" />
+    <circle cx="1490" cy="270" r="5" fill="#7C61D9" opacity="0.75" />
+    <circle cx="1512" cy="294" r="5" fill="#39A36B" opacity="0.75" />
+    <circle cx="1490" cy="294" r="5" fill="#4B8FD9" opacity="0.75" />
+    <path d="M 1494 273 L 1508 290 M 1495 294 H 1507" stroke="#7C61D9" stroke-width="1.6" stroke-linecap="round" />
+    <text class="label" x="1559" y="282">Synthesizer SDK</text>
+  </g>
+
+  <g>
+    <rect class="node" x="1635" y="335" width="145" height="74" rx="20" fill="#EAF8F1" />
+    <path class="icon icon-green" d="M 1665 359 h 40 a 10 10 0 0 1 10 10 v 7 a 10 10 0 0 1 -10 10 h -19 l -12 10 v -10 h -9 a 10 10 0 0 1 -10 -10 v -7 a 10 10 0 0 1 10 -10 Z" />
+    <text class="label" x="1722" y="372">Final Response</text>
+  </g>
+
+  <!-- Runtime SDK -->
+  <g>
+    <rect class="node" x="830" y="430" width="260" height="200" rx="24" fill="#FFF4E6" />
+    <path class="icon icon-orange" d="M 943 468 h 34 M 960 451 v 34 M 928 485 h 64" opacity="0.85" />
+    <text class="container-label" x="960" y="470">Runtime SDK</text>
+
+    <rect class="chip" x="854" y="505" width="108" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="908" y="524">Method Hub</text>
+
+    <rect class="chip" x="982" y="505" width="84" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="1024" y="524">Executor</text>
+
+    <rect class="chip" x="854" y="556" width="82" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="895" y="575">Logger</text>
+
+    <rect class="chip" x="954" y="556" width="112" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="1010" y="575">Resource Manager</text>
+
+    <rect class="chip" x="918" y="604" width="84" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="960" y="623">Cache</text>
+  </g>
+
+  <!-- Sandbox SDK -->
+  <g>
+    <rect class="node" x="830" y="710" width="260" height="155" rx="24" fill="#EAF8F1" />
+    <path class="icon icon-green" d="M 940 748 l 20 -10 l 20 10 v 24 l -20 10 l -20 -10 Z M 940 748 l 20 10 l 20 -10 M 960 758 v 24" opacity="0.85" />
+    <text class="container-label" x="960" y="748">Sandbox SDK</text>
+
+    <rect class="chip" x="858" y="785" width="86" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="901" y="804">Data</text>
+
+    <rect class="chip" x="976" y="785" width="98" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="1025" y="804">Workspace</text>
+
+    <rect class="chip" x="858" y="832" width="86" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="901" y="851">Artifacts</text>
+
+    <rect class="chip" x="976" y="832" width="98" height="38" rx="13" fill="#FFFFFF" />
+    <text class="small-label" x="1025" y="851">Logs</text>
+  </g>
+</svg>
