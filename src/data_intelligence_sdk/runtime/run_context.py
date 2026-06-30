@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from data_intelligence.core.types import EngineOutput, EngineStep, EngineTrace, MethodCall, TraceStatus
+from data_intelligence_sdk.core.types import EngineOutput, EngineStep, EngineTrace, MethodCall, TraceStatus
 
 
 class EngineRunContext:

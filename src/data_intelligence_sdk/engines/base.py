@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from data_intelligence.core.types import DataHubContext, EngineOutput, ExecutionSpec, UserContext
-from data_intelligence.runtime.run_context import EngineRunContext
+from data_intelligence_sdk.core.types import DataHubContext, EngineOutput, ExecutionSpec, UserContext
+from data_intelligence_sdk.runtime.run_context import EngineRunContext
 
 
 class Engine(Protocol):

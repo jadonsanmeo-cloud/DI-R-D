@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from data_intelligence.core.errors import EngineNotFoundError
-from data_intelligence.core.types import ExecutionSpec
-from data_intelligence.engines.base import Engine
+from data_intelligence_sdk.core.errors import EngineNotFoundError
+from data_intelligence_sdk.core.types import ExecutionSpec
+from data_intelligence_sdk.engines.base import Engine
 
 
 class EngineRegistry(Protocol):

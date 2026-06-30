@@ -1,6 +1,6 @@
 """Base package for the Data Intelligence orchestration system."""
 
-from data_intelligence.core.types import (
+from data_intelligence_sdk.core.types import (
     DataHubContext,
     EngineStep,
     EngineOutput,

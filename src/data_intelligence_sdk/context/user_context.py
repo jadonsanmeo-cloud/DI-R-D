@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from data_intelligence.core.types import UserContext
+from data_intelligence_sdk.core.types import UserContext
 
 
 class UserContextStore(Protocol):
