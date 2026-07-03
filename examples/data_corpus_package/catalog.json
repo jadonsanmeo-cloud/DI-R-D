@@ -1,0 +1,47 @@
+{
+  "raw_files": {
+    "csv": [
+      "raw/csv/customers.csv",
+      "raw/csv/orders.csv",
+      "raw/csv/products.csv",
+      "raw/csv/support_tickets.csv",
+      "raw/csv/web_events.csv"
+    ],
+    "txt": [
+      "raw/txt/orders_summary.txt",
+      "raw/txt/customer_segments.txt",
+      "raw/txt/product_catalog.txt",
+      "raw/txt/support_notes.txt",
+      "raw/txt/web_activity.txt"
+    ]
+  },
+  "embedding": {
+    "environment_variable": "OPENROUTER_EMBEDDING_MODEL",
+    "default_model": "openai/text-embedding-3-small",
+    "mock_dimensions": 5
+  },
+  "datasets": [
+    {
+      "name": "orders",
+      "kind": "db_table",
+      "source": "postgresql://data_intelligence:data_intelligence@localhost:2345/data_corpus",
+      "raw_file": "raw/csv/orders.csv",
+      "engine": "postgres",
+      "description": "Mock Postgres order records with customer, country, status, and revenue fields."
+    },
+    {
+      "name": "document_chunks",
+      "kind": "vectordb_collection",
+      "source": "postgresql://data_intelligence:data_intelligence@localhost:2345/data_corpus?schema=vectordb",
+      "raw_files": [
+        "raw/txt/orders_summary.txt",
+        "raw/txt/customer_segments.txt",
+        "raw/txt/product_catalog.txt",
+        "raw/txt/support_notes.txt",
+        "raw/txt/web_activity.txt"
+      ],
+      "description": "Persisted document chunks containing chunk ids, source document ids, text content, mock embeddings, and metadata for semantic retrieval."
+    }
+  ],
+  "summary": "A mock data corpus package with five CSV files persisted into Postgres tables and five TXT files chunked into pgvector-backed document embeddings."
+}

@@ -81,7 +81,7 @@ Key architectural boundaries:
 - [src/data_intelligence_sdk/engines/general.py](src/data_intelligence_sdk/engines/general.py) defines `GeneralPurposeEngine`, the fallback/general engine.
 - OpenRouter through LangChain is the first supported LLM provider for the general engine. Live calls should only happen when a pipeline run invokes an OpenRouter-backed engine.
 - CSV MethodHub methods live under [src/data_intelligence_sdk/methods/csv.py](src/data_intelligence_sdk/methods/csv.py) and provide `scan_csv`, `filter_csv`, `count_csv`, and `sum_csv`.
-- Default workflow factories live under [src/data_intelligence_sdk/defaults/pipeline.py](src/data_intelligence_sdk/defaults/pipeline.py), including `create_default_pipeline` and `create_default_pipeline_from_openrouter`.
+- The SDK package should expose protocol boundaries and reusable engines/methods. Concrete workflow wiring belongs in consuming apps or examples, such as [examples/basic_workflow.py](examples/basic_workflow.py).
 - Do not add live OpenRouter calls to tests; use fake engines, fake LLMs, or constructor/config validation tests.
 
 Design notes from the README to preserve:

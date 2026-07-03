@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import asdict, is_dataclass
 from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+try:  # pragma: no cover - exercised with monkeypatched tests when unavailable.
+    from langchain.agents import AgentExecutor, create_react_agent
+except ImportError:  # pragma: no cover
+    AgentExecutor = None  # type: ignore[assignment]
+    create_react_agent = None  # type: ignore[assignment]
+try:  # pragma: no cover - exercised with monkeypatched tests when unavailable.
+    from langchain.agents import create_agent
+except ImportError:  # pragma: no cover
+    create_agent = None  # type: ignore[assignment]
+from langchain_core.prompts import PromptTemplate
+from langchain_core.tools import StructuredTool, create_schema_from_function
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
@@ -87,26 +99,6 @@ class GeneralPurposeEngine:
             metadata={"sources": corpus_package.sources},
         )
 
-    def _run_known_method(
-        self, spec: ExecutionSpec, csv_source: str | None, runtime: EngineRuntimeContext
-    ) -> str | None:
-        if csv_source is None:
-            return None
-        objective = spec.objective.lower()
-        if "count" in objective or "how many" in objective:
-            result = self._call_method(runtime, "count_csv", {"path": csv_source})
-            return f"Count: {result['count']}"
-        if "sum" in objective or "total" in objective:
-            column = self._guess_column(objective, default="revenue")
-            result = self._call_method(
-                runtime, "sum_csv", {"path": csv_source, "column": column}
-            )
-            return f"Sum of {column}: {result['sum']}"
-        if "scan" in objective or "inspect" in objective or "columns" in objective:
-            result = self._call_method(runtime, "scan_csv", {"path": csv_source})
-            return f"CSV columns: {', '.join(result['columns'])}; rows: {result['row_count']}"
-        return None
-
     def _call_method(
         self, runtime: EngineRuntimeContext, method_name: str, inputs: dict[str, Any]
     ) -> Any:
@@ -146,22 +138,106 @@ class GeneralPurposeEngine:
         return (
             "Answer the user query using MethodHub tools for factual data access.\n"
             "Do not guess facts about data files; call tools instead.\n\n"
+            "Source usage rules:\n"
+            "- Use CSV tools only for local file paths ending in .csv.\n"
+            "- Use search_vector_chunks for postgresql:// sources with schema=vectordb.\n"
+            "- Do not pass database URIs to CSV tools.\n\n"
             f"User objective: {spec.objective}\n\n"
             f"Data sources:\n{sources}\n\n"
             f"Available tools:\n{methods}\n"
         )
 
-    def _build_agent_tools(self, runtime: EngineRuntimeContext) -> dict[str, object]:
+    def _find_vectordb_source(self, corpus_package: DataCorpusPackage) -> str | None:
+        for source in corpus_package.sources:
+            source_text = str(source)
+            parsed = urlparse(source_text)
+            if parsed.scheme in {"postgres", "postgresql"}:
+                query = parse_qs(parsed.query)
+                if query.get("schema", [""])[0] == "vectordb":
+                    return source_text
+            if source_text.rstrip("/").endswith("/vectordb"):
+                return source_text
+        package_metadata = corpus_package.metadata.get("package")
+        if isinstance(package_metadata, dict):
+            vectordb = package_metadata.get("vectordb")
+            if isinstance(vectordb, str):
+                return vectordb
+        return None
+
+    def _normalize_tool_inputs(
+        self,
+        method_name: str,
+        inputs: dict[str, Any],
+        corpus_package: DataCorpusPackage,
+    ) -> dict[str, Any]:
+        if method_name != "search_vector_chunks":
+            return inputs
+        vectordb_source = self._find_vectordb_source(corpus_package)
+        if vectordb_source is None:
+            return inputs
+        normalized = dict(inputs)
+        parsed = urlparse(str(normalized.get("vectordb", "")))
+        if parsed.scheme not in {"postgres", "postgresql"}:
+            normalized["vectordb"] = vectordb_source
+        return normalized
+
+    def _build_agent_tools(
+        self, runtime: EngineRuntimeContext, corpus_package: DataCorpusPackage
+    ) -> dict[str, object]:
         tools = {}
         for registered in runtime.method_hub.list_methods():
 
             def make_tool(method_name: str):
                 def tool(args: dict[str, Any]) -> Any:
+                    args = self._normalize_tool_inputs(
+                        method_name, args, corpus_package
+                    )
                     return self._call_method(runtime, method_name, args)
 
                 return tool
 
             tools[registered.name] = make_tool(registered.name)
+        return tools
+
+    def _build_langchain_tools(
+        self, runtime: EngineRuntimeContext, corpus_package: DataCorpusPackage
+    ) -> list[StructuredTool]:
+        tools = []
+        for registered in runtime.method_hub.list_methods():
+
+            def make_tool(method_name: str):
+                method = runtime.method_hub.get(method_name)
+
+                def tool(**kwargs: Any) -> Any:
+                    kwargs = self._normalize_tool_inputs(
+                        method_name, kwargs, corpus_package
+                    )
+                    return self._call_method(runtime, method_name, kwargs)
+
+                tool.__name__ = method_name
+                tool.__doc__ = getattr(method, "__doc__", None) or registered.metadata.get(
+                    "description", method_name
+                )
+                schema_model = create_schema_from_function(
+                    f"{method_name}_schema", method  # type: ignore[arg-type]
+                )
+                if hasattr(schema_model, "model_json_schema"):
+                    args_schema = schema_model.model_json_schema()
+                else:  # pragma: no cover - compatibility with Pydantic v1.
+                    args_schema = schema_model.schema()
+                return tool, args_schema
+
+            tool, args_schema = make_tool(registered.name)
+
+            tools.append(
+                StructuredTool.from_function(
+                    func=tool,
+                    name=registered.name,
+                    description=registered.metadata.get("description", registered.name),
+                    args_schema=args_schema,
+                    infer_schema=False,
+                )
+            )
         return tools
 
     def _run_agent(
@@ -171,7 +247,7 @@ class GeneralPurposeEngine:
         runtime: EngineRuntimeContext,
     ) -> str | None:
         prompt = self._build_agent_prompt(spec, corpus_package, runtime)
-        tools = self._build_agent_tools(runtime)
+        tools = self._build_agent_tools(runtime, corpus_package)
 
         if hasattr(self.llm, "run"):
             response = self.llm.run(prompt=prompt, tools=tools)
@@ -181,46 +257,82 @@ class GeneralPurposeEngine:
                 tools[tool_name](args)
             return str(response.get("final_answer", ""))
 
-        return self._run_langchain_agent(prompt, tools)
+        agent_result = self._run_langchain_agent(spec, corpus_package, runtime)
+        if agent_result:
+            return agent_result
 
-    def _run_langchain_agent(self, prompt: str, tools: dict[str, object]) -> str | None:
-        if hasattr(self.llm, "invoke"):
-            response = self.llm.invoke(prompt)
-            content = str(getattr(response, "content", response))
-            tool_request = self._parse_tool_request(content)
-            if tool_request is None:
-                return content
-            tool_name = tool_request["tool"]
-            raw_arguments = tool_request.get(
-                "arguments", tool_request.get("parameters", {})
-            )
-            arguments = self._normalize_tool_arguments(raw_arguments)
-            result = tools[tool_name](arguments)
-            return self._format_tool_result(tool_name, result)
         return None
 
-    def _parse_tool_request(self, content: str) -> dict[str, Any] | None:
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError:
+    def _run_langchain_agent(
+        self,
+        spec: ExecutionSpec,
+        corpus_package: DataCorpusPackage,
+        runtime: EngineRuntimeContext,
+    ) -> str | None:
+        if not hasattr(self.llm, "invoke"):
             return None
-        if not isinstance(parsed, dict) or "tool" not in parsed:
-            return None
-        return parsed
+        tools = self._build_langchain_tools(runtime, corpus_package)
 
-    def _normalize_tool_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        normalized = dict(arguments)
-        if "file_path" in normalized and "path" not in normalized:
-            normalized["path"] = normalized.pop("file_path")
-        return normalized
+        if create_react_agent is not None and AgentExecutor is not None:
+            prompt = PromptTemplate.from_template(
+                self._build_agent_prompt(spec, corpus_package, runtime)
+                + "\nUse this ReAct format:\n"
+                + "Question: {input}\n"
+                + "Thought: reason about the next step\n"
+                + "Action: one of [{tool_names}]\n"
+                + "Action Input: a JSON object with tool arguments\n"
+                + "Observation: tool result\n"
+                + "... repeat Thought/Action/Action Input/Observation as needed\n"
+                + "Thought: I now know the final answer\n"
+                + "Final Answer: the answer\n\n"
+                + "Tools:\n{tools}\n\n"
+                + "Question: {input}\n"
+                + "Data source path: {source_path}\n"
+                + "{agent_scratchpad}"
+            )
+            agent = create_react_agent(self.llm, tools, prompt)
+            executor = AgentExecutor(agent=agent, tools=tools)
+            result = executor.invoke(
+                {"input": spec.objective, "source_path": corpus_package.sources[0]}
+            )
+            return self._extract_langchain_agent_output(result)
 
-    def _format_tool_result(self, tool_name: str, result: Any) -> str:
-        if tool_name == "scan_csv" and isinstance(result, dict):
-            return f"CSV columns: {', '.join(result['columns'])}; rows: {result['row_count']}"
-        if tool_name == "count_csv" and isinstance(result, dict):
-            return f"Count: {result['count']}"
-        if tool_name == "sum_csv" and isinstance(result, dict):
-            return f"Sum of {result['column']}: {result['sum']}"
+        if create_agent is not None:
+            agent = create_agent(
+                model=self.llm,
+                tools=tools,
+                system_prompt=self._build_agent_prompt(spec, corpus_package, runtime),
+            )
+            result = agent.invoke(
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": f"{spec.objective}\nData source path: {corpus_package.sources[0]}",
+                        }
+                    ]
+                }
+            )
+            return self._extract_langchain_agent_output(result)
+
+        return (
+            "LangChain ReAct agent support is not available. Install a LangChain "
+            "version that exposes create_react_agent and AgentExecutor or create_agent."
+        )
+
+    def _extract_langchain_agent_output(self, result: Any) -> str:
+        if isinstance(result, dict):
+            if "output" in result:
+                return str(result.get("output", ""))
+            messages = result.get("messages")
+            if messages:
+                last_message = messages[-1]
+                content = getattr(last_message, "content", None)
+                if content is None and isinstance(last_message, dict):
+                    content = last_message.get("content")
+                if content is not None:
+                    return str(content)
+                return str(last_message)
         return str(result)
 
     def _handle_method_generation(
@@ -291,13 +403,6 @@ class GeneralPurposeEngine:
                 "sandbox_results": [sandbox_result],
             },
         )
-
-    def _guess_column(self, objective: str, *, default: str) -> str:
-        tokens = [token.strip(" ?.!,") for token in objective.split()]
-        if "revenue" in tokens:
-            return "revenue"
-        return default
-
 
 def _to_dict(value: Any) -> dict[str, Any]:
     if is_dataclass(value):

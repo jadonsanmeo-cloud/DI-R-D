@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: data-intelligence-postgres
+    environment:
+      POSTGRES_DB: data_corpus
+      POSTGRES_USER: data_intelligence
+      POSTGRES_PASSWORD: data_intelligence
+      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-openai/text-embedding-3-small}
+    ports:
+      - "2345:5432"
+    volumes:
+      - data_corpus_postgres:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U data_intelligence -d data_corpus"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  data_corpus_postgres:

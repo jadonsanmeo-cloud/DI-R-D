@@ -1,0 +1,1 @@
+Support tickets capture customer issues such as invoice export, semantic search, and CSV import. Ticket priority and status provide operational context for customer health analysis.

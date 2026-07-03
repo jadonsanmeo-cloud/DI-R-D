@@ -1,0 +1,62 @@
+{
+  "database": {
+    "engine": "postgres",
+    "reference": "postgresql://data_intelligence:data_intelligence@localhost:2345/data_corpus",
+    "description": "Mock Postgres-compatible warehouse reference seeded by examples/data_corpus_package/initdb."
+  },
+  "embedding": {
+    "environment_variable": "OPENROUTER_EMBEDDING_MODEL",
+    "default_model": "openai/text-embedding-3-small",
+    "mock_dimensions": 5,
+    "description": "Mock embeddings are deterministic 5-dimensional vectors that stand in for OpenRouter embeddings during local examples."
+  },
+  "tables": {
+    "customers": {
+      "source_file": "raw/csv/customers.csv",
+      "description": "Mock customer dimension for package wiring tests.",
+      "columns": ["customer_id", "country", "segment"],
+      "primary_key": "customer_id"
+    },
+    "orders": {
+      "source_file": "raw/csv/orders.csv",
+      "description": "Mock sales orders used by the example pipeline.",
+      "columns": ["order_id", "customer_id", "country", "status", "revenue"],
+      "primary_key": "order_id"
+    },
+    "products": {
+      "source_file": "raw/csv/products.csv",
+      "description": "Mock product catalog records.",
+      "columns": ["product_id", "name", "category", "price"],
+      "primary_key": "product_id"
+    },
+    "support_tickets": {
+      "source_file": "raw/csv/support_tickets.csv",
+      "description": "Mock customer support ticket records.",
+      "columns": ["ticket_id", "customer_id", "status", "priority", "topic"],
+      "primary_key": "ticket_id"
+    },
+    "web_events": {
+      "source_file": "raw/csv/web_events.csv",
+      "description": "Mock product usage event records.",
+      "columns": ["event_id", "customer_id", "event_type", "occurred_at"],
+      "primary_key": "event_id"
+    }
+  },
+  "vector_collections": {
+    "document_chunks": {
+      "description": "Persisted document chunks with embedding vectors and source content for retrieval.",
+      "storage": "vectordb",
+      "source_files": [
+        "raw/txt/orders_summary.txt",
+        "raw/txt/customer_segments.txt",
+        "raw/txt/product_catalog.txt",
+        "raw/txt/support_notes.txt",
+        "raw/txt/web_activity.txt"
+      ],
+      "columns": ["chunk_id", "document_id", "content", "embedding", "metadata"],
+      "embedding_model_env": "OPENROUTER_EMBEDDING_MODEL",
+      "embedding_model": "openai/text-embedding-3-small",
+      "embedding_dimensions": 5
+    }
+  }
+}

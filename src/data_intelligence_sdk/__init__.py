@@ -21,10 +21,6 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
-from data_intelligence_sdk.defaults import (
-    create_default_pipeline,
-    create_default_pipeline_from_openrouter,
-)
 from data_intelligence_sdk.engines import GeneralPurposeEngine
 
 __all__ = [
@@ -48,6 +44,4 @@ __all__ = [
     "TrustLevel",
     "UserContext",
     "UserQuery",
-    "create_default_pipeline",
-    "create_default_pipeline_from_openrouter",
 ]

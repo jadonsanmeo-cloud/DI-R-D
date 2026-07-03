@@ -1,0 +1,4 @@
+event_id,customer_id,event_type,occurred_at
+evt_001,cust_001,view_dashboard,2026-07-01T09:00:00Z
+evt_002,cust_002,search_documents,2026-07-01T09:05:00Z
+evt_003,cust_003,upload_csv,2026-07-01T09:10:00Z

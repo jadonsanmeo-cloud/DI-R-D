@@ -1,0 +1,4 @@
+customer_id,country,segment
+cust_001,US,enterprise
+cust_002,CA,mid_market
+cust_003,US,startup

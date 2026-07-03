@@ -58,19 +58,51 @@ Supporting layers:
 
 ## Base Query-to-Answer Workflow
 
-The SDK now includes a first runnable base workflow for CSV-backed data questions. `GeneralPurposeEngine` is the fallback/general engine, OpenRouter is the first supported LLM provider through LangChain, and concrete CSV capabilities are exposed through MethodHub methods.
+The SDK exposes interfaces/contracts and reusable runtime capabilities. Concrete analyzer/spec/evidence/synthesis implementations live in consuming applications or examples, not in the SDK package. `GeneralPurposeEngine` is the fallback/general engine, OpenRouter is the first supported LLM provider through LangChain, and concrete CSV capabilities are exposed through MethodHub methods.
 
 ```python
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
-from data_intelligence_sdk.defaults import create_default_pipeline_from_openrouter
+from examples.basic_workflow import create_example_pipeline_from_openrouter
 
-pipeline = create_default_pipeline_from_openrouter()
+pipeline = create_example_pipeline_from_openrouter()
 response = pipeline.run(
     UserQuery("What is the total revenue in this file?"),
     DataCorpusPackage(sources=["sales.csv"]),
 )
 print(response.answer)
 ```
+
+Run the example pipeline from the command line:
+
+```bash
+uv run python examples/run_pipeline.py --source sales.csv --query "What is the total revenue?"
+uv run python examples/run_pipeline.py --package examples/data_corpus_package/data_corpus_package.json --query "Summarize this package"
+```
+
+The `--package` file describes a data corpus package by reference:
+
+```json
+{
+  "vectordb": "vectordb",
+  "db": "warehouse.db",
+  "schema": "schema.json",
+  "catalog": "catalog.json"
+}
+```
+
+Relative paths resolve from the package file directory. The example runner maps `vectordb` and `db` into `DataCorpusPackage.sources`, loads `schema.json` into `DataCorpusPackage.schemas`, and loads `catalog.json` into `DataCorpusPackage.metadata["catalog"]`.
+
+The checked-in example at `examples/data_corpus_package/` models `db` as a Postgres-style warehouse reference and `vectordb` as persisted document chunk storage with `chunk_id`, `document_id`, `content`, `embedding`, and `metadata` fields. It includes five raw CSV files under `raw/csv/` and five raw text files under `raw/txt/`.
+
+Mock embeddings are deterministic local vectors. The metadata records `OPENROUTER_EMBEDDING_MODEL`, defaulting to `openai/text-embedding-3-small`, so a real ingestion implementation can swap in OpenRouter embeddings later without changing the package shape.
+
+Start the local mock Postgres + pgvector package with:
+
+```bash
+docker compose -f examples/data_corpus_package/docker-compose.yml up -d
+```
+
+The seed SQL creates relational `customers`, `orders`, `products`, `support_tickets`, `web_events`, and `documents` tables plus `vectordb.document_chunks` rows with mock text content and embeddings.
 
 Configure OpenRouter with:
 
@@ -79,6 +111,6 @@ OPENROUTER_API_KEY
 OPENROUTER_MODEL
 ```
 
-CSV MethodHub methods live in `data_intelligence_sdk.methods` and include `scan_csv`, `filter_csv`, `count_csv`, and `sum_csv`. Default pipeline factories live in `data_intelligence_sdk.defaults` as `create_default_pipeline()` and `create_default_pipeline_from_openrouter()`.
+CSV MethodHub methods live in `data_intelligence_sdk.methods` and include `scan_csv`, `filter_csv`, `count_csv`, and `sum_csv`. Example pipeline factories live in `examples.basic_workflow` as app-owned wiring outside the SDK package.
 
 Tests use fake engines or fake LLMs and do not call OpenRouter.

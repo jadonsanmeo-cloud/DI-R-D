@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
@@ -9,8 +10,10 @@ from data_intelligence_sdk.core.types import (
     ExecutionSpec,
     InterfaceDefinition,
 )
+import data_intelligence_sdk.engines.general as general_module
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.methods.csv import register_csv_methods
+from data_intelligence_sdk.methods.vector import register_vector_methods
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
 from data_intelligence_sdk.runtime.method_hub import MethodHub
@@ -71,6 +74,38 @@ class FakeInvokeModel:
     def invoke(self, prompt):
         self.prompts.append(prompt)
         return FakeInvokeResponse(self.content)
+
+
+class FakeAgentExecutor:
+    instances = []
+
+    def __init__(self, *, agent, tools):
+        self.agent = agent
+        self.tools = tools
+        self.invocations = []
+        FakeAgentExecutor.instances.append(self)
+
+    def invoke(self, inputs):
+        self.invocations.append(inputs)
+        scan_tool = next(tool for tool in self.tools if tool.name == "scan_csv")
+        scan_result = scan_tool.invoke({"path": inputs["source_path"]})
+        return {"output": f"ReAct saw {scan_result['row_count']} rows"}
+
+class FakeLangChainV1Agent:
+    instances = []
+
+    def __init__(self, *, model, tools, system_prompt):
+        self.model = model
+        self.tools = tools
+        self.system_prompt = system_prompt
+        self.invocations = []
+        FakeLangChainV1Agent.instances.append(self)
+
+    def invoke(self, inputs):
+        self.invocations.append(inputs)
+        scan_tool = next(tool for tool in self.tools if tool.name == "scan_csv")
+        scan_result = scan_tool.invoke({"path": inputs["messages"][0]["content"].split("Data source path: ")[1]})
+        return {"messages": [FakeInvokeResponse(f"LangChain v1 saw {scan_result['row_count']} rows")]}
 
 
 class GeneralPurposeEngineTests(unittest.TestCase):
@@ -158,7 +193,72 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             self.assertEqual(output.result, "Columns are country, status, revenue.")
             self.assertEqual(output.trace.method_calls[0].method_name, "scan_csv")
 
-    def test_invoke_model_json_tool_request_executes_method_hub_tool(self) -> None:
+    def test_agent_prompt_guides_vectordb_sources_to_vector_search(self) -> None:
+        method_hub = MethodHub()
+        register_csv_methods(method_hub)
+        register_vector_methods(method_hub)
+        runtime = EngineRuntimeContext(method_hub=method_hub)
+
+        prompt = GeneralPurposeEngine(llm=object())._build_agent_prompt(
+            ExecutionSpec(intent="unknown", objective="What is the data about?"),
+            DataCorpusPackage(
+                sources=[
+                    "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb",
+                    "postgresql://demo:demo@localhost:5432/data_corpus",
+                ]
+            ),
+            runtime,
+        )
+
+        self.assertIn("Use search_vector_chunks", prompt)
+        self.assertIn("schema=vectordb", prompt)
+        self.assertIn("Do not pass database URIs to CSV tools", prompt)
+
+    def test_vector_search_tool_uses_package_vectordb_when_agent_passes_bad_reference(self) -> None:
+        method_hub = MethodHub()
+
+        def fake_search_vector_chunks(vectordb: str, query: str, limit: int = 5):
+            return {"vectordb": vectordb, "query": query, "limit": limit}
+
+        method_hub.register(
+            "search_vector_chunks",
+            fake_search_vector_chunks,
+            capability_names=["search_vectordb"],
+        )
+        runtime = EngineRuntimeContext(method_hub=method_hub)
+        agent = FakeToolCallingAgent(
+            tool_calls=[
+                {
+                    "name": "search_vector_chunks",
+                    "args": {"vectordb": "vectordb", "query": "What is the data about?"},
+                }
+            ],
+            final_answer="Used vector search.",
+        )
+        vectordb_uri = "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb"
+
+        output = GeneralPurposeEngine(llm=agent).run(
+            ExecutionSpec(intent="unknown", objective="What is the data about?"),
+            DataCorpusPackage(
+                sources=[
+                    vectordb_uri,
+                    "postgresql://demo:demo@localhost:5432/data_corpus",
+                ]
+            ),
+            runtime,
+        )
+
+        self.assertEqual(output.result, "Used vector search.")
+        self.assertEqual(output.trace.method_calls[0].inputs["vectordb"], vectordb_uri)
+
+    def test_invoke_model_uses_langchain_react_agent_executor(self) -> None:
+        FakeAgentExecutor.instances = []
+        created_agents = []
+
+        def fake_create_react_agent(llm, tools, prompt):
+            created_agents.append({"llm": llm, "tools": tools, "prompt": prompt})
+            return "react-agent"
+
         with tempfile.TemporaryDirectory() as temp_dir:
             csv_path = Path(temp_dir) / "sales.csv"
             csv_path.write_text(
@@ -168,58 +268,132 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             method_hub = MethodHub()
             register_csv_methods(method_hub)
             runtime = EngineRuntimeContext(method_hub=method_hub)
-            model = FakeInvokeModel(
-                '{"tool": "scan_csv", "arguments": {"file_path": "'
-                + str(csv_path)
-                + '"}}'
-            )
+            model = FakeInvokeModel("unused")
 
-            output = GeneralPurposeEngine(llm=model).run(
-                ExecutionSpec(
-                    intent="custom", objective="What columns are in this file?"
-                ),
-                DataCorpusPackage(sources=[str(csv_path)]),
-                runtime,
-            )
+            with (
+                patch.object(general_module, "create_react_agent", fake_create_react_agent),
+                patch.object(general_module, "AgentExecutor", FakeAgentExecutor),
+            ):
+                output = GeneralPurposeEngine(llm=model).run(
+                    ExecutionSpec(
+                        intent="custom", objective="What columns are in this file?"
+                    ),
+                    DataCorpusPackage(sources=[str(csv_path)]),
+                    runtime,
+                )
 
-            self.assertEqual(
-                output.result, "CSV columns: country, status, revenue; rows: 1"
-            )
-            self.assertEqual(output.trace.method_calls[0].method_name, "scan_csv")
-            self.assertEqual(
-                output.trace.method_calls[0].inputs, {"path": str(csv_path)}
-            )
+        self.assertEqual(output.result, "ReAct saw 1 rows")
+        self.assertEqual(created_agents[0]["llm"], model)
+        self.assertIn("scan_csv", [tool.name for tool in created_agents[0]["tools"]])
+        self.assertEqual(FakeAgentExecutor.instances[0].agent, "react-agent")
+        self.assertEqual(
+            FakeAgentExecutor.instances[0].invocations[0],
+            {"input": "What columns are in this file?", "source_path": str(csv_path)},
+        )
+        self.assertEqual(output.trace.method_calls[0].method_name, "scan_csv")
+        self.assertEqual(
+            output.trace.method_calls[0].inputs, {"path": str(csv_path)}
+        )
 
-    def test_invoke_model_json_tool_request_accepts_parameters_key(self) -> None:
+    def test_langchain_react_path_does_not_use_hardcoded_tool_result_formatting(self) -> None:
+        FakeAgentExecutor.instances = []
+
+        def fake_create_react_agent(llm, tools, prompt):
+            return "react-agent"
+
         with tempfile.TemporaryDirectory() as temp_dir:
             csv_path = Path(temp_dir) / "sales.csv"
             csv_path.write_text(
-                "country,status,revenue\nUS,complete,10\n",
+                "country,status,revenue\nUS,complete,10\nCA,complete,7\n",
                 encoding="utf-8",
             )
             method_hub = MethodHub()
             register_csv_methods(method_hub)
             runtime = EngineRuntimeContext(method_hub=method_hub)
-            model = FakeInvokeModel(
-                '{"tool": "scan_csv", "parameters": {"file_path": "'
-                + str(csv_path)
-                + '"}}'
+
+            with (
+                patch.object(general_module, "create_react_agent", fake_create_react_agent),
+                patch.object(general_module, "AgentExecutor", FakeAgentExecutor),
+            ):
+                output = GeneralPurposeEngine(llm=FakeInvokeModel("unused")).run(
+                    ExecutionSpec(
+                        intent="custom", objective="What columns are in this file?"
+                    ),
+                    DataCorpusPackage(sources=[str(csv_path)]),
+                    runtime,
+                )
+
+        self.assertEqual(output.result, "ReAct saw 2 rows")
+        self.assertNotEqual(
+            output.result, "CSV columns: country, status, revenue; rows: 2"
+        )
+
+    def test_invoke_model_uses_langchain_v1_agent_when_react_executor_is_unavailable(self) -> None:
+        FakeLangChainV1Agent.instances = []
+
+        def fake_create_agent(*, model, tools, system_prompt):
+            return FakeLangChainV1Agent(
+                model=model, tools=tools, system_prompt=system_prompt
             )
 
-            output = GeneralPurposeEngine(llm=model).run(
-                ExecutionSpec(
-                    intent="custom", objective="What columns are in this file?"
-                ),
-                DataCorpusPackage(sources=[str(csv_path)]),
-                runtime,
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "sales.csv"
+            csv_path.write_text(
+                "country,status,revenue\nUS,complete,10\nCA,complete,7\n",
+                encoding="utf-8",
             )
+            method_hub = MethodHub()
+            register_csv_methods(method_hub)
+            runtime = EngineRuntimeContext(method_hub=method_hub)
+            model = FakeInvokeModel("unused")
 
-            self.assertEqual(
-                output.result, "CSV columns: country, status, revenue; rows: 1"
+            with (
+                patch.object(general_module, "create_react_agent", None),
+                patch.object(general_module, "AgentExecutor", None),
+                patch.object(general_module, "create_agent", fake_create_agent),
+            ):
+                output = GeneralPurposeEngine(llm=model).run(
+                    ExecutionSpec(
+                        intent="custom", objective="What is the data about?"
+                    ),
+                    DataCorpusPackage(sources=[str(csv_path)]),
+                    runtime,
+                )
+
+        self.assertEqual(output.result, "LangChain v1 saw 2 rows")
+        self.assertEqual(FakeLangChainV1Agent.instances[0].model, model)
+        self.assertIn("scan_csv", [tool.name for tool in FakeLangChainV1Agent.instances[0].tools])
+        self.assertIn("What is the data about?", FakeLangChainV1Agent.instances[0].invocations[0]["messages"][0]["content"])
+        self.assertEqual(output.trace.method_calls[0].method_name, "scan_csv")
+
+    def test_csv_question_does_not_use_hardcoded_fallback_when_langchain_agent_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "sales.csv"
+            csv_path.write_text(
+                "country,status,revenue\nUS,complete,10\nCA,complete,7\n",
+                encoding="utf-8",
             )
-            self.assertEqual(
-                output.trace.method_calls[0].inputs, {"path": str(csv_path)}
-            )
+            method_hub = MethodHub()
+            register_csv_methods(method_hub)
+            runtime = EngineRuntimeContext(method_hub=method_hub)
+
+            with (
+                patch.object(general_module, "create_react_agent", None),
+                patch.object(general_module, "AgentExecutor", None),
+                patch.object(general_module, "create_agent", None),
+            ):
+                output = GeneralPurposeEngine(llm=FakeInvokeModel("unused")).run(
+                    ExecutionSpec(
+                        intent="custom", objective="What is the data about?"
+                    ),
+                    DataCorpusPackage(sources=[str(csv_path)]),
+                    runtime,
+                )
+
+        self.assertIn(
+            "LangChain ReAct agent support is not available", str(output.result)
+        )
+        self.assertEqual(output.trace.method_calls, [])
 
     def test_missing_generation_services_returns_clear_answer(self) -> None:
         output = GeneralPurposeEngine(llm=object()).run(

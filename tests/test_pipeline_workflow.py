@@ -12,9 +12,9 @@ from data_intelligence_sdk.core.types import (
     FinalResponse,
     UserQuery,
 )
-from data_intelligence_sdk.defaults import (
-    create_default_pipeline,
-    create_default_pipeline_from_openrouter,
+from examples.basic_workflow import (
+    create_example_pipeline,
+    create_example_pipeline_from_openrouter,
 )
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 
@@ -91,13 +91,13 @@ class PipelineWorkflowTests(unittest.TestCase):
         self.assertEqual(response.evidence.steps[0].name, "fake_step")
         self.assertIsInstance(engine.runtime.method_hub, MethodHub)
 
-    def test_create_default_pipeline_with_fake_engine_runs_workflow(self) -> None:
+    def test_create_example_pipeline_with_fake_engine_runs_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             csv_path = Path(temp_dir) / "sales.csv"
             csv_path.write_text(
                 "country,status,revenue\nUS,complete,10\n", encoding="utf-8"
             )
-            pipeline = create_default_pipeline(engine=FakeEngine())
+            pipeline = create_example_pipeline(engine=FakeEngine())
 
             response = pipeline.run(
                 UserQuery("count rows"), DataCorpusPackage(sources=[str(csv_path)])
@@ -106,11 +106,11 @@ class PipelineWorkflowTests(unittest.TestCase):
             self.assertTrue(response.answer)
             self.assertIsNotNone(response.evidence)
 
-    def test_create_default_pipeline_from_openrouter_validates_api_key(self) -> None:
+    def test_create_example_pipeline_from_openrouter_validates_api_key(self) -> None:
         old_key = os.environ.pop("OPENROUTER_API_KEY", None)
         try:
             with self.assertRaisesRegex(ValueError, "OPENROUTER_API_KEY"):
-                create_default_pipeline_from_openrouter(
+                create_example_pipeline_from_openrouter(
                     model="some/model", api_key=None
                 )
         finally:

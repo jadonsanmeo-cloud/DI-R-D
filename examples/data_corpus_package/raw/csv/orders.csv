@@ -1,0 +1,4 @@
+order_id,customer_id,country,status,revenue
+ord_1001,cust_001,US,complete,1200.00
+ord_1002,cust_002,CA,complete,850.50
+ord_1003,cust_003,US,pending,430.25
