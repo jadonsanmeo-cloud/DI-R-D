@@ -75,6 +75,13 @@ class FakeInvokeModel:
         self.prompts.append(prompt)
         return FakeInvokeResponse(self.content)
 
+class FakeChatOpenAI:
+    instances = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        FakeChatOpenAI.instances.append(self)
+
 
 class FakeAgentExecutor:
     instances = []
@@ -109,30 +116,111 @@ class FakeLangChainV1Agent:
 
 
 class GeneralPurposeEngineTests(unittest.TestCase):
-    def test_from_openrouter_requires_api_key(self) -> None:
+    def test_constructor_requires_openrouter_api_key_without_injected_llm(self) -> None:
         old_key = os.environ.pop("OPENROUTER_API_KEY", None)
         try:
             with self.assertRaisesRegex(ValueError, "OPENROUTER_API_KEY"):
-                GeneralPurposeEngine.from_openrouter(model="some/model")
+                GeneralPurposeEngine(model="some/model")
         finally:
             if old_key is not None:
                 os.environ["OPENROUTER_API_KEY"] = old_key
 
-    def test_from_openrouter_requires_model(self) -> None:
+    def test_constructor_requires_openrouter_model_without_injected_llm(self) -> None:
         old_model = os.environ.pop("OPENROUTER_MODEL", None)
         try:
-            with self.assertRaisesRegex(ValueError, "OPENROUTER_MODEL"):
-                GeneralPurposeEngine.from_openrouter(api_key="key")
+            with self.assertRaisesRegex(ValueError, "LLM_MODEL_NAME"):
+                GeneralPurposeEngine(api_key="key")
         finally:
             if old_model is not None:
                 os.environ["OPENROUTER_MODEL"] = old_model
+
+    def test_constructor_loads_openrouter_defaults_from_config_file(self) -> None:
+        FakeChatOpenAI.instances = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "openrouter.toml"
+            config_path.write_text(
+                "[models]\n"
+                "[[models.llms]]\n"
+                "name = \"anthropic/claude-3.5-sonnet\"\n"
+                "provider = \"openrouter\"\n"
+                "api_base = \"https://openrouter.ai/api/v1\"\n"
+                "api_key = \"${env:OPENROUTER_API_KEY}\"\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.dict(os.environ, {"OPENROUTER_API_KEY": "config-key"}, clear=True),
+                patch.dict("sys.modules", {"langchain_openai": type("Module", (), {"ChatOpenAI": FakeChatOpenAI})}),
+            ):
+                engine = GeneralPurposeEngine(config_path=str(config_path))
+
+        self.assertIs(engine.llm, FakeChatOpenAI.instances[0])
+        self.assertEqual(
+            FakeChatOpenAI.instances[0].kwargs,
+            {
+                "api_key": "config-key",
+                "base_url": "https://openrouter.ai/api/v1",
+                "model": "anthropic/claude-3.5-sonnet",
+            },
+        )
+
+    def test_constructor_loads_repo_proxy_openrouter_config_by_default(self) -> None:
+        FakeChatOpenAI.instances = []
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LLM_MODEL_NAME": "openrouter/default-model",
+                    "OPENROUTER_API_KEY": "default-config-key",
+                },
+                clear=True,
+            ),
+            patch.dict("sys.modules", {"langchain_openai": type("Module", (), {"ChatOpenAI": FakeChatOpenAI})}),
+        ):
+            GeneralPurposeEngine()
+
+        self.assertEqual(
+            FakeChatOpenAI.instances[0].kwargs,
+            {
+                "api_key": "default-config-key",
+                "base_url": "https://openrouter.ai/api/v1",
+                "model": "openrouter/default-model",
+            },
+        )
+
+    def test_constructor_arguments_override_openrouter_config_file(self) -> None:
+        FakeChatOpenAI.instances = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "openrouter.toml"
+            config_path.write_text(
+                "[models]\n"
+                "[[models.llms]]\n"
+                "name = \"config/model\"\n"
+                "provider = \"openrouter\"\n"
+                "api_key = \"config-key\"\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                "sys.modules",
+                {"langchain_openai": type("Module", (), {"ChatOpenAI": FakeChatOpenAI})},
+            ):
+                GeneralPurposeEngine(
+                    model="argument/model",
+                    api_key="argument-key",
+                    config_path=str(config_path),
+                )
+
+        self.assertEqual(FakeChatOpenAI.instances[0].kwargs["model"], "argument/model")
+        self.assertEqual(FakeChatOpenAI.instances[0].kwargs["api_key"], "argument-key")
 
     def test_name_and_can_handle_general_specs(self) -> None:
         engine = GeneralPurposeEngine(llm=object())
 
         self.assertEqual(engine.name, "general_purpose")
         self.assertTrue(
-            engine.can_handle(ExecutionSpec(intent="custom", objective="x"))
+            engine.can_handle(ExecutionSpec(intent="reason", objective="x"))
         )
         self.assertTrue(
             engine.can_handle(ExecutionSpec(intent="unknown", objective="x"))
@@ -154,7 +242,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             )
 
             output = GeneralPurposeEngine(llm=agent).run(
-                ExecutionSpec(intent="custom", objective="How many rows are there?"),
+                ExecutionSpec(intent="reason", objective="How many rows are there?"),
                 DataCorpusPackage(sources=[str(csv_path)]),
                 runtime,
             )
@@ -184,7 +272,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
 
             output = GeneralPurposeEngine(llm=agent).run(
                 ExecutionSpec(
-                    intent="custom", objective="What columns are in this file?"
+                    intent="reason", objective="What columns are in this file?"
                 ),
                 DataCorpusPackage(sources=[str(csv_path)]),
                 runtime,
@@ -276,7 +364,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             ):
                 output = GeneralPurposeEngine(llm=model).run(
                     ExecutionSpec(
-                        intent="custom", objective="What columns are in this file?"
+                        intent="reason", objective="What columns are in this file?"
                     ),
                     DataCorpusPackage(sources=[str(csv_path)]),
                     runtime,
@@ -317,7 +405,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             ):
                 output = GeneralPurposeEngine(llm=FakeInvokeModel("unused")).run(
                     ExecutionSpec(
-                        intent="custom", objective="What columns are in this file?"
+                        intent="reason", objective="What columns are in this file?"
                     ),
                     DataCorpusPackage(sources=[str(csv_path)]),
                     runtime,
@@ -354,7 +442,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             ):
                 output = GeneralPurposeEngine(llm=model).run(
                     ExecutionSpec(
-                        intent="custom", objective="What is the data about?"
+                        intent="reason", objective="What is the data about?"
                     ),
                     DataCorpusPackage(sources=[str(csv_path)]),
                     runtime,
@@ -384,7 +472,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             ):
                 output = GeneralPurposeEngine(llm=FakeInvokeModel("unused")).run(
                     ExecutionSpec(
-                        intent="custom", objective="What is the data about?"
+                        intent="reason", objective="What is the data about?"
                     ),
                     DataCorpusPackage(sources=[str(csv_path)]),
                     runtime,
@@ -398,7 +486,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
     def test_missing_generation_services_returns_clear_answer(self) -> None:
         output = GeneralPurposeEngine(llm=object()).run(
             ExecutionSpec(
-                intent="custom",
+                intent="reason",
                 objective="needs unavailable capability",
                 capability_requirements=[CapabilityRequirement("missing")],
             ),
@@ -419,7 +507,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
 
         output = GeneralPurposeEngine(llm=object()).run(
             ExecutionSpec(
-                intent="custom",
+                intent="reason",
                 objective="needs generated capability",
                 capability_requirements=[CapabilityRequirement("generated_capability")],
             ),

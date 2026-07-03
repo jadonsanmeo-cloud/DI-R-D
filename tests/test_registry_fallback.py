@@ -30,7 +30,7 @@ class RegistryFallbackTests(unittest.TestCase):
         registry.register(specific)
 
         self.assertIs(
-            registry.select(ExecutionSpec(intent="custom", objective="x")), specific
+            registry.select(ExecutionSpec(intent="reason", objective="x")), specific
         )
 
     def test_set_fallback_updates_fallback_engine(self) -> None:

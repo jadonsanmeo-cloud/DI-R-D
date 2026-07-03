@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -25,6 +26,7 @@ from data_intelligence_sdk.core.types import (
     ExecutionSpec,
     UserContext,
 )
+from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 
 
@@ -33,35 +35,54 @@ class GeneralPurposeEngine:
 
     name = "general_purpose"
 
-    def __init__(self, llm: object, *, allow_method_generation: bool = True) -> None:
-        self.llm = llm
-        self.allow_method_generation = allow_method_generation
-
-    @classmethod
-    def from_openrouter(
-        cls,
+    def __init__(
+        self,
+        llm: object | None = None,
         *,
         model: str | None = None,
         api_key: str | None = None,
+        config_path: str | Path | None = None,
+        config_manager: ConfigManager | None = None,
         allow_method_generation: bool = True,
-    ) -> "GeneralPurposeEngine":
-        api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+    ) -> None:
+        self.llm = llm or self._build_openrouter_llm(
+            model=model,
+            api_key=api_key,
+            config_path=config_path,
+            config_manager=config_manager,
+        )
+        self.allow_method_generation = allow_method_generation
+
+    def _build_openrouter_llm(
+        self,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        config_path: str | Path | None = None,
+        config_manager: ConfigManager | None = None,
+    ) -> object:
+        manager = config_manager or get_config_manager(
+            str(config_path) if config_path is not None else None
+        )
+        settings = manager.openrouter_settings()
+        api_key = api_key or settings.api_key or os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError(
                 "OPENROUTER_API_KEY is required when no api_key is passed."
             )
-        model = model or os.environ.get("OPENROUTER_MODEL")
+        model = model or settings.model or os.environ.get("OPENROUTER_MODEL")
         if not model:
-            raise ValueError("OPENROUTER_MODEL is required when no model is passed.")
+            raise ValueError(
+                "LLM_MODEL_NAME is required when no model is passed."
+            )
         from langchain_openai import ChatOpenAI
 
-        llm = ChatOpenAI(
-            api_key=api_key, base_url="https://openrouter.ai/api/v1", model=model
+        return ChatOpenAI(
+            api_key=api_key, base_url=settings.base_url, model=model
         )
-        return cls(llm=llm, allow_method_generation=allow_method_generation)
 
     def can_handle(self, spec: ExecutionSpec) -> bool:
-        return spec.engine_hint == self.name or spec.intent in {"custom", "unknown"}
+        return spec.engine_hint == self.name or spec.intent in {"reason", "unknown"}
 
     def run(
         self,

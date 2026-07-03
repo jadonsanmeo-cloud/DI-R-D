@@ -51,14 +51,14 @@ class RunPipelineExampleTests(unittest.TestCase):
                 patch.object(sys, "argv", argv),
                 patch.object(
                     module,
-                    "create_example_pipeline_from_openrouter",
+                    "create_example_pipeline",
                     return_value=fake_pipeline,
-                ) as create_openrouter,
+                ) as create_pipeline,
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 module.main()
 
-        create_openrouter.assert_called_once_with()
+        create_pipeline.assert_called_once_with()
         self.assertEqual(fake_pipeline.query.text, "What columns are in this file?")
         self.assertEqual(fake_pipeline.corpus_package.sources, [str(csv_path)])
         self.assertEqual(stdout.getvalue().strip(), "openrouter answer")
@@ -84,7 +84,7 @@ class RunPipelineExampleTests(unittest.TestCase):
 
             with (
                 patch.object(sys, "argv", argv),
-                patch.object(module, "create_example_pipeline_from_openrouter", return_value=fake_pipeline),
+                patch.object(module, "create_example_pipeline", return_value=fake_pipeline),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 module.main()
@@ -148,7 +148,7 @@ class RunPipelineExampleTests(unittest.TestCase):
 
             with (
                 patch.object(sys, "argv", argv),
-                patch.object(module, "create_example_pipeline_from_openrouter", return_value=fake_pipeline),
+                patch.object(module, "create_example_pipeline", return_value=fake_pipeline),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 module.main()

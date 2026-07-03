@@ -12,16 +12,13 @@ from data_intelligence_sdk.core.types import (
     FinalResponse,
     UserQuery,
 )
-from examples.basic_workflow import (
-    create_example_pipeline,
-    create_example_pipeline_from_openrouter,
-)
+from examples.basic_workflow import create_example_pipeline
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 
 
 class FakeAnalyzer:
     def analyze(self, query, corpus_package, session_context=None, user_context=None):
-        return "custom"
+        return "reason"
 
 
 class FakeSpecBuilder:
@@ -106,13 +103,11 @@ class PipelineWorkflowTests(unittest.TestCase):
             self.assertTrue(response.answer)
             self.assertIsNotNone(response.evidence)
 
-    def test_create_example_pipeline_from_openrouter_validates_api_key(self) -> None:
+    def test_create_example_pipeline_defaults_to_openrouter_and_validates_api_key(self) -> None:
         old_key = os.environ.pop("OPENROUTER_API_KEY", None)
         try:
             with self.assertRaisesRegex(ValueError, "OPENROUTER_API_KEY"):
-                create_example_pipeline_from_openrouter(
-                    model="some/model", api_key=None
-                )
+                create_example_pipeline(model="some/model", api_key=None)
         finally:
             if old_key is not None:
                 os.environ["OPENROUTER_API_KEY"] = old_key

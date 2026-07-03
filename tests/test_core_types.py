@@ -41,7 +41,7 @@ class CoreTypesTests(unittest.TestCase):
             metadata={"source": "warehouse.orders"},
         )
         spec = ExecutionSpec(
-            intent="sql",
+            intent="reason",
             objective="Summarize customer orders.",
             capability_requirements=[capability],
         )
@@ -65,7 +65,7 @@ class CoreTypesTests(unittest.TestCase):
 class EngineSignatureTests(unittest.TestCase):
     def test_engine_run_signature_accepts_corpus_and_runtime_context(self) -> None:
         engine = GeneralPurposeEngine(llm=object())
-        spec = ExecutionSpec(intent="custom", objective="Run general analysis.")
+        spec = ExecutionSpec(intent="reason", objective="Run general analysis.")
         corpus = DataCorpusPackage(sources=["warehouse.orders"])
         runtime = EngineRuntimeContext()
 

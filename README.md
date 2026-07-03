@@ -47,7 +47,7 @@ Supporting layers:
 
 - `DataCorpusPackage` describes the available data universe for a task. It may contain source refs, schemas, semantic metadata, and policy metadata; it does not necessarily contain raw data.
 - `DataHubContext` remains available as a compatibility alias for `DataCorpusPackage` during the transition.
-- `Intent` is a controlled string selected from `SUPPORTED_INTENTS`, not a rich object. The spec carries the richer objective, constraints, and capability requirements.
+- `Intent` is a controlled string selected from `SUPPORTED_INTENTS`: `reason` for questions about data, `report` for report generation, and `unknown` for outliers. The spec carries the richer objective, constraints, and capability requirements.
 - `ExecutionSpec.capability_requirements` describes what the selected engine/runtime must resolve.
 - Engines receive an `EngineRuntimeContext`, which owns an `EngineRunContext` for trace recording and exposes runtime services such as `MethodHub`, `InterfaceRegistry`, `InterfaceBuilder`, and `SandboxExecutor`.
 - Engines should request capabilities from runtime services. They should not each reimplement interface discovery, generated interface lifecycle, sandbox policy, trust promotion, artifact/log policy, or evidence construction.
@@ -62,9 +62,9 @@ The SDK exposes interfaces/contracts and reusable runtime capabilities. Concrete
 
 ```python
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
-from examples.basic_workflow import create_example_pipeline_from_openrouter
+from examples.basic_workflow import create_example_pipeline
 
-pipeline = create_example_pipeline_from_openrouter()
+pipeline = create_example_pipeline()
 response = pipeline.run(
     UserQuery("What is the total revenue in this file?"),
     DataCorpusPackage(sources=["sales.csv"]),
@@ -108,7 +108,7 @@ Configure OpenRouter with:
 
 ```text
 OPENROUTER_API_KEY
-OPENROUTER_MODEL
+LLM_MODEL_NAME
 ```
 
 CSV MethodHub methods live in `data_intelligence_sdk.methods` and include `scan_csv`, `filter_csv`, `count_csv`, and `sum_csv`. Example pipeline factories live in `examples.basic_workflow` as app-owned wiring outside the SDK package.

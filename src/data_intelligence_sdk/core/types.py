@@ -10,13 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-Intent = Literal["sql", "python", "rag", "workflow", "custom", "unknown"]
+Intent = Literal["reason", "report", "unknown"]
 SUPPORTED_INTENTS: tuple[Intent, ...] = (
-    "sql",
-    "python",
-    "rag",
-    "workflow",
-    "custom",
+    "reason",
+    "report",
     "unknown",
 )
 TraceStatus = Literal["pending", "running", "completed", "failed", "skipped"]

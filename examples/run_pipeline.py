@@ -9,7 +9,7 @@ Examples:
 Package JSON shape:
     {"vectordb": "vectordb", "db": "warehouse.db", "schema": "schema.json", "catalog": "catalog.json"}
 
-Requires OPENROUTER_API_KEY and OPENROUTER_MODEL in the environment or .env.
+Requires OPENROUTER_API_KEY and LLM_MODEL_NAME in the environment or .env.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
-from basic_workflow import create_example_pipeline_from_openrouter
+from basic_workflow import create_example_pipeline
 
 load_dotenv()
 
@@ -113,7 +113,7 @@ def main() -> None:
         corpus_package = DataCorpusPackage(sources=sources)
 
     try:
-        pipeline = create_example_pipeline_from_openrouter()
+        pipeline = create_example_pipeline()
 
         response = pipeline.run(
             UserQuery(args.query),
