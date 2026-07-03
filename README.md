@@ -2,6 +2,9 @@
 
 ```
 uv venv --python 3.11
+uv sync
+
+docker compose -f examples/data_corpus_package/docker-compose.yml up -d
 ```
 
 # Data Intelligence
