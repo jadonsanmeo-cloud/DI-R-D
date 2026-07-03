@@ -75,6 +75,7 @@ class FakeInvokeModel:
         self.prompts.append(prompt)
         return FakeInvokeResponse(self.content)
 
+
 class FakeChatOpenAI:
     instances = []
 
@@ -98,6 +99,7 @@ class FakeAgentExecutor:
         scan_result = scan_tool.invoke({"path": inputs["source_path"]})
         return {"output": f"ReAct saw {scan_result['row_count']} rows"}
 
+
 class FakeLangChainV1Agent:
     instances = []
 
@@ -111,8 +113,14 @@ class FakeLangChainV1Agent:
     def invoke(self, inputs):
         self.invocations.append(inputs)
         scan_tool = next(tool for tool in self.tools if tool.name == "scan_csv")
-        scan_result = scan_tool.invoke({"path": inputs["messages"][0]["content"].split("Data source path: ")[1]})
-        return {"messages": [FakeInvokeResponse(f"LangChain v1 saw {scan_result['row_count']} rows")]}
+        scan_result = scan_tool.invoke(
+            {"path": inputs["messages"][0]["content"].split("Data source path: ")[1]}
+        )
+        return {
+            "messages": [
+                FakeInvokeResponse(f"LangChain v1 saw {scan_result['row_count']} rows")
+            ]
+        }
 
 
 class GeneralPurposeEngineTests(unittest.TestCase):
@@ -141,16 +149,25 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             config_path.write_text(
                 "[models]\n"
                 "[[models.llms]]\n"
-                "name = \"anthropic/claude-3.5-sonnet\"\n"
-                "provider = \"openrouter\"\n"
-                "api_base = \"https://openrouter.ai/api/v1\"\n"
-                "api_key = \"${env:OPENROUTER_API_KEY}\"\n",
+                'name = "anthropic/claude-3.5-sonnet"\n'
+                'provider = "openrouter"\n'
+                'api_base = "https://openrouter.ai/api/v1"\n'
+                'api_key = "${env:OPENROUTER_API_KEY}"\n',
                 encoding="utf-8",
             )
 
             with (
-                patch.dict(os.environ, {"OPENROUTER_API_KEY": "config-key"}, clear=True),
-                patch.dict("sys.modules", {"langchain_openai": type("Module", (), {"ChatOpenAI": FakeChatOpenAI})}),
+                patch.dict(
+                    os.environ, {"OPENROUTER_API_KEY": "config-key"}, clear=True
+                ),
+                patch.dict(
+                    "sys.modules",
+                    {
+                        "langchain_openai": type(
+                            "Module", (), {"ChatOpenAI": FakeChatOpenAI}
+                        )
+                    },
+                ),
             ):
                 engine = GeneralPurposeEngine(config_path=str(config_path))
 
@@ -176,7 +193,14 @@ class GeneralPurposeEngineTests(unittest.TestCase):
                 },
                 clear=True,
             ),
-            patch.dict("sys.modules", {"langchain_openai": type("Module", (), {"ChatOpenAI": FakeChatOpenAI})}),
+            patch.dict(
+                "sys.modules",
+                {
+                    "langchain_openai": type(
+                        "Module", (), {"ChatOpenAI": FakeChatOpenAI}
+                    )
+                },
+            ),
         ):
             GeneralPurposeEngine()
 
@@ -196,15 +220,19 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             config_path.write_text(
                 "[models]\n"
                 "[[models.llms]]\n"
-                "name = \"config/model\"\n"
-                "provider = \"openrouter\"\n"
-                "api_key = \"config-key\"\n",
+                'name = "config/model"\n'
+                'provider = "openrouter"\n'
+                'api_key = "config-key"\n',
                 encoding="utf-8",
             )
 
             with patch.dict(
                 "sys.modules",
-                {"langchain_openai": type("Module", (), {"ChatOpenAI": FakeChatOpenAI})},
+                {
+                    "langchain_openai": type(
+                        "Module", (), {"ChatOpenAI": FakeChatOpenAI}
+                    )
+                },
             ):
                 GeneralPurposeEngine(
                     model="argument/model",
@@ -302,7 +330,9 @@ class GeneralPurposeEngineTests(unittest.TestCase):
         self.assertIn("schema=vectordb", prompt)
         self.assertIn("Do not pass database URIs to CSV tools", prompt)
 
-    def test_vector_search_tool_uses_package_vectordb_when_agent_passes_bad_reference(self) -> None:
+    def test_vector_search_tool_uses_package_vectordb_when_agent_passes_bad_reference(
+        self,
+    ) -> None:
         method_hub = MethodHub()
 
         def fake_search_vector_chunks(vectordb: str, query: str, limit: int = 5):
@@ -318,12 +348,17 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             tool_calls=[
                 {
                     "name": "search_vector_chunks",
-                    "args": {"vectordb": "vectordb", "query": "What is the data about?"},
+                    "args": {
+                        "vectordb": "vectordb",
+                        "query": "What is the data about?",
+                    },
                 }
             ],
             final_answer="Used vector search.",
         )
-        vectordb_uri = "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb"
+        vectordb_uri = (
+            "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb"
+        )
 
         output = GeneralPurposeEngine(llm=agent).run(
             ExecutionSpec(intent="unknown", objective="What is the data about?"),
@@ -359,7 +394,9 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             model = FakeInvokeModel("unused")
 
             with (
-                patch.object(general_module, "create_react_agent", fake_create_react_agent),
+                patch.object(
+                    general_module, "create_react_agent", fake_create_react_agent
+                ),
                 patch.object(general_module, "AgentExecutor", FakeAgentExecutor),
             ):
                 output = GeneralPurposeEngine(llm=model).run(
@@ -379,11 +416,11 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             {"input": "What columns are in this file?", "source_path": str(csv_path)},
         )
         self.assertEqual(output.trace.method_calls[0].method_name, "scan_csv")
-        self.assertEqual(
-            output.trace.method_calls[0].inputs, {"path": str(csv_path)}
-        )
+        self.assertEqual(output.trace.method_calls[0].inputs, {"path": str(csv_path)})
 
-    def test_langchain_react_path_does_not_use_hardcoded_tool_result_formatting(self) -> None:
+    def test_langchain_react_path_does_not_use_hardcoded_tool_result_formatting(
+        self,
+    ) -> None:
         FakeAgentExecutor.instances = []
 
         def fake_create_react_agent(llm, tools, prompt):
@@ -400,7 +437,9 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             runtime = EngineRuntimeContext(method_hub=method_hub)
 
             with (
-                patch.object(general_module, "create_react_agent", fake_create_react_agent),
+                patch.object(
+                    general_module, "create_react_agent", fake_create_react_agent
+                ),
                 patch.object(general_module, "AgentExecutor", FakeAgentExecutor),
             ):
                 output = GeneralPurposeEngine(llm=FakeInvokeModel("unused")).run(
@@ -416,7 +455,9 @@ class GeneralPurposeEngineTests(unittest.TestCase):
             output.result, "CSV columns: country, status, revenue; rows: 2"
         )
 
-    def test_invoke_model_uses_langchain_v1_agent_when_react_executor_is_unavailable(self) -> None:
+    def test_invoke_model_uses_langchain_v1_agent_when_react_executor_is_unavailable(
+        self,
+    ) -> None:
         FakeLangChainV1Agent.instances = []
 
         def fake_create_agent(*, model, tools, system_prompt):
@@ -441,20 +482,25 @@ class GeneralPurposeEngineTests(unittest.TestCase):
                 patch.object(general_module, "create_agent", fake_create_agent),
             ):
                 output = GeneralPurposeEngine(llm=model).run(
-                    ExecutionSpec(
-                        intent="reason", objective="What is the data about?"
-                    ),
+                    ExecutionSpec(intent="reason", objective="What is the data about?"),
                     DataCorpusPackage(sources=[str(csv_path)]),
                     runtime,
                 )
 
         self.assertEqual(output.result, "LangChain v1 saw 2 rows")
         self.assertEqual(FakeLangChainV1Agent.instances[0].model, model)
-        self.assertIn("scan_csv", [tool.name for tool in FakeLangChainV1Agent.instances[0].tools])
-        self.assertIn("What is the data about?", FakeLangChainV1Agent.instances[0].invocations[0]["messages"][0]["content"])
+        self.assertIn(
+            "scan_csv", [tool.name for tool in FakeLangChainV1Agent.instances[0].tools]
+        )
+        self.assertIn(
+            "What is the data about?",
+            FakeLangChainV1Agent.instances[0].invocations[0]["messages"][0]["content"],
+        )
         self.assertEqual(output.trace.method_calls[0].method_name, "scan_csv")
 
-    def test_csv_question_does_not_use_hardcoded_fallback_when_langchain_agent_is_unavailable(self) -> None:
+    def test_csv_question_does_not_use_hardcoded_fallback_when_langchain_agent_is_unavailable(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             csv_path = Path(temp_dir) / "sales.csv"
             csv_path.write_text(
@@ -471,9 +517,7 @@ class GeneralPurposeEngineTests(unittest.TestCase):
                 patch.object(general_module, "create_agent", None),
             ):
                 output = GeneralPurposeEngine(llm=FakeInvokeModel("unused")).run(
-                    ExecutionSpec(
-                        intent="reason", objective="What is the data about?"
-                    ),
+                    ExecutionSpec(intent="reason", objective="What is the data about?"),
                     DataCorpusPackage(sources=[str(csv_path)]),
                     runtime,
                 )

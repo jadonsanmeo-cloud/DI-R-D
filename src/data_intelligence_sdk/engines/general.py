@@ -72,14 +72,10 @@ class GeneralPurposeEngine:
             )
         model = model or settings.model or os.environ.get("OPENROUTER_MODEL")
         if not model:
-            raise ValueError(
-                "LLM_MODEL_NAME is required when no model is passed."
-            )
+            raise ValueError("LLM_MODEL_NAME is required when no model is passed.")
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(
-            api_key=api_key, base_url=settings.base_url, model=model
-        )
+        return ChatOpenAI(api_key=api_key, base_url=settings.base_url, model=model)
 
     def can_handle(self, spec: ExecutionSpec) -> bool:
         return spec.engine_hint == self.name or spec.intent in {"reason", "unknown"}
@@ -236,9 +232,9 @@ class GeneralPurposeEngine:
                     return self._call_method(runtime, method_name, kwargs)
 
                 tool.__name__ = method_name
-                tool.__doc__ = getattr(method, "__doc__", None) or registered.metadata.get(
-                    "description", method_name
-                )
+                tool.__doc__ = getattr(
+                    method, "__doc__", None
+                ) or registered.metadata.get("description", method_name)
                 schema_model = create_schema_from_function(
                     f"{method_name}_schema", method  # type: ignore[arg-type]
                 )
@@ -424,6 +420,7 @@ class GeneralPurposeEngine:
                 "sandbox_results": [sandbox_result],
             },
         )
+
 
 def _to_dict(value: Any) -> dict[str, Any]:
     if is_dataclass(value):

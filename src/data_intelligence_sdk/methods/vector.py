@@ -10,8 +10,10 @@ from data_intelligence_sdk.runtime.method_hub import MethodHub
 
 ConnectionFactory = Callable[[str], Any]
 
+
 def _normalize_limit(limit: int) -> int:
     return max(1, min(int(limit), 50))
+
 
 def _parse_vectordb_uri(vectordb: str) -> tuple[str, str]:
     parsed = urlparse(vectordb)
@@ -21,6 +23,7 @@ def _parse_vectordb_uri(vectordb: str) -> tuple[str, str]:
     schema = query.get("schema", ["vectordb"])[0] or "vectordb"
     dsn = urlunparse(parsed._replace(query=""))
     return dsn, schema
+
 
 def _default_connection_factory(dsn: str) -> Any:
     try:
@@ -32,10 +35,12 @@ def _default_connection_factory(dsn: str) -> Any:
         ) from exc
     return psycopg.connect(dsn)
 
+
 def _embedding_literal(query_embedding: Sequence[float]) -> str:
     if not query_embedding:
         raise ValueError("query_embedding must contain at least one value.")
     return "[" + ",".join(str(float(value)) for value in query_embedding) + "]"
+
 
 def _row_to_match(row: Sequence[Any]) -> dict[str, Any]:
     chunk_id, document_id, content, metadata, score = row
@@ -46,6 +51,7 @@ def _row_to_match(row: Sequence[Any]) -> dict[str, Any]:
         "metadata": metadata,
         "score": float(score),
     }
+
 
 def search_vector_chunks(
     vectordb: str,
@@ -62,6 +68,7 @@ def search_vector_chunks(
         limit=limit,
         connection_factory=None,
     )
+
 
 def search_vector_chunks_with_connection(
     vectordb: str,
@@ -112,6 +119,7 @@ def search_vector_chunks_with_connection(
         "search_mode": search_mode,
         "matches": [_row_to_match(row) for row in rows],
     }
+
 
 def register_vector_methods(method_hub: MethodHub) -> None:
     """Register vector search methods with capability metadata."""

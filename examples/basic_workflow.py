@@ -50,9 +50,14 @@ class ExampleIntentAnalyzer:
     ) -> Intent:
         del session_context, user_context
         text = query.text.lower()
-        if any(term in text for term in ("report", "dashboard", "write up", "write-up", "briefing")):
+        if any(
+            term in text
+            for term in ("report", "dashboard", "write up", "write-up", "briefing")
+        ):
             return "report"
-        if any(str(source).lower().endswith(".csv") for source in corpus_package.sources) or any(
+        if any(
+            str(source).lower().endswith(".csv") for source in corpus_package.sources
+        ) or any(
             term in text
             for term in (
                 "data",
@@ -86,14 +91,23 @@ class ExampleSpecBuilder:
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
         del session_context, user_context
-        capability_names = ["inspect_data", "filter_data", "aggregate_data", "answer_question"]
-        if any(str(source).lower().endswith(".csv") for source in corpus_package.sources):
+        capability_names = [
+            "inspect_data",
+            "filter_data",
+            "aggregate_data",
+            "answer_question",
+        ]
+        if any(
+            str(source).lower().endswith(".csv") for source in corpus_package.sources
+        ):
             capability_names.append("answer_csv_question")
         return ExecutionSpec(
             intent=intent,
             objective=query.text,
             data_requirements=list(corpus_package.sources),
-            capability_requirements=[CapabilityRequirement(name=name) for name in capability_names],
+            capability_requirements=[
+                CapabilityRequirement(name=name) for name in capability_names
+            ],
         )
 
 
@@ -118,16 +132,25 @@ class ExampleEvidenceCollector:
             steps=list(output.trace.steps),
             method_calls=list(output.trace.method_calls),
             interface_defs=list(metadata.get("interface_defs", [])),
-            sandbox_results=[_as_result_dict(result) for result in metadata.get("sandbox_results", [])],
+            sandbox_results=[
+                _as_result_dict(result)
+                for result in metadata.get("sandbox_results", [])
+            ],
             artifact_refs=list(output.trace.artifact_refs),
             log_refs=list(output.trace.log_refs),
         )
 
 
 class ExampleSynthesizer:
-    def synthesize(self, spec: ExecutionSpec, output: EngineOutput, evidence: EvidenceBundle) -> FinalResponse:
+    def synthesize(
+        self, spec: ExecutionSpec, output: EngineOutput, evidence: EvidenceBundle
+    ) -> FinalResponse:
         del spec
-        return FinalResponse(answer=str(output.result), evidence=evidence, metadata={"engine_name": output.engine_name})
+        return FinalResponse(
+            answer=str(output.result),
+            evidence=evidence,
+            metadata={"engine_name": output.engine_name},
+        )
 
 
 def create_example_pipeline(

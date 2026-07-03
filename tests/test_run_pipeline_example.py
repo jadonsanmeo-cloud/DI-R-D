@@ -70,7 +70,9 @@ class RunPipelineExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             sales_path = Path(temp_dir) / "sales.csv"
             customers_path = Path(temp_dir) / "customers.csv"
-            sales_path.write_text("country,status,revenue\nUS,complete,10\n", encoding="utf-8")
+            sales_path.write_text(
+                "country,status,revenue\nUS,complete,10\n", encoding="utf-8"
+            )
             customers_path.write_text("customer_id,country\n1,US\n", encoding="utf-8")
             argv = [
                 "run_pipeline.py",
@@ -84,13 +86,17 @@ class RunPipelineExampleTests(unittest.TestCase):
 
             with (
                 patch.object(sys, "argv", argv),
-                patch.object(module, "create_example_pipeline", return_value=fake_pipeline),
+                patch.object(
+                    module, "create_example_pipeline", return_value=fake_pipeline
+                ),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 module.main()
 
         self.assertEqual(fake_pipeline.query.text, "What sources are available?")
-        self.assertEqual(fake_pipeline.corpus_package.sources, [str(sales_path), str(customers_path)])
+        self.assertEqual(
+            fake_pipeline.corpus_package.sources, [str(sales_path), str(customers_path)]
+        )
         self.assertEqual(fake_pipeline.corpus_package.schemas, {})
         self.assertEqual(stdout.getvalue().strip(), "openrouter answer")
 
@@ -106,23 +112,13 @@ class RunPipelineExampleTests(unittest.TestCase):
             db_path.write_text("mock sqlite bytes", encoding="utf-8")
             schema_path = package_dir / "schema.json"
             schema_path.write_text(
-                json.dumps(
-                    {
-                        "tables": {
-                            "orders": {"columns": ["country", "revenue"]}
-                        }
-                    }
-                ),
+                json.dumps({"tables": {"orders": {"columns": ["country", "revenue"]}}}),
                 encoding="utf-8",
             )
             catalog_path = package_dir / "catalog.json"
             catalog_path.write_text(
                 json.dumps(
-                    {
-                        "datasets": [
-                            {"name": "orders", "description": "Mock orders"}
-                        ]
-                    }
+                    {"datasets": [{"name": "orders", "description": "Mock orders"}]}
                 ),
                 encoding="utf-8",
             )
@@ -148,7 +144,9 @@ class RunPipelineExampleTests(unittest.TestCase):
 
             with (
                 patch.object(sys, "argv", argv),
-                patch.object(module, "create_example_pipeline", return_value=fake_pipeline),
+                patch.object(
+                    module, "create_example_pipeline", return_value=fake_pipeline
+                ),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 module.main()
@@ -165,9 +163,7 @@ class RunPipelineExampleTests(unittest.TestCase):
             fake_pipeline.corpus_package.metadata,
             {
                 "catalog": {
-                    "datasets": [
-                        {"name": "orders", "description": "Mock orders"}
-                    ]
+                    "datasets": [{"name": "orders", "description": "Mock orders"}]
                 },
                 "package": {
                     "vectordb": str(vector_dir),
@@ -247,9 +243,7 @@ class RunPipelineExampleTests(unittest.TestCase):
 
     def test_repo_data_corpus_package_includes_docker_and_seed_content(self) -> None:
         package_dir = (
-            Path(__file__).resolve().parents[1]
-            / "examples"
-            / "data_corpus_package"
+            Path(__file__).resolve().parents[1] / "examples" / "data_corpus_package"
         )
         csv_files = sorted((package_dir / "raw" / "csv").glob("*.csv"))
         txt_files = sorted((package_dir / "raw" / "txt").glob("*.txt"))
@@ -257,15 +251,25 @@ class RunPipelineExampleTests(unittest.TestCase):
         seed_text = (package_dir / "initdb" / "001_schema_and_seed.sql").read_text(
             encoding="utf-8"
         )
-        schema_payload = json.loads((package_dir / "schema.json").read_text(encoding="utf-8"))
-        catalog_payload = json.loads((package_dir / "catalog.json").read_text(encoding="utf-8"))
+        schema_payload = json.loads(
+            (package_dir / "schema.json").read_text(encoding="utf-8")
+        )
+        catalog_payload = json.loads(
+            (package_dir / "catalog.json").read_text(encoding="utf-8")
+        )
 
         self.assertEqual(len(csv_files), 5)
         self.assertEqual(len(txt_files), 5)
         self.assertIn("pgvector/pgvector", compose_text)
         self.assertIn("OPENROUTER_EMBEDDING_MODEL", compose_text)
         self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", seed_text)
-        for table_name in ["customers", "orders", "products", "support_tickets", "web_events"]:
+        for table_name in [
+            "customers",
+            "orders",
+            "products",
+            "support_tickets",
+            "web_events",
+        ]:
             self.assertIn(f"CREATE TABLE IF NOT EXISTS {table_name}", seed_text)
         self.assertIn("CREATE TABLE IF NOT EXISTS vectordb.document_chunks", seed_text)
         for chunk_id in [
@@ -291,7 +295,9 @@ class RunPipelineExampleTests(unittest.TestCase):
         self.assertEqual(len(catalog_payload["raw_files"]["txt"]), 5)
 
     def test_direct_script_help_execution_can_import_example_workflow(self) -> None:
-        script_path = Path(__file__).resolve().parents[1] / "examples" / "run_pipeline.py"
+        script_path = (
+            Path(__file__).resolve().parents[1] / "examples" / "run_pipeline.py"
+        )
 
         result = subprocess.run(
             [sys.executable, str(script_path), "--help"],

@@ -27,22 +27,33 @@ class DataHubCatalogTests(unittest.TestCase):
         self.assertEqual(open_data.schema[0].name, "Section")
 
         specification = NAPH_DATAHUB.get_file("csv:naph_10ar_open_data_specification")
-        self.assertEqual(specification.link, "data_parsed/NAPH 10AR - Open Data - Specification.csv")
+        self.assertEqual(
+            specification.link, "data_parsed/NAPH 10AR - Open Data - Specification.csv"
+        )
         self.assertIn("data dictionary", specification.description)
-        self.assertEqual([column.name for column in specification.schema], [
-            "Field_Name",
-            "Field_Type",
-            "Field_Description",
-            "Notes",
-            "Field_Values",
-        ])
+        self.assertEqual(
+            [column.name for column in specification.schema],
+            [
+                "Field_Name",
+                "Field_Type",
+                "Field_Description",
+                "Notes",
+                "Field_Values",
+            ],
+        )
 
     def test_pdf_entries_have_links_to_parsed_markdown_and_descriptions(self) -> None:
         main_report = NAPH_DATAHUB.get_file("pdf:naph_10ar_main_report")
 
-        self.assertEqual(main_report.link, "data_parsed/documents/naph_10ar_main_report.md")
-        self.assertEqual(main_report.parsed_link, "data_parsed/documents/naph_10ar_main_report.md")
-        self.assertEqual(main_report.metadata["source_file"], "NAPH 10AR - Main Report.pdf")
+        self.assertEqual(
+            main_report.link, "data_parsed/documents/naph_10ar_main_report.md"
+        )
+        self.assertEqual(
+            main_report.parsed_link, "data_parsed/documents/naph_10ar_main_report.md"
+        )
+        self.assertEqual(
+            main_report.metadata["source_file"], "NAPH 10AR - Main Report.pdf"
+        )
         self.assertEqual(main_report.metadata["page_count"], 102)
         self.assertIn("annual report", main_report.description)
 
@@ -51,7 +62,10 @@ class DataHubCatalogTests(unittest.TestCase):
 
         self.assertEqual(context.sources[0], "csv:naph_10ar_open_data_specification")
         self.assertIn("csv:naph_10ar_open_data", context.schemas)
-        self.assertEqual(context.metadata["files"][0]["link"], "data_parsed/NAPH 10AR - Open Data - Specification.csv")
+        self.assertEqual(
+            context.metadata["files"][0]["link"],
+            "data_parsed/NAPH 10AR - Open Data - Specification.csv",
+        )
 
 
 if __name__ == "__main__":

@@ -40,7 +40,6 @@ class FakeConnection:
         return self.cursor_obj
 
 
-
 class VectorMethodTests(unittest.TestCase):
     def test_register_vector_methods_registers_search_tool(self) -> None:
         method_hub = MethodHub()
@@ -54,7 +53,9 @@ class VectorMethodTests(unittest.TestCase):
         self.assertIn("semantic_search", definition.capability_names)
         self.assertIn("Postgres pgvector", definition.metadata["description"])
 
-    def test_search_vector_chunks_uses_pgvector_when_embedding_is_provided(self) -> None:
+    def test_search_vector_chunks_uses_pgvector_when_embedding_is_provided(
+        self,
+    ) -> None:
         rows = [
             (
                 "chunk_orders_summary_001",
@@ -74,7 +75,10 @@ class VectorMethodTests(unittest.TestCase):
             connection_factory=lambda dsn: connection,
         )
 
-        self.assertEqual(result["vectordb"], "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb")
+        self.assertEqual(
+            result["vectordb"],
+            "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb",
+        )
         self.assertEqual(result["query"], "What is the data about?")
         self.assertEqual(result["search_mode"], "vector")
         self.assertEqual(result["matches"][0]["chunk_id"], "chunk_orders_summary_001")

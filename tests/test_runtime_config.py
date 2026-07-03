@@ -14,10 +14,10 @@ class RuntimeConfigTests(unittest.TestCase):
             config_path.write_text(
                 "[models]\n"
                 "[[models.llms]]\n"
-                "name = \"${env:LLM_MODEL_NAME}\"\n"
-                "provider = \"proxy/openrouter\"\n"
-                "api_base = \"https://openrouter.ai/api/v1\"\n"
-                "api_key = \"${env:OPENROUTER_API_KEY}\"\n",
+                'name = "${env:LLM_MODEL_NAME}"\n'
+                'provider = "proxy/openrouter"\n'
+                'api_base = "https://openrouter.ai/api/v1"\n'
+                'api_key = "${env:OPENROUTER_API_KEY}"\n',
                 encoding="utf-8",
             )
 
@@ -41,16 +41,18 @@ class RuntimeConfigTests(unittest.TestCase):
             config_path.write_text(
                 "[models]\n"
                 "[[models.llms]]\n"
-                "name = \"${env:LLM_MODEL_NAME}\"\n"
-                "provider = \"proxy/openrouter\"\n"
-                "api_key = \"${env:OPENROUTER_API_KEY}\"\n",
+                'name = "${env:LLM_MODEL_NAME}"\n'
+                'provider = "proxy/openrouter"\n'
+                'api_key = "${env:OPENROUTER_API_KEY}"\n',
                 encoding="utf-8",
             )
             manager = ConfigManager(config_path)
 
             import data_intelligence_sdk.runtime.config as config_module
 
-            with patch.object(config_module.tomllib, "load", wraps=config_module.tomllib.load) as load_toml:
+            with patch.object(
+                config_module.tomllib, "load", wraps=config_module.tomllib.load
+            ) as load_toml:
                 with patch.dict(
                     os.environ,
                     {

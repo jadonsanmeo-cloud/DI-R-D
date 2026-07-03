@@ -54,6 +54,7 @@ def _resolve_package_ref(package_path: Path, ref: str) -> str:
         path = package_path.parent / path
     return str(path)
 
+
 def _load_package_json(path: str) -> DataCorpusPackage:
     package_path = Path(path)
     package_payload = json.loads(package_path.read_text(encoding="utf-8"))
@@ -79,6 +80,7 @@ def _load_package_json(path: str) -> DataCorpusPackage:
             },
         },
     )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(

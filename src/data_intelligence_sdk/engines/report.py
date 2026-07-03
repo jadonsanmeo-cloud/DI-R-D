@@ -73,9 +73,15 @@ class ReportEngine:
                 "A basic report generated from the provided data corpus package.",
             ),
             "sections": [
-                {"heading": "Sources", "content": _source_summary(corpus_package.sources)},
+                {
+                    "heading": "Sources",
+                    "content": _source_summary(corpus_package.sources),
+                },
                 {"heading": "Datasets", "content": _dataset_summary(catalog)},
-                {"heading": "Schema", "content": _schema_summary(corpus_package.schemas)},
+                {
+                    "heading": "Schema",
+                    "content": _schema_summary(corpus_package.schemas),
+                },
             ],
         }
 

@@ -27,7 +27,9 @@ class CreateReportExampleTests(unittest.TestCase):
             package_dir = Path(temp_dir)
             schema_path = package_dir / "schema.json"
             schema_path.write_text(
-                json.dumps({"tables": {"orders": {"columns": ["order_id", "revenue"]}}}),
+                json.dumps(
+                    {"tables": {"orders": {"columns": ["order_id", "revenue"]}}}
+                ),
                 encoding="utf-8",
             )
             catalog_path = package_dir / "catalog.json"

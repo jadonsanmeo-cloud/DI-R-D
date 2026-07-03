@@ -6,7 +6,9 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 
 
 class ReportEngineTests(unittest.TestCase):
-    def test_report_engine_generates_structured_report_from_corpus_metadata(self) -> None:
+    def test_report_engine_generates_structured_report_from_corpus_metadata(
+        self,
+    ) -> None:
         corpus = DataCorpusPackage(
             sources=[
                 "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb",
