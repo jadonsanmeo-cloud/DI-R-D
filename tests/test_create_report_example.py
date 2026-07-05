@@ -75,7 +75,7 @@ class CreateReportExampleTests(unittest.TestCase):
                 module.main()
 
         rendered = stdout.getvalue()
-        self.assertIn("# Data Corpus Report", rendered)
+        self.assertIn("# Data Intelligence Report", rendered)
         self.assertIn("A small sales corpus.", rendered)
         self.assertIn("## Datasets", rendered)
         self.assertIn("orders", rendered)
