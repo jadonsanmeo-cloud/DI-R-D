@@ -1,5 +1,9 @@
 """Base package for the Data Intelligence orchestration system."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
     DataCorpusPackage,
@@ -14,6 +18,7 @@ from data_intelligence_sdk.core.types import (
     InterfaceDefinition,
     InterfaceSource,
     MethodCall,
+    MethodStatus,
     SUPPORTED_INTENTS,
     SessionContext,
     TraceStatus,
@@ -21,7 +26,9 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
-from data_intelligence_sdk.engines import GeneralPurposeEngine
+
+if TYPE_CHECKING:  # pragma: no cover - import-time convenience only.
+    from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 
 __all__ = [
     "CapabilityRequirement",
@@ -38,6 +45,7 @@ __all__ = [
     "InterfaceDefinition",
     "InterfaceSource",
     "MethodCall",
+    "MethodStatus",
     "SUPPORTED_INTENTS",
     "SessionContext",
     "TraceStatus",
@@ -45,3 +53,15 @@ __all__ = [
     "UserContext",
     "UserQuery",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name == "GeneralPurposeEngine":
+        from data_intelligence_sdk.engines.general import GeneralPurposeEngine
+
+        return GeneralPurposeEngine
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), "GeneralPurposeEngine"})
