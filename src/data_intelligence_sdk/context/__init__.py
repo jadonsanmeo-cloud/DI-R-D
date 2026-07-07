@@ -1,6 +1,6 @@
 """Context boundaries."""
 
-from data_intelligence_sdk.context.spec_context import (
+from data_intelligence_sdk.spec.context import (
     CorpusSummary,
     SessionBrief,
     SpecBuildContext,

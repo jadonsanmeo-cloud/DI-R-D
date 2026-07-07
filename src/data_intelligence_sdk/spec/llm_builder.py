@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from data_intelligence_sdk.context import SpecContextBuilder
-from data_intelligence_sdk.data_selection import DataSelector
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
     DataCorpusPackage,
@@ -16,8 +14,10 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
-from data_intelligence_sdk.prompts.spec_builder import SpecBuilderPrompt
 from data_intelligence_sdk.runtime.llm_client import LLMClient
+from data_intelligence_sdk.spec.context import SpecContextBuilder
+from data_intelligence_sdk.spec.data_selection import DataSelector
+from data_intelligence_sdk.spec.prompts.spec_builder import SpecBuilderPrompt
 
 
 class LLMSpecBuilder:

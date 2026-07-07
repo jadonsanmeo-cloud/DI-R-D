@@ -1,12 +1,12 @@
 import unittest
 
-from data_intelligence_sdk.context import SpecContextBuilder
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     SessionContext,
     UserContext,
     UserQuery,
 )
+from data_intelligence_sdk.spec import SpecContextBuilder
 
 
 class SpecContextBuilderTests(unittest.TestCase):

@@ -1,6 +1,5 @@
 """Prompt builders used by SDK components."""
 
-from data_intelligence_sdk.prompts.data_selection import DataSelectionPrompt
-from data_intelligence_sdk.prompts.spec_builder import SpecBuilderPrompt
+from data_intelligence_sdk.spec.prompts import DataSelectionPrompt, SpecBuilderPrompt
 
 __all__ = ["DataSelectionPrompt", "SpecBuilderPrompt"]

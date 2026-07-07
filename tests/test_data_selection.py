@@ -1,10 +1,13 @@
 import json
 import unittest
 
-from data_intelligence_sdk.context import SpecContextBuilder
 from data_intelligence_sdk.core.types import DataCorpusPackage, ExecutionSpec, UserQuery
-from data_intelligence_sdk.data_selection import LLMDataSelector, SelectedDataContext
-from data_intelligence_sdk.prompts import DataSelectionPrompt
+from data_intelligence_sdk.spec import (
+    DataSelectionPrompt,
+    LLMDataSelector,
+    SelectedDataContext,
+    SpecContextBuilder,
+)
 
 
 class FakeLLMClient:

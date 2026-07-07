@@ -35,8 +35,6 @@ from data_intelligence_sdk.core.types import (  # noqa: E402
     UserContext,
     UserQuery,
 )
-from data_intelligence_sdk.context import SpecContextBuilder  # noqa: E402
-from data_intelligence_sdk.data_selection import LLMDataSelector  # noqa: E402
 from data_intelligence_sdk.registry.engine_registry import (  # noqa: E402
     InMemoryEngineRegistry,
 )
@@ -47,7 +45,9 @@ from data_intelligence_sdk.runtime.llm_client import (  # noqa: E402
 from data_intelligence_sdk.spec import (  # noqa: E402
     ConsoleSpecConfirmationProvider,
     DefaultSpecConfirmation,
+    LLMDataSelector,
     LLMSpecBuilder,
+    SpecContextBuilder,
 )
 
 DEFAULT_PACKAGE = EXAMPLES_DIR / "data_corpus_package" / "data_corpus_package.json"

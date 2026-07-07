@@ -2,8 +2,7 @@ import json
 import unittest
 
 from data_intelligence_sdk.core.types import DataCorpusPackage, ExecutionSpec, UserQuery
-from data_intelligence_sdk.context import SpecContextBuilder
-from data_intelligence_sdk.prompts import SpecBuilderPrompt
+from data_intelligence_sdk.spec import SpecBuilderPrompt, SpecContextBuilder
 
 
 class SpecBuilderPromptTests(unittest.TestCase):
