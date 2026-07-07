@@ -11,3 +11,7 @@ class EngineNotFoundError(DataIntelligenceError):
 
 class SpecConfirmationRequired(DataIntelligenceError):
     """Raised when a spec requires user confirmation before execution."""
+
+    def __init__(self, message: str, *, request: object | None = None) -> None:
+        super().__init__(message)
+        self.request = request
