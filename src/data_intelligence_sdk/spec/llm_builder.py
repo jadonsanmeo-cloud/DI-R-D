@@ -15,6 +15,12 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.runtime.llm_client import LLMClient
+from data_intelligence_sdk.datahub import DataHubClusterer
+from data_intelligence_sdk.spec.cluster_specs import (
+    ClusterSpecBuilder,
+    ClusterSpecSelector,
+    DefaultClusterSpecBuilder,
+)
 from data_intelligence_sdk.spec.context import SpecContextBuilder
 from data_intelligence_sdk.spec.data_selection import DataSelector
 from data_intelligence_sdk.spec.prompts.spec_builder import SpecBuilderPrompt
@@ -30,11 +36,17 @@ class LLMSpecBuilder:
         prompt: object | None = None,
         context_builder: SpecContextBuilder | None = None,
         data_selector: DataSelector | None = None,
+        datahub_clusterer: DataHubClusterer | None = None,
+        cluster_spec_builder: ClusterSpecBuilder | None = None,
+        cluster_spec_selector: ClusterSpecSelector | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.prompt = prompt or SpecBuilderPrompt()
         self.context_builder = context_builder or SpecContextBuilder()
         self.data_selector = data_selector
+        self.datahub_clusterer = datahub_clusterer
+        self.cluster_spec_builder = cluster_spec_builder or DefaultClusterSpecBuilder()
+        self.cluster_spec_selector = cluster_spec_selector
 
     def build(
         self,
@@ -44,6 +56,15 @@ class LLMSpecBuilder:
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
+        if self._uses_cluster_flow():
+            return self._build_from_selected_cluster_spec(
+                query=query,
+                intent=intent,
+                corpus_package=corpus_package,
+                session_context=session_context,
+                user_context=user_context,
+            )
+
         spec_build_context = self.context_builder.build(
             query,
             intent,
@@ -74,6 +95,17 @@ class LLMSpecBuilder:
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
+        if self._uses_cluster_flow():
+            return self._build_from_selected_cluster_spec(
+                query=query,
+                intent=intent,
+                corpus_package=corpus_package,
+                session_context=session_context,
+                user_context=user_context,
+                previous_spec=previous_spec,
+                user_feedback=user_feedback,
+            )
+
         spec_build_context = self.context_builder.build(
             query,
             intent,
@@ -98,6 +130,43 @@ class LLMSpecBuilder:
             )
         )
         return self._payload_to_spec(payload, intent, selected_data_context)
+
+    def _uses_cluster_flow(self) -> bool:
+        return self.datahub_clusterer is not None and self.cluster_spec_selector is not None
+
+    def _build_from_selected_cluster_spec(
+        self,
+        *,
+        query: UserQuery,
+        intent: Intent,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+        previous_spec: ExecutionSpec | None = None,
+        user_feedback: str | None = None,
+    ) -> ExecutionSpec:
+        if self.datahub_clusterer is None or self.cluster_spec_selector is None:
+            raise RuntimeError("Cluster flow requires a clusterer and selector.")
+        clustering_result = self.datahub_clusterer.cluster(corpus_package)
+        cluster_specs = self.cluster_spec_builder.build_specs(
+            corpus_package,
+            clustering_result,
+            intent,
+        )
+        cluster_specs_by_id = {item.cluster_id: item for item in cluster_specs}
+        selected = self.cluster_spec_selector.select(
+            query=query,
+            intent=intent,
+            corpus_package=corpus_package,
+            clustering_result=clustering_result,
+            cluster_specs=cluster_specs,
+            cluster_specs_by_id=cluster_specs_by_id,
+            session_context=session_context,
+            user_context=user_context,
+            previous_spec=previous_spec,
+            user_feedback=user_feedback,
+        )
+        return selected.execution_spec
 
     def _select_data(
         self,

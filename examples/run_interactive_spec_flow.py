@@ -35,6 +35,7 @@ from data_intelligence_sdk.core.types import (  # noqa: E402
     UserContext,
     UserQuery,
 )
+from data_intelligence_sdk.datahub import LLMDataHubClusterer  # noqa: E402
 from data_intelligence_sdk.registry.engine_registry import (  # noqa: E402
     InMemoryEngineRegistry,
 )
@@ -44,8 +45,9 @@ from data_intelligence_sdk.runtime.llm_client import (  # noqa: E402
 )
 from data_intelligence_sdk.spec import (  # noqa: E402
     ConsoleSpecConfirmationProvider,
+    DefaultClusterSpecBuilder,
     DefaultSpecConfirmation,
-    LLMDataSelector,
+    LLMClusterSpecSelector,
     LLMSpecBuilder,
     SpecContextBuilder,
 )
@@ -132,6 +134,62 @@ class TracingDataSelector:
             user_feedback=user_feedback,
         )
         _print_section("LLMDataSelector Output")
+        _print_json(result)
+        return result
+
+
+class TracingDataHubClusterer:
+    """Prints DataHub clustering input and output."""
+
+    def __init__(self, inner: object) -> None:
+        self.inner = inner
+
+    def cluster(self, corpus_package: DataCorpusPackage) -> object:
+        _print_section("DataHubClusterer Input")
+        _print_json({"corpus_package": corpus_package})
+        result = self.inner.cluster(corpus_package)
+        _print_section("DataHubClusterer Output")
+        _print_json(result)
+        return result
+
+
+class TracingClusterSpecBuilder:
+    """Prints prepared specs for all datahub clusters."""
+
+    def __init__(self, inner: object) -> None:
+        self.inner = inner
+
+    def build_specs(
+        self,
+        corpus_package: DataCorpusPackage,
+        clustering_result: object,
+        intent: Intent,
+    ) -> list[object]:
+        _print_section("ClusterSpecBuilder Input")
+        _print_json(
+            {
+                "corpus_package": corpus_package,
+                "clustering_result": clustering_result,
+                "intent": intent,
+            }
+        )
+        result = self.inner.build_specs(corpus_package, clustering_result, intent)
+        _print_section("ClusterSpecBuilder Output")
+        _print_json(result)
+        return result
+
+
+class TracingClusterSpecSelector:
+    """Prints cluster spec selection input and output."""
+
+    def __init__(self, inner: object) -> None:
+        self.inner = inner
+
+    def select(self, **kwargs: object) -> object:
+        _print_section("ClusterSpecSelector Input")
+        _print_json(kwargs)
+        result = self.inner.select(**kwargs)
+        _print_section("ClusterSpecSelector Output")
         _print_json(result)
         return result
 
@@ -414,13 +472,15 @@ def main() -> None:
         model=args.model,
     )
     llm_client = TracingLLMClient(raw_llm_client)
-    context_builder = TracingSpecContextBuilder(SpecContextBuilder())
-    data_selector = TracingDataSelector(LLMDataSelector(llm_client))
+    datahub_clusterer = TracingDataHubClusterer(LLMDataHubClusterer(llm_client))
+    cluster_spec_builder = TracingClusterSpecBuilder(DefaultClusterSpecBuilder())
+    cluster_spec_selector = TracingClusterSpecSelector(LLMClusterSpecSelector(llm_client))
     spec_builder = TracingSpecBuilder(
         LLMSpecBuilder(
             llm_client,
-            context_builder=context_builder,
-            data_selector=data_selector,
+            datahub_clusterer=datahub_clusterer,
+            cluster_spec_builder=cluster_spec_builder,
+            cluster_spec_selector=cluster_spec_selector,
         )
     )
     spec_confirmation = DefaultSpecConfirmation(
@@ -451,7 +511,10 @@ def main() -> None:
     print(args.query)
     print("")
     print("=== Flow ===")
-    print("SpecContextBuilder -> LLMDataSelector -> LLMSpecBuilder -> SpecConfirmation")
+    print(
+        "DataHubClusterer -> ClusterSpecBuilder -> "
+        "ClusterSpecSelector -> LLMSpecBuilder -> SpecConfirmation"
+    )
 
     response = pipeline.run(UserQuery(args.query), corpus_package)
 

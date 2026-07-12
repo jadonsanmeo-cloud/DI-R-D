@@ -4,7 +4,10 @@ import unittest
 class SpecModuleLayoutTests(unittest.TestCase):
     def test_spec_package_exports_spec_building_components(self) -> None:
         from data_intelligence_sdk.spec import (
+            ClusterExecutionSpec,
             DataSelectionPrompt,
+            DefaultClusterSpecBuilder,
+            LLMClusterSpecSelector,
             LLMDataSelector,
             SelectedDataContext,
             SpecBuilderPrompt,
@@ -12,6 +15,9 @@ class SpecModuleLayoutTests(unittest.TestCase):
             SpecContextBuilder,
         )
 
+        self.assertEqual(ClusterExecutionSpec.__name__, "ClusterExecutionSpec")
+        self.assertEqual(DefaultClusterSpecBuilder.__name__, "DefaultClusterSpecBuilder")
+        self.assertEqual(LLMClusterSpecSelector.__name__, "LLMClusterSpecSelector")
         self.assertEqual(SpecContextBuilder.__name__, "SpecContextBuilder")
         self.assertEqual(SpecBuildContext.__name__, "SpecBuildContext")
         self.assertEqual(SelectedDataContext.__name__, "SelectedDataContext")

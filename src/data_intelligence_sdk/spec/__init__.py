@@ -1,6 +1,13 @@
 """Spec drafting and confirmation boundaries."""
 
 from data_intelligence_sdk.spec.builder import SpecBuilder
+from data_intelligence_sdk.spec.cluster_specs import (
+    ClusterExecutionSpec,
+    ClusterSpecBuilder,
+    ClusterSpecSelector,
+    DefaultClusterSpecBuilder,
+    LLMClusterSpecSelector,
+)
 from data_intelligence_sdk.spec.confirmation import SpecConfirmation
 from data_intelligence_sdk.spec.context import (
     CorpusSummary,
@@ -29,9 +36,14 @@ from data_intelligence_sdk.spec.prompts import DataSelectionPrompt, SpecBuilderP
 
 __all__ = [
     "CorpusSummary",
+    "ClusterExecutionSpec",
+    "ClusterSpecBuilder",
+    "ClusterSpecSelector",
     "DataSelectionPrompt",
     "DataSelector",
+    "DefaultClusterSpecBuilder",
     "DefaultSpecConfirmation",
+    "LLMClusterSpecSelector",
     "LLMDataSelector",
     "LLMSpecBuilder",
     "SelectedDataContext",
