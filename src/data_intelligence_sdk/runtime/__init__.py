@@ -11,6 +11,11 @@ from data_intelligence_sdk.runtime.interfaces import (
     InterfaceRegistry,
     InMemoryInterfaceRegistry,
 )
+from data_intelligence_sdk.runtime.logger import (
+    ConsoleRuntimeLogger,
+    FileRuntimeLogger,
+    InMemoryRuntimeLogger,
+    RuntimeLogger,
 from data_intelligence_sdk.runtime.llm_client import (
     LLMClient,
     OpenAICompatibleLLMClient,
@@ -20,8 +25,11 @@ from data_intelligence_sdk.runtime.run_context import EngineRunContext
 
 __all__ = [
     "ConfigManager",
+    "ConsoleRuntimeLogger",
     "EngineRunContext",
     "EngineRuntimeContext",
+    "FileRuntimeLogger",
+    "InMemoryRuntimeLogger",
     "InterfaceBuilder",
     "InterfaceRegistry",
     "InMemoryInterfaceRegistry",
@@ -30,5 +38,6 @@ __all__ = [
     "OpenAICompatibleLLMClient",
     "OpenRouterSettings",
     "RegisteredMethod",
+    "RuntimeLogger",
     "get_config_manager",
 ]

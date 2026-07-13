@@ -1,7 +1,11 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
 
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
+from data_intelligence_sdk.runtime.logger import FileRuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.resource_manager import ResourceManager
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
@@ -60,6 +64,21 @@ class EngineRuntimeContextTests(unittest.TestCase):
         self.assertEqual(result.log_refs, ["log://sandbox/1"])
         self.assertEqual(result.resource_usage, {"cpu_seconds": 1})
         self.assertEqual(result.metadata, {"interface": "orders_reader"})
+
+    def test_file_runtime_logger_writes_json_lines_and_creates_parent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / "logs" / "pipeline.log"
+            logger = FileRuntimeLogger(log_path)
+
+            logger.log("pipeline.start", {"query": "hello"})
+            logger.log("pipeline.completed", {"engine_name": "report"})
+
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(json.loads(lines[0])["event"], "pipeline.start")
+        self.assertEqual(json.loads(lines[0])["payload"], {"query": "hello"})
+        self.assertEqual(json.loads(lines[1])["event"], "pipeline.completed")
 
 
 if __name__ == "__main__":

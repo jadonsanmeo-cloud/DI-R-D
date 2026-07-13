@@ -66,6 +66,13 @@ class FakeSynthesizer:
     def synthesize(self, spec, output, evidence):
         return FinalResponse(answer=str(output.result), evidence=evidence)
 
+class FakeLogger:
+    def __init__(self):
+        self.events = []
+
+    def log(self, event, payload=None):
+        self.events.append((event, payload or {}))
+
 
 class PipelineWorkflowTests(unittest.TestCase):
     def test_pipeline_orchestrates_components(self) -> None:
@@ -87,6 +94,40 @@ class PipelineWorkflowTests(unittest.TestCase):
         self.assertEqual(response.evidence.sources, ["sales.csv"])
         self.assertEqual(response.evidence.steps[0].name, "fake_step")
         self.assertIsInstance(engine.runtime.method_hub, MethodHub)
+
+    def test_pipeline_logs_lifecycle_events(self) -> None:
+        logger = FakeLogger()
+        engine = FakeEngine()
+        pipeline = DataIntelligencePipeline(
+            intent_analyzer=FakeAnalyzer(),
+            spec_builder=FakeSpecBuilder(),
+            spec_confirmation=FakeConfirmation(),
+            engine_registry=FakeRegistry(engine),
+            evidence_collector=FakeEvidenceCollector(),
+            synthesizer=FakeSynthesizer(),
+            logger=logger,
+        )
+
+        pipeline.run(UserQuery("answer"), DataCorpusPackage(sources=["sales.csv"]))
+
+        event_names = [event for event, _ in logger.events]
+        self.assertEqual(
+            event_names,
+            [
+                "pipeline.start",
+                "pipeline.intent_analyzed",
+                "pipeline.spec_built",
+                "pipeline.spec_confirmed",
+                "pipeline.engine_selected",
+                "pipeline.engine_completed",
+                "pipeline.evidence_collected",
+                "pipeline.completed",
+            ],
+        )
+        self.assertEqual(logger.events[0][1]["query"], "answer")
+        self.assertEqual(logger.events[1][1]["intent"], "reason")
+        self.assertEqual(logger.events[4][1]["engine_name"], "fake")
+        self.assertEqual(logger.events[5][1]["method_call_count"], 0)
 
     def test_create_example_pipeline_with_fake_engine_runs_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
