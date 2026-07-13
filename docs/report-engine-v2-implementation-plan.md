@@ -2,8 +2,9 @@
 
 ## 1. Objective
 
-Evolve the current sequential `ReportEngine` into a template-driven report
-workflow with explicit data lineage, dependency-aware execution, parallel chart
+Evolve the current sequential `ReportEngine` into a template-driven workflow
+with explicit contracts, bounded Plan/Template negotiation, dependency-aware
+execution, controlled concurrency, traceable data outputs, parallel chart
 generation, structured report output, and separate rendering.
 
 The target workflow is:
@@ -15,764 +16,1227 @@ User goal + DataCorpusPackage
 PlanAgent <------> TemplateAgent <------> TemplatePool
         |                  |
         |                  +---- TemplateInstance
-        +---- FinalPlan
-                 |
-                 v
-            DAG Scheduler
-                 |
-       +---------+----------+
-       |                    |
-existing method       generated method
-       |           Code -> Sandbox -> Validator
-       +--------- Tool Executor -----+
+        +---- FinalPlan ----------+
+                                  |
+                                  v
+                             DAG Scheduler
+                                  |
+                    +-------------+-------------+
+                    |                           |
+              existing method             generated method
+                    |               Code -> Sandbox -> Validator
+                    +----------- ToolExecutor --------+
+                                                   |
+                                                   v
+                                          DataStepProcessor
+                                  +----------------+----------------+
+                                  |                                 |
+                          deterministic runtime                AnalysisAgent
+                    artifact/schema/profile/sample/metrics     bounded summary
+                                  |                                 |
+                                  +------------ DataStepResult -----+
+                                                   |
+                         +-------------------------+------------------+
+                         |                                            |
+                         v                                            v
+                  ChartInputAssembler                            ReportAgent
+                         |                                            ^
+                 parallel ChartRequests                              |
+                         |                                            |
+                    ChartAgent --------------------------------------+
                          |
-                         v
-                    Data Runtime
-              artifact + schema + profile
+                    ChartResults
                          |
-                         v
-                 DataScience tasks
-                  |             |
-                  |             +---- chart datasets
-                  |                       |
-                  |               ChartInputAssembler
-                  |                       |
-                  |             parallel ChartAgent tasks
-                  |                       |
-                  +------- ReportAgent <--+--- TemplateInstance
-                              |
-                        structured report
-                              |
-                           Renderer
-                       HTML / Markdown
+                         +-----------------------> ReportAgent
+                                                     |
+                                              StructuredReport JSON
+                                                     |
+                                                  Renderer
+                                               HTML / Markdown
 ```
 
-## 2. Scope boundaries
+The workflow uses JSON objects for agent and runtime contracts. JSONL is
+reserved for event streams and trace records; it is not the report contract.
+
+## 2. Decisions fixed by this plan
+
+1. `NegotiationRunner`, not either agent, owns Plan/Template loop state.
+2. PlanAgent and TemplateAgent are stateless from the workflow perspective.
+3. Every PlanAgent revision response contains a complete `ReportPlan` snapshot.
+4. NegotiationRunner sends PlanAgent the current plan and a batch of
+   `MissingDataRequest` objects, not the entire template layout.
+5. PlanAgent returns one `RequestResolution` for every missing-data request.
+6. One template requirement may bind to one or more named plan outputs.
+7. Canonical template files are immutable. A run modifies only a cloned
+   `TemplateInstance`.
+8. DAG Scheduler decides when a step may run; RouterAgent decides how one ready
+   step should run.
+9. Existing and generated methods execute through one `ToolExecutor` contract.
+10. Data Runtime and the old DataScience stage are exposed as one workflow
+    component named `DataStepProcessor`.
+11. Deterministic code owns persistence, schema, profiling, sampling, metrics,
+    and data shaping. `AnalysisAgent` only interprets bounded verified context.
+12. `DataStepResult` publishes generic `data_outputs`, not chart-owned datasets.
+13. `ChartInputAssembler` may resolve multiple step outputs for one chart.
+14. Business joins, ratios, aggregations, and derived metrics require a PlanStep;
+    neither ChartInputAssembler nor ChartAgent may calculate them.
+15. ChartAgent creates safe ECharts presentation JSON only.
+16. ReportAgent emits `StructuredReport` JSON. Renderer owns HTML and Markdown.
+17. Every loop, retry path, and concurrency pool has a configured limit.
+
+## 3. Scope boundaries
 
 ### Included
 
-- A versioned built-in Template Pool.
-- Template selection, cloning, adaptation, and Plan/Template negotiation.
-- Data dependencies with named input and output references.
-- A scheduler that starts a task as soon as its dependencies are ready.
-- One execution path for existing and generated tools.
-- Artifact references, deterministic schema/profile/sample generation, and
-  chart-ready datasets.
-- Independent ECharts chart tasks that can run concurrently.
-- A structured report contract and HTML/Markdown renderers.
-- Traceability from source data through analysis, chart, report, and render
-  artifacts.
+- A versioned built-in TemplatePool with optional application overrides.
+- Template selection, cloning, adaptation, binding, and bounded negotiation.
+- Versioned ReportPlan DAGs with named inputs and outputs.
+- In-process dependency scheduling with bounded concurrency.
+- Existing-tool and generated-tool execution through ToolExecutor.
+- Inline and artifact-backed data outputs.
+- Deterministic schema, profile, sample, metric, and lineage generation.
+- A bounded AnalysisAgent summary for each completed data step.
+- Multi-output and multi-step chart bindings.
+- Independent ECharts ChartAgent tasks.
+- StructuredReport, HTML renderer, and Markdown renderer.
+- Required/optional failure policies and auditable partial reports.
 
 ### Deferred
 
-- Major semantic improvements to ValidatorAgent. Its interface will be kept
-  compatible, but deeper business-logic validation can be added later.
-- Persisting a modified TemplateInstance back into the canonical pool.
+- Distributed scheduling across processes or machines.
 - A visual template editor.
-- Distributed scheduling. The first scheduler is in-process.
-- Live LLM or database calls in unit tests.
+- Persisting adapted TemplateInstances into the canonical pool.
+- Live LLM and database calls in unit tests.
+- Arbitrary JavaScript callbacks inside ECharts options.
+- Automatic workflow replanning after runtime data-quality failures. Runtime
+  failures use explicit fallback policies in v2; they do not re-enter template
+  negotiation.
 
-## 3. Current baseline and migration constraints
+## 4. Current baseline and migration constraints
 
 The current `ReportEngine` already has Plan, Router, Code, Sandbox, Validator,
-MethodHub, DataScience, and Report stages. The migration must preserve:
+MethodHub, DataScience, and Report stages. It currently sorts plan steps and
+executes them sequentially. Tool results are passed inline to DataScienceAgent,
+and ReportAgent emits Markdown directly.
 
-- `EngineOutput` and `EngineTrace` as the engine boundary.
-- `EngineRuntimeContext` as the runtime service boundary.
-- Existing MethodHub registration and trust levels.
-- Offline/fallback behavior when no LLM is configured.
-- Existing tests until their assertions are intentionally migrated.
+The migration must preserve:
+
+- `EngineOutput` and `EngineTrace` as the public engine boundary.
+- `EngineRuntimeContext` as the runtime-service boundary.
+- Existing MethodHub registration, evidence, and trust levels.
+- Offline deterministic behavior when no LLM is configured.
+- Existing public engine construction during the migration window.
+- Existing tests until assertions are intentionally migrated to v2 contracts.
 
 Known gaps to close:
 
-- `depends_on` currently controls ordering but does not bind prior outputs.
-- Existing-tool failures currently become an empty list without a route
-  fallback or structured failure.
-- Tool results are passed inline instead of through data artifacts.
-- DataScience output only contains a summary and aggregated metrics.
-- There is no TemplateAgent, TemplatePool, chart stage, report JSON contract,
-  or renderer stage.
-- ReportAgent emits Markdown directly.
+- `depends_on` controls ordering but does not bind real upstream outputs.
+- Existing-tool failures collapse to `[]` instead of a structured failure.
+- Generated tools do not share a complete execution request with existing tools.
+- Large results can enter prompts and trace metadata directly.
+- DataScienceAgent duplicates deterministic profiling work.
+- There is no run-local TemplateInstance or Plan/Template negotiation runtime.
+- There is no chart assembly contract, StructuredReport, or Renderer boundary.
 
-## 4. Architectural rules to establish first
+## 5. Common contract conventions
 
-1. Agents decide, select, and explain; deterministic runtime code executes,
-   profiles, samples, stores, schedules, and validates structural contracts.
-2. Canonical templates are immutable. Every run operates on a cloned
-   `TemplateInstance`.
-3. A dependency means data lineage. Every dependency must be backed by an
-   input reference to a named upstream output.
-4. Large data travels by artifact reference, not in LLM prompts or trace
-   metadata.
-5. Business aggregations are computed once and shared by narrative and chart
-   generation.
-6. ChartAgent creates presentation specifications; it must not recompute
-   business metrics.
-7. Required and optional dependencies have different failure policies.
-8. Every loop and retry path has a configured maximum.
-9. ReportAgent produces structured JSON. Renderer owns output format.
-10. ECharts output is JSON-serializable and cannot contain executable
-    JavaScript functions.
+All persisted objects and all objects exchanged with an LLM use an explicit
+`schema_version`. Stable IDs are required for plans, steps, requirements,
+outputs, artifacts, charts, sections, blocks, and report runs.
 
-## 5. Contracts to introduce
-
-Define these as small dataclasses or typed dictionaries under a dedicated
-`reporting/contracts.py` module. Keep JSON serialization explicit.
-
-| Contract | Purpose |
-| --- | --- |
-| `ReportPlan` | Versioned DAG produced by PlanAgent |
-| `PlanStep` | One executable data/analysis step |
-| `DataReference` | Reference to a named upstream output or corpus dataset |
-| `StepOutputDefinition` | Name, schema expectation, and intended consumers |
-| `TemplateDefinition` | Immutable template loaded from the pool |
-| `TemplateInstance` | Run-local adapted template with resolved bindings |
-| `TemplateBinding` | Connect a template requirement to a plan output |
-| `MissingDataRequest` | Template request for data not exposed by the plan |
-| `NegotiationResult` | Accepted, partial, or failed plan/template pair |
-| `ExecutionResult` | Status and artifact returned by Tool Executor |
-| `DataArtifact` | URI, format, schema, profile, sample, and lineage |
-| `DataStepResult` | Analysis, aggregates, and chart datasets for one step |
-| `ChartDataset` | Chart-shaped data bound to one or more chart IDs |
-| `ChartRequest` | Resolved template chart slot and data context |
-| `ChartResult` | ECharts option, dataset refs, status, and warnings |
-| `StructuredReport` | Sections and blocks produced by ReportAgent |
-| `RenderedReport` | Format, content/artifact ref, and render warnings |
-
-All contracts need:
-
-- A `schema_version` where persisted or exchanged with an LLM.
-- Stable IDs.
-- `status`, `warnings`, and lineage where appropriate.
-- Validation before a downstream component consumes them.
-
-## 6. Phase-by-phase implementation
-
-### Phase 0 — Freeze decisions and failure policies
-
-#### Tasks
-
-1. Confirm JSON, not JSONL, as the structured report format. Use JSONL only
-   for event streams or trace records.
-2. Confirm built-in template precedence versus application-provided templates.
-3. Choose limits:
-   - Maximum Plan/Template negotiation iterations.
-   - Maximum generated-code attempts.
-   - DataScience concurrency.
-   - Chart concurrency.
-   - Artifact/sample size.
-4. Define required versus optional failure behavior.
-5. Define whether an existing-tool execution failure may fall back to generated
-   code.
-6. Define artifact retention and redaction policies.
-
-#### Deliverable
-
-A configuration contract containing all limits and policies. Avoid hard-coded
-limits across agent implementations.
-
-#### Acceptance criteria
-
-- Every loop has a limit.
-- Every node type has a documented failure transition.
-- No unresolved decision changes a public contract in later phases.
-
-### Phase 1 — Template Pool foundation
-
-#### Target files
+The common status vocabulary is:
 
 ```text
-src/data_intelligence_sdk/templates/
-└── pool/
-    ├── manifest.json
-    ├── template.schema.json
-    ├── executive-overview.json
-    ├── time-series-analysis.json
-    └── segment-comparison.json
-
-src/data_intelligence_sdk/reporting/
-├── contracts.py
-└── template_pool.py
+pending | ready | running | completed | partial | failed | skipped
 ```
 
-#### Tasks
+Where useful, contracts include this envelope:
 
-1. Implement `TemplatePool` using `importlib.resources`; never assume a real
-   filesystem path because package resources may live in a wheel.
-2. Load `manifest.json` and expose lightweight descriptors without reading all
-   templates.
-3. Load a template by `template_id` and optional version.
-4. Validate a loaded payload against the supported schema version.
-5. Return immutable `TemplateDefinition` objects.
-6. Support an optional application template directory layered over built-ins.
-7. Reject duplicate IDs at the same precedence level.
-8. Add selection metadata indexing for keywords, report intents, and data
-   signals.
+```json
+{
+  "schema_version": "1.0",
+  "run_id": "run-123",
+  "status": "completed",
+  "warnings": [],
+  "errors": [],
+  "lineage": {}
+}
+```
 
-#### Tests
+Rules:
 
-- Built-in manifest and all three templates parse.
-- IDs and `(template_id, version)` pairs are unique.
-- Manifest paths exist as package resources.
-- Unsupported schema versions fail clearly.
-- Invalid block references and chart requirement references fail.
-- Application templates can override or extend according to the chosen policy.
-- A built wheel contains every JSON resource.
+- `warnings` describe recoverable degradation.
+- `errors` contain structured codes and messages, not raw exceptions only.
+- Full connection strings, secrets, and sensitive sample values are redacted.
+- Large row sets never appear in trace metadata or LLM prompts.
+- An artifact reference is not sufficient by itself; its schema, row count, and
+  bounded preview remain available to downstream deterministic code.
 
-#### Acceptance criteria
+## 6. Core contracts
 
-- A caller can list and load templates without knowing their storage path.
-- Canonical definitions cannot be mutated by a report run.
+Implement the contracts under `data_intelligence_sdk/reporting/contracts.py` as
+dataclasses or typed models with explicit `to_dict`, `from_dict`, and validation.
 
-### Phase 2 — Plan/Template negotiation
+### 6.1 ReportPlan and PlanStep
 
-#### Target modules
+PlanAgent returns a complete, versioned plan snapshot:
+
+```json
+{
+  "schema_version": "1.0",
+  "plan_id": "plan-abc",
+  "revision": 2,
+  "objective": "Create a performance report",
+  "steps": [
+    {
+      "step_id": "step-1",
+      "task": "Calculate c grouped by a",
+      "required": true,
+      "depends_on": [],
+      "inputs": [
+        {
+          "kind": "corpus_dataset",
+          "dataset_id": "table-abc",
+          "columns": ["a", "c"]
+        }
+      ],
+      "operation": {
+        "capability": "group_by_sum",
+        "parameters": {
+          "group_by": ["a"],
+          "measure": "c"
+        }
+      },
+      "outputs": [
+        {
+          "output_name": "c-by-a",
+          "shape": "time_series",
+          "semantic_roles": {
+            "time": "a",
+            "measure": "c"
+          },
+          "expected_schema": {
+            "a": "date",
+            "c": "number"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+An upstream input uses a named output reference:
+
+```json
+{
+  "kind": "step_output",
+  "step_id": "step-1",
+  "output_name": "c-by-a",
+  "required": true
+}
+```
+
+Plan validation requires:
+
+- Unique step IDs and output names within each step.
+- Every dependency and step-output reference exists.
+- Every step-output input also appears in `depends_on`.
+- No cycles.
+- Required source columns exist in the corpus catalog when statically known.
+- Every step has at least one named output.
+
+### 6.2 Template contracts
+
+`TemplateDefinition` is the immutable payload loaded from the TemplatePool. It
+contains selection metadata, data requirements, sections, blocks, chart slots,
+layout, constraints, and fallback rules.
+
+`TemplateInstance` is the run-local clone:
+
+```json
+{
+  "schema_version": "1.0",
+  "template_instance_id": "run-123.executive-overview",
+  "template_id": "executive-overview",
+  "template_version": "1.0.0",
+  "revision": 2,
+  "sections": [],
+  "bindings": [],
+  "fallback_states": [],
+  "status": "partial"
+}
+```
+
+A binding may resolve one requirement to multiple outputs:
+
+```json
+{
+  "requirement_id": "c-d-comparison",
+  "output_refs": [
+    {"step_id": "step-1", "output_name": "c-by-a"},
+    {"step_id": "step-2", "output_name": "d-by-a"}
+  ],
+  "status": "bound"
+}
+```
+
+`MissingDataRequest` contains computation-relevant information only:
+
+```json
+{
+  "request_id": "missing-primary-trend",
+  "requirement_id": "primary-trend",
+  "required": false,
+  "expected_shape": "time_series",
+  "semantic_roles": {
+    "time": "time",
+    "measure": "primary_measure"
+  },
+  "constraints": {
+    "max_rows": 36
+  },
+  "reason": "No compatible plan output exists"
+}
+```
+
+It does not include section layout, colors, titles, or unrelated blocks.
+
+### 6.3 Plan revision response
+
+For the initial call, `request_resolutions` is empty. For every later call,
+PlanAgent returns one resolution for every request in the input batch:
+
+```json
+{
+  "schema_version": "1.0",
+  "iteration": 2,
+  "plan": {
+    "plan_id": "plan-abc",
+    "revision": 2,
+    "steps": []
+  },
+  "request_resolutions": [
+    {
+      "request_id": "missing-primary-trend",
+      "requirement_id": "primary-trend",
+      "decision": "added",
+      "output_refs": [
+        {"step_id": "step-2", "output_name": "c-by-a"}
+      ],
+      "reason": null
+    },
+    {
+      "request_id": "missing-secondary-measure",
+      "requirement_id": "secondary-measure",
+      "decision": "rejected",
+      "output_refs": [],
+      "reason": "No compatible source column exists"
+    }
+  ]
+}
+```
+
+Allowed decisions are `already_satisfied`, `added`, `revised`, and `rejected`.
+The revised plan is the source of truth; `output_refs` are hints that must still
+be validated against the returned plan.
+
+### 6.4 NegotiationResult
+
+```json
+{
+  "schema_version": "1.0",
+  "iteration": 2,
+  "plan": {},
+  "template_instance": {},
+  "missing_data_requests": [],
+  "status": "accepted",
+  "stop_reason": "all_required_bindings_resolved",
+  "revision_hash": "sha256:...",
+  "warnings": []
+}
+```
+
+Negotiation statuses are `needs_plan_revision`, `accepted`, `partial`, and
+`failed`.
+
+### 6.5 Route and tool execution contracts
+
+RouterAgent returns a decision only:
+
+```json
+{
+  "schema_version": "1.0",
+  "step_id": "step-1",
+  "route": "existing_tool",
+  "tool_name": "group_by_sum",
+  "arguments": {
+    "dataset": "table-abc",
+    "group_by": "a",
+    "column": "c"
+  },
+  "reason": "The registered method satisfies the required capability"
+}
+```
+
+Allowed routes are `existing_tool`, `generated_tool`, and `unavailable`.
+
+ToolExecutor accepts both existing and validated generated methods through the
+same request:
+
+```json
+{
+  "schema_version": "1.0",
+  "execution_id": "exec-123",
+  "step_id": "step-1",
+  "tool_name": "group_by_sum",
+  "arguments": {},
+  "input_refs": [],
+  "expected_outputs": [
+    {"output_name": "c-by-a", "shape": "time_series"}
+  ],
+  "policy": {
+    "timeout_seconds": 30,
+    "max_attempts": 1
+  }
+}
+```
+
+It returns raw named values before DataStepProcessor persistence:
+
+```json
+{
+  "schema_version": "1.0",
+  "execution_id": "exec-123",
+  "step_id": "step-1",
+  "status": "completed",
+  "tool_name": "group_by_sum",
+  "outputs": {
+    "c-by-a": [
+      {"a": "2026-01-01", "c": 10},
+      {"a": "2026-01-02", "c": 20}
+    ]
+  },
+  "duration_ms": 18,
+  "warnings": [],
+  "errors": []
+}
+```
+
+### 6.6 DataStepResult and DataOutput
+
+`DataStepProcessor` converts ToolExecutionResult into one validated result:
+
+```json
+{
+  "schema_version": "1.0",
+  "step_id": "step-1",
+  "status": "completed",
+  "analysis_summary": "Column c increased from 10 to 20.",
+  "data_outputs": [
+    {
+      "output_name": "c-by-a",
+      "shape": "time_series",
+      "data": {
+        "mode": "inline",
+        "value": [
+          {"a": "2026-01-01", "c": 10},
+          {"a": "2026-01-02", "c": 20}
+        ]
+      },
+      "schema": {
+        "a": "date",
+        "c": "number"
+      },
+      "profile": {
+        "row_count": 2,
+        "null_counts": {"a": 0, "c": 0},
+        "numeric": {
+          "c": {"min": 10, "max": 20, "mean": 15}
+        }
+      },
+      "semantic_roles": {
+        "time": "a",
+        "measure": "c"
+      }
+    }
+  ],
+  "aggregated_metrics": {
+    "total_c": 30,
+    "average_c": 15
+  },
+  "warnings": [],
+  "lineage": {
+    "plan_step_id": "step-1",
+    "execution_id": "exec-123",
+    "tool_name": "group_by_sum",
+    "source_refs": ["corpus://table-abc"]
+  }
+}
+```
+
+Large output uses the same `data` field with artifact mode:
+
+```json
+{
+  "mode": "artifact",
+  "artifact_ref": "artifact://run-123/step-1/c-by-a",
+  "format": "parquet",
+  "row_count": 100000,
+  "preview": [
+    {"a": "2026-01-01", "c": 10}
+  ]
+}
+```
+
+Exactly one of `value` or `artifact_ref` is present. DataOutput is a generic
+step output and is not owned by a chart.
+
+### 6.7 Chart assembly contracts
+
+ChartInputAssembler returns one request per ready chart slot plus structured
+failures for slots that cannot run:
+
+```json
+{
+  "schema_version": "1.0",
+  "requests": [
+    {
+      "chart_id": "executive.trend.c-d-comparison",
+      "chart_slot_id": "c-d-comparison",
+      "intent": "Compare c and d over a",
+      "suggested_type": "line",
+      "allowed_types": ["line", "bar"],
+      "datasets": [
+        {
+          "dataset_id": "step-1.c-by-a",
+          "source_output_ref": {
+            "step_id": "step-1",
+            "output_name": "c-by-a"
+          },
+          "artifact_ref": null,
+          "rows": [
+            {"a": "2026-01-01", "c": 10},
+            {"a": "2026-01-02", "c": 20}
+          ],
+          "encoding": {
+            "x_field": "a",
+            "y_field": "c",
+            "series_name": "c"
+          }
+        },
+        {
+          "dataset_id": "step-2.d-by-a",
+          "source_output_ref": {
+            "step_id": "step-2",
+            "output_name": "d-by-a"
+          },
+          "artifact_ref": null,
+          "rows": [
+            {"a": "2026-01-01", "d": 15},
+            {"a": "2026-01-02", "d": 15}
+          ],
+          "encoding": {
+            "x_field": "a",
+            "y_field": "d",
+            "series_name": "d"
+          }
+        }
+      ],
+      "constraints": {
+        "max_points": 36,
+        "sort": "chronological"
+      },
+      "presentation": {
+        "title": "c and d over a",
+        "show_legend": true
+      },
+      "fallback": {"action": "table"},
+      "lineage": {
+        "source_output_refs": ["step-1.c-by-a", "step-2.d-by-a"]
+      }
+    }
+  ],
+  "failures": []
+}
+```
+
+ChartResult contains safe ECharts JSON:
+
+```json
+{
+  "schema_version": "1.0",
+  "chart_id": "executive.trend.c-d-comparison",
+  "status": "completed",
+  "chart_type": "line",
+  "echarts_option": {},
+  "source_output_refs": ["step-1.c-by-a", "step-2.d-by-a"],
+  "warnings": []
+}
+```
+
+### 6.8 StructuredReport and RenderedReport
+
+ReportAgent receives TemplateInstance, DataStepResults, ChartResults, user goal,
+and evidence references as separate fields. It returns blocks in template order:
+
+```json
+{
+  "schema_version": "1.0",
+  "report_id": "report-123",
+  "status": "completed",
+  "title": "Performance overview",
+  "sections": [
+    {
+      "section_id": "summary",
+      "blocks": [
+        {
+          "block_id": "headline",
+          "type": "narrative",
+          "content": "...",
+          "source_refs": ["step-1.c-by-a"]
+        },
+        {
+          "block_id": "trend",
+          "type": "chart",
+          "chart_id": "executive.trend.c-d-comparison"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+```
+
+Renderer returns:
+
+```json
+{
+  "schema_version": "1.0",
+  "report_id": "report-123",
+  "format": "html",
+  "status": "completed",
+  "content": "<html>...</html>",
+  "artifact_ref": null,
+  "warnings": []
+}
+```
+
+Large rendered content may use `artifact_ref` instead of inline `content`.
+
+## 7. End-to-end processing logic
+
+### 7.1 Plan/Template negotiation
+
+NegotiationRunner owns this state:
 
 ```text
-src/data_intelligence_sdk/reporting/planning.py
-src/data_intelligence_sdk/reporting/template_agent.py
-src/data_intelligence_sdk/reporting/negotiation.py
+current_plan
+template_instance
+iteration
+revision history
+previous revision hash
 ```
 
-#### Tasks
+Algorithm:
 
-1. Upgrade PlanAgent output from unvalidated dictionaries to `ReportPlan`.
-2. Require every `PlanStep` to declare named outputs.
-3. Implement TemplateAgent selection using:
-   - User goal.
-   - Plan output definitions.
-   - Corpus schema/catalog.
-   - Template selection metadata.
-4. Clone the selected definition into a `TemplateInstance`.
-5. Bind every section block and chart slot to plan output references.
-6. Emit `MissingDataRequest` records for unresolved required or optional data.
-7. Ask PlanAgent to add feasible steps and reject infeasible requests with a
-   reason.
-8. Rebind and adapt the TemplateInstance after each plan revision.
-9. Stop when:
-   - All required bindings resolve.
-   - The result is partial with accepted fallbacks.
-   - A fatal requirement is unavailable.
-   - The configured iteration limit is reached.
-10. Record every revision and decision in `EngineRunContext`.
+1. Call PlanAgent with user goal, corpus catalog, source descriptors, capability
+   descriptors, and no missing requests.
+2. Validate the complete ReportPlan revision.
+3. Give TemplateAgent the user goal, complete plan, corpus catalog, and template
+   descriptors.
+4. Select and clone one TemplateDefinition into a TemplateInstance.
+5. Bind every requirement used by a section, block, or chart slot to compatible
+   named plan outputs.
+6. Emit all unresolved requirements in one `missing_data_requests` array.
+7. If no required request remains unresolved, accept or return partial with
+   explicit optional fallbacks.
+8. Otherwise call PlanAgent with the complete current plan, the whole missing
+   request batch, corpus catalog, and capability descriptors.
+9. Validate that the response contains a complete higher plan revision and one
+   resolution for every request.
+10. Give TemplateAgent the revised plan, current TemplateInstance, and request
+    resolutions. Rebind from validated plan outputs; do not trust resolution
+    output refs without validation.
+11. Increase TemplateInstance revision and record the decision.
+12. Stop on accepted, partial, fatal requirement failure, unchanged revision
+    hash, or configured iteration limit.
 
-#### Negotiation invariants
+Negotiation invariants:
 
-- Plan revision numbers increase monotonically.
-- Template instance revision numbers increase monotonically.
-- Canonical templates never change.
-- A binding references a real plan output.
-- A plan dependency references a real upstream step.
-- Cycles are rejected before execution.
+- Plan and TemplateInstance revisions increase monotonically.
+- Canonical TemplateDefinition content never changes.
+- Every binding resolves to an existing named output.
+- A rejected optional request activates its declared fallback.
+- A rejected required request fails negotiation unless its requirement defines
+  an accepted required fallback.
+- The same plan/template hash cannot start another iteration.
 
-#### Tests
+### 7.2 DAG scheduling
 
-- Template selects successfully from a fully compatible plan.
-- Missing optional data produces a fallback and `partial` status.
-- Missing feasible data causes PlanAgent to add a step.
-- Missing fatal data produces `failed` status.
-- The same plan/template revision hash stops the loop.
-- The maximum iteration limit prevents infinite negotiation.
-
-#### Acceptance criteria
-
-- Execution receives exactly one validated `FinalPlan` and one immutable
-  `TemplateInstance`.
-
-### Phase 3 — Data-aware DAG Scheduler
-
-#### Target modules
+Scheduler validates the FinalPlan before execution and maintains:
 
 ```text
-src/data_intelligence_sdk/reporting/scheduler.py
-src/data_intelligence_sdk/reporting/task_state.py
+pending -> ready -> running -> completed
+                           -> failed
+pending ------------------> skipped
 ```
 
-#### Tasks
+Algorithm:
 
-1. Validate the DAG before starting work:
-   - Unique step IDs.
-   - Existing dependencies.
-   - No cycles.
-   - Valid input/output references.
-2. Model node states: `pending`, `ready`, `running`, `completed`, `failed`, and
-   `skipped`.
-3. Mark a node ready only when its hard dependencies complete.
-4. Resolve input references into artifact references, not inline datasets.
-5. Use bounded concurrency with separate semaphores for data and chart tasks.
-6. Start chart tasks as soon as their required `ChartDataset` is available.
-7. Propagate failure according to required/optional edges.
-8. Support cancellation and timeouts without leaving a node marked running.
-9. Record scheduling transitions in the run trace.
-10. Return an execution summary with completed, failed, and skipped nodes.
+1. Build dependency and reverse-dependency indexes.
+2. Mark steps with no unresolved hard dependencies as ready.
+3. Dispatch ready steps while the data-task semaphore has capacity.
+4. Resolve corpus and upstream output references before routing.
+5. Execute one step through Router, optional code generation, ToolExecutor, and
+   DataStepProcessor.
+6. Register every DataOutput in a run-local output index using
+   `{step_id}.{output_name}`.
+7. Mark downstream steps ready as soon as all required dependencies complete.
+8. Skip consumers of failed required inputs; preserve optional-input warnings.
+9. Notify chart scheduling whenever a new bound output becomes available.
+10. On cancellation or timeout, move every started task to a terminal state.
 
-#### First implementation choice
+Scheduler is an in-process dispatcher and resource coordinator, not a
+distributed load balancer. Router still owns tool selection.
 
-Use in-process `asyncio` scheduling. Keep the scheduler interface independent of
-`asyncio` so a distributed implementation can replace it later.
+### 7.3 Routing and generated methods
 
-#### Tests
+For each ready step:
 
-- Independent nodes overlap in a controlled async test.
-- Dependent nodes never start early.
-- A chart starts after its dataset is ready without waiting for unrelated data
-  tasks.
-- A failed required dependency skips its consumer.
-- A failed optional chart does not fail the report.
-- Cancellation produces terminal states for all started nodes.
+1. Router receives one PlanStep, resolved input descriptors, and MethodHub
+   descriptors. It does not execute a method.
+2. For `existing_tool`, build ToolExecutionRequest and call ToolExecutor.
+3. For `generated_tool`, CodeAgent generates a complete interface and source.
+4. Sandbox runs structural and sample validation.
+5. ValidatorAgent returns pass/fail and actionable feedback.
+6. Correctable failures return to CodeAgent until the configured maximum.
+7. Register a validated generated method with its trust evidence.
+8. Execute it through the same ToolExecutor path as an existing method.
+9. Convert every exception into a structured ToolExecutionResult.
 
-#### Acceptance criteria
+An existing-method failure may fall back to code generation only once and only
+when the configured policy and PlanStep permit generated code.
 
-- Execution order follows data lineage.
-- Concurrency is observable and bounded.
+### 7.4 DataStepProcessor
 
-### Phase 4 — Unified routing and Tool Executor
-
-#### Target modules
+DataStepProcessor is one public workflow stage with internal deterministic
+helpers and an optional AnalysisAgent:
 
 ```text
-src/data_intelligence_sdk/reporting/routing.py
-src/data_intelligence_sdk/runtime/tool_executor.py
+DataStepProcessor
+|-- DataOutputStore
+|-- SchemaInferrer
+|-- DataProfiler
+|-- DataSampler
+|-- MetricCalculator
+|-- OutputValidator
+`-- AnalysisAgent
 ```
 
-#### Tasks
+Algorithm:
 
-1. Make RouterAgent return a validated route decision only.
-2. Introduce `ToolExecutionRequest` with tool name, arguments, expected output,
-   resource policy, and step ID.
-3. Route existing methods through Tool Executor.
-4. Route validated generated methods through the same Tool Executor.
-5. Centralize:
-   - Input validation.
-   - Timeouts.
-   - Retry policy.
-   - Trace recording.
-   - Exception normalization.
-   - Artifact creation.
-6. Decide and implement existing-tool failure fallback to code generation.
-7. Preserve MethodHub trust levels and InterfaceRegistry evidence.
+1. Match ToolExecutionResult named values to PlanStep output definitions.
+2. Validate expected output names and basic shapes.
+3. Persist large outputs; retain small outputs inline according to policy.
+4. Generate deterministic schema, profile, sample, and lineage.
+5. Compute only metrics explicitly requested by the PlanStep operation or
+   template-bound data requirement. Do not invent business metrics.
+6. Build a bounded AnalysisAgent input from step description, verified metrics,
+   schema, profile, and redacted sample.
+7. Ask AnalysisAgent for interpretation, caveats, and concise summary only.
+8. Validate the agent response and combine it with deterministic data into one
+   DataStepResult.
+9. If no LLM is configured, create a deterministic summary from verified
+   metrics and profile.
 
-#### Tests
+AnalysisAgent must not:
 
-- Existing and generated methods produce the same execution-result shape.
-- Invalid route arguments fail before method invocation.
-- Exceptions become structured failures with log references.
-- Retry and fallback limits are respected.
+- Call tools or execute code.
+- Recalculate metrics from sample rows.
+- Create chart datasets or ECharts options.
+- Modify data artifacts.
 
-#### Acceptance criteria
+### 7.5 ChartInputAssembler
 
-- No direct method call remains inside RouterAgent or DataScienceAgent.
-
-### Phase 5 — Data Runtime
-
-#### Target modules
+ChartInputAssembler is deterministic and has no LLM. It receives:
 
 ```text
-src/data_intelligence_sdk/runtime/data_artifacts.py
-src/data_intelligence_sdk/runtime/data_profiler.py
-src/data_intelligence_sdk/runtime/data_sampler.py
+TemplateInstance + TemplateBindings + DataStepResults + ArtifactStore
 ```
 
-#### Tasks
+Suggested structure:
 
-1. Define a `DataArtifactStore` protocol separate from string-only artifact
-   references if necessary.
-2. Store full step results in a supported format:
-   - JSON for small structured values.
-   - Parquet or Arrow for tabular data when dependencies are approved.
-3. Generate deterministic schema metadata.
-4. Generate bounded profiles:
-   - Row and column counts.
-   - Null counts.
-   - Numeric min/max/mean.
-   - Categorical cardinality.
-   - Time ranges.
-5. Generate bounded, deterministic samples with redaction.
-6. Keep large values out of trace metadata and prompts.
-7. Attach source dataset, method call, plan step, and upstream artifact lineage.
-8. Distinguish source data from a step result; prefer `step_result_ref` over the
-   ambiguous name `raw_data_ref`.
+```python
+class ChartInputAssembler:
+    def assemble_ready(
+        self,
+        template_instance,
+        bindings,
+        output_index,
+        completed_chart_ids,
+    ) -> ChartAssemblyResult:
+        ...
 
-#### Tests
-
-- Profiles are correct for empty, numeric, categorical, and time data.
-- Sampling respects row/byte limits.
-- Sensitive columns are redacted by policy.
-- Artifact URIs resolve during the run.
-- Traces contain refs and summaries, not full large datasets.
-
-#### Acceptance criteria
-
-- Downstream agents receive only bounded context plus resolvable references.
-
-### Phase 6 — DataScience task contract
-
-#### Target modules
-
-```text
-src/data_intelligence_sdk/reporting/data_science.py
-src/data_intelligence_sdk/reporting/chart_data.py
+    def _collect_chart_slots(self, template_instance): ...
+    def _resolve_bindings(self, chart_slot, bindings): ...
+    def _resolve_output(self, output_ref, output_index): ...
+    def _load_bounded_rows(self, data_output): ...
+    def _validate_shape_and_roles(self, chart_slot, outputs): ...
+    def _build_chart_request(self, chart_slot, outputs): ...
 ```
 
-#### Tasks
+Algorithm for each chart slot:
 
-1. Pass one validated `PlanStep`, resolved input artifacts, and template data
-   requirements into each DataScience task.
-2. Separate physical computation from interpretation:
-   - Tool/SQL/Pandas performs calculations.
-   - DataScience selects or requests transformations and interprets results.
-3. Return `DataStepResult` containing:
-   - Status and step ID.
-   - Step-result artifact.
-   - Analysis summary.
-   - Aggregated metrics.
-   - Zero or more `ChartDataset` objects.
-   - Warnings and lineage.
-4. Shape chart datasets according to template constraints:
-   - Projection.
-   - Filtering.
-   - Aggregation.
-   - Time-grain selection.
-   - Top-K plus optional `Other`.
-   - Binning.
-   - Sampling/downsampling.
-5. Store large chart datasets as artifacts and expose only profile/sample
-   inline.
-6. Ensure a metric is computed once and reused by narrative and charts.
-7. Handle empty or insufficient data explicitly.
+1. Resolve `data_requirement_refs` to TemplateBindings.
+2. Resolve every binding output ref through the run output index.
+3. Wait if a required producer step is still non-terminal.
+4. Return `insufficient_data` without an LLM call when a required terminal
+   output is unavailable or incompatible.
+5. Read inline values or bounded artifact rows.
+6. Validate schema, shape, semantic roles, units, cardinality, and point limit.
+7. Map semantic roles to concrete fields and series names.
+8. Build one ChartRequest containing only data needed by that chart slot.
+9. Preserve all source output and artifact references in lineage.
 
-#### Tests
+Allowed deterministic presentation operations:
 
-- A step consumes an upstream step artifact through its input ref.
-- KPI and chart data remain numerically consistent.
-- Top-K and `Other` preserve totals.
-- Time-series downsampling preserves chronological order.
-- Empty data returns a completed no-data result or a structured failure based
-  on policy.
+- Field projection and safe label renaming.
+- Declared chronological or categorical sorting.
+- Policy-approved deterministic downsampling with a warning.
+- Validation and bounded data loading.
 
-#### Acceptance criteria
+Disallowed operations:
 
-- Every required chart slot can resolve to a compatible chart dataset or a
-  documented fallback.
+- Business aggregation, joins, ratios, growth calculations, and new metrics.
+- Guessing missing semantic roles.
+- Combining incompatible populations.
 
-### Phase 7 — ChartInputAssembler and ECharts ChartAgent
+If a chart needs `e = c - d`, PlanAgent must add a downstream PlanStep that
+depends on the outputs containing c and d. ChartInputAssembler then consumes
+that derived step output.
 
-#### Target modules and resources
+### 7.6 Chart execution
 
-```text
-src/data_intelligence_sdk/reporting/chart_input.py
-src/data_intelligence_sdk/reporting/chart_agent.py
-src/data_intelligence_sdk/reporting/chart_validation.py
-.agents/skills/echarts-chart-agent/SKILL.md  # if repo-local is confirmed
-```
+1. Scheduler or ChartTaskRunner receives valid ChartRequests.
+2. Run independent requests concurrently under the chart semaphore.
+3. Invoke one stateless ChartAgent task per logical chart ID.
+4. Validate returned ECharts option as pure JSON.
+5. Reject functions, scripts, unsupported URLs, and invalid field encodings.
+6. Retry only correctable structural failures.
+7. Apply the chart slot fallback after retry exhaustion.
 
-#### Tasks
-
-1. Resolve `TemplateInstance.chart_slot_id` to the correct chart dataset.
-2. Validate semantic roles, required fields, units, cardinality, and point
-   limits before invoking ChartAgent.
-3. Skip the LLM call and return `insufficient_data` when input cannot satisfy
-   the slot.
-4. Invoke one stateless ChartAgent task per chart slot.
-5. Let ChartAgent choose among the allowed types but preserve the template
-   chart ID and intent.
-6. Generate ECharts option as pure JSON.
-7. Reject functions, arbitrary scripts, unapproved URLs, or unsupported ECharts
-   features.
-8. Validate axis types, encodings, series fields, units, legend behavior, and
-   dataset references.
-9. Retry only correctable structural failures.
-10. Apply slot fallback after retry exhaustion.
-11. Run independent chart tasks concurrently under a chart semaphore.
-
-#### Chart ID rule
+Chart ID format:
 
 ```text
 {template_id}.{section_id}.{chart_slot_id}[.{instance_key}]
 ```
 
-Random IDs may be used only for the containing report run, not for logical chart
-identity.
+### 7.7 Report and render
 
-#### Tests
+ReportAgent receives TemplateInstance, DataStepResults, ChartResults, user goal,
+and evidence references. It must:
 
-- Multiple chart slots execute concurrently.
-- A chart waits only for its declared dataset.
-- An invalid ECharts option is rejected.
-- JavaScript functions are rejected.
-- Optional chart failure becomes table/message fallback.
-- Chart IDs are deterministic.
+1. Preserve template section and block order.
+2. Insert content only into declared blocks.
+3. Use deterministic metrics as the source of numeric facts.
+4. Reference charts by deterministic chart ID.
+5. Preserve source refs for facts, tables, recommendations, and charts.
+6. Mark missing optional blocks and fallbacks explicitly.
+7. Return JSON matching the StructuredReport schema.
 
-#### Acceptance criteria
+Renderer receives the same StructuredReport for HTML or Markdown. It escapes
+all text, embeds safe ECharts JSON for HTML, and applies deterministic table or
+message fallbacks for Markdown charts.
 
-- ChartResult is safe, JSON-serializable, and traceable to one or more data
-  artifacts.
+## 8. Concurrency and resource policy
 
-### Phase 8 — Structured ReportAgent
+Initial configurable defaults:
 
-#### Target modules
+| Resource | Default maximum |
+| --- | ---: |
+| Plan/Template negotiation calls | 1 |
+| Router calls | 4 |
+| Data step executions | 4 |
+| Code generation calls | 1 |
+| Sandbox executions | 1 |
+| AnalysisAgent calls | 4 |
+| ChartAgent calls | 2 |
+| Plan/Template iterations | 3 |
+| Generated-code attempts | 2 |
+| Chart structural retries | 1 |
 
-```text
-src/data_intelligence_sdk/reporting/report_agent.py
-src/data_intelligence_sdk/reporting/report_validation.py
-```
+Additional limits:
 
-#### Tasks
+- Per-source database concurrency.
+- Tool timeout and maximum result bytes.
+- Maximum inline rows and bytes.
+- Profile and sample row/byte limits.
+- Maximum chart points per slot.
+- Global LLM request concurrency and token budget when available.
 
-1. Change ReportAgent output from Markdown text to `StructuredReport` JSON.
-2. Pass TemplateInstance, DataStepResults, and ChartResults as separate inputs.
-3. Preserve template section and block order.
-4. Insert content only into declared blocks.
-5. Reference charts by deterministic chart ID.
-6. Preserve source/artifact lineage for facts and metrics.
-7. Mark missing optional blocks and fallbacks explicitly.
-8. Validate structure before rendering.
-9. Keep an offline deterministic fallback report builder.
+Independent existing-tool and generated-tool branches may overlap, but code
+generation and sandbox work use their own smaller semaphores.
 
-#### Tests
+## 9. Failure transitions
 
-- Output follows the TemplateInstance layout.
-- Duplicate facts and charts are not emitted.
-- Missing optional chart uses its declared fallback.
-- Required missing content produces partial/failed status according to policy.
-- Every chart reference resolves.
+| Failure | Transition |
+| --- | --- |
+| Invalid initial plan | Retry PlanAgent, then fail negotiation |
+| Missing optional template data | Activate fallback and return partial |
+| Missing required template data | Revise plan or fail negotiation |
+| Same negotiation revision hash | Stop with partial/failed result |
+| Existing method unavailable | Generated route if policy permits |
+| Existing method execution failure | One generated fallback if permitted |
+| Generated code validation failure | Retry CodeAgent to configured limit |
+| Required DAG dependency failure | Skip dependent step |
+| Optional DAG input failure | Continue with warning when contract permits |
+| DataOutput shape mismatch | Fail step; do not pass invalid output downstream |
+| AnalysisAgent failure | Use deterministic summary and warning |
+| Chart input insufficient | Skip LLM and apply chart fallback |
+| Invalid ECharts JSON | Structural retry, then fallback |
+| Optional chart failure | Partial report |
+| Required report block unresolved | Partial or failed according to template |
+| Renderer failure | Preserve StructuredReport and return render error |
 
-#### Acceptance criteria
-
-- Report content is independent of HTML or Markdown concerns.
-
-### Phase 9 — Renderer boundary
-
-#### Target modules
-
-```text
-src/data_intelligence_sdk/reporting/renderers/base.py
-src/data_intelligence_sdk/reporting/renderers/html.py
-src/data_intelligence_sdk/reporting/renderers/markdown.py
-```
-
-#### Tasks
-
-1. Define a Renderer protocol accepting `StructuredReport` and render options.
-2. Implement HTML rendering with safe ECharts initialization.
-3. Implement Markdown rendering with configurable chart fallback:
-   - Image artifact when a chart-image renderer is available.
-   - Table.
-   - Link/placeholder.
-4. Escape all narrative and label content for the target format.
-5. Resolve value-format tokens such as currency and percentage through a
-   whitelist.
-6. Emit render warnings separately from analysis warnings.
-7. Store large HTML output as an artifact when configured.
-8. Decide whether Renderer lives inside ReportEngine or is invoked by the
-   outer Synthesizer. Prefer ReportEngine returning structured output plus
-   optional render artifacts while the outer pipeline preserves evidence.
-
-#### Tests
-
-- Snapshot-like assertions for stable HTML and Markdown fixtures.
-- Escaping prevents script injection.
-- Chart option JSON is embedded safely.
-- Markdown fallback is deterministic.
-- Renderer does not change metric values or narrative meaning.
-
-#### Acceptance criteria
-
-- The same StructuredReport can produce at least HTML and Markdown.
-
-### Phase 10 — Observability and failure handling
-
-#### Tasks
-
-1. Record every agent invocation, task transition, method call, artifact, chart,
-   fallback, and render result in `EngineRunContext`.
-2. Use correlation fields:
-   - `run_id`.
-   - `plan_revision`.
-   - `template_instance_id`.
-   - `step_id`.
-   - `chart_id`.
-   - `artifact_id`.
-3. Redact connection strings and sensitive sample values.
-4. Define summary metadata for `EngineOutput` without embedding large objects.
-5. Expose partial-report warnings to the final response.
-6. Add metrics for negotiation iterations, task duration, concurrency, cache
-   hits, retries, fallbacks, and token usage when available.
-
-#### Acceptance criteria
-
-- A report fact or chart can be traced back to its plan step, method call, and
-  source artifact.
-
-### Phase 11 — Integration and migration
-
-#### Tasks
-
-1. Extract the current agent classes from the monolithic `report.py` into the
-   reporting modules incrementally.
-2. Keep a compatibility facade named `ReportEngine`.
-3. Add a feature flag or constructor option for `workflow_version="v1"|"v2"`
-   during migration.
-4. Run v1 and v2 against the same deterministic fixtures and compare:
-   - Completed steps.
-   - Metrics.
-   - Evidence.
-   - User-visible content.
-5. Update `examples/basic_workflow.py` to demonstrate template selection and
-   render-format selection.
-6. Add one full offline example using the repository data corpus package.
-7. Make v2 the default only after compatibility and failure-path tests pass.
-8. Remove v1 after a documented deprecation window.
-
-#### Acceptance criteria
-
-- Existing public engine construction remains valid.
-- No live external services are needed for the test suite.
-- The example produces a structured report and at least one rendered format.
-
-## 7. Recommended implementation sequence
-
-Follow this order because each milestone creates stable inputs for the next:
-
-1. Template JSON/schema and package resources.
-2. Report contracts and TemplatePool loader.
-3. Plan output references and DAG validation.
-4. TemplateAgent and bounded negotiation loop.
-5. Unified Tool Executor.
-6. Data artifact/profile/sample runtime.
-7. DataScience `DataStepResult` and chart datasets.
-8. In-process DAG Scheduler.
-9. ChartInputAssembler.
-10. ECharts ChartAgent skill, agent, and validator.
-11. Structured ReportAgent.
-12. HTML and Markdown renderers.
-13. Full tracing, failure tests, examples, and migration flag.
-
-The scheduler can be prototyped earlier, but it should not become the default
-until data references and task-result contracts are stable.
-
-## 8. Parallel work opportunities
-
-After contracts are frozen, these workstreams can proceed independently:
+## 10. Target modules
 
 ```text
-TemplatePool loader ----+
-                        +--> Plan/Template negotiation
-Plan contracts ---------+
+src/data_intelligence_sdk/reporting/
+|-- contracts.py
+|-- configuration.py
+|-- planning.py
+|-- template_pool.py
+|-- template_agent.py
+|-- negotiation.py
+|-- scheduler.py
+|-- task_state.py
+|-- routing.py
+|-- data_step_processor.py
+|-- analysis_agent.py
+|-- chart_input.py
+|-- chart_agent.py
+|-- chart_validation.py
+|-- report_agent.py
+|-- report_validation.py
+`-- renderers/
+    |-- base.py
+    |-- html.py
+    `-- markdown.py
 
-Artifact Store ---------+
-Profiler/Sampler -------+--> DataScience result contract
-Tool Executor ----------+
-
-Chart skill ------------+
-Chart validator --------+--> ChartAgent integration
-
-Structured report ------+
-HTML renderer ----------+--> Report/Renderer integration
-Markdown renderer ------+
+src/data_intelligence_sdk/runtime/
+|-- tool_executor.py
+|-- data_artifacts.py
+|-- data_profiler.py
+`-- data_sampler.py
 ```
 
-Do not parallelize components that are still negotiating their shared JSON
-contract; that creates avoidable rework.
+`DataStepProcessor` is the public stage. Runtime helpers remain separate small
+classes/functions for deterministic testing and reuse; they are not additional
+workflow agents.
 
-## 9. Test strategy
+## 11. Phase-by-phase implementation
+
+### Phase 0 - Freeze contracts and configuration
+
+Tasks:
+
+1. Implement all contract models and JSON serialization.
+2. Implement contract validators and stable error codes.
+3. Add ReportWorkflowConfig with every loop, retry, timeout, artifact, sample,
+   and concurrency limit.
+4. Freeze required/optional failure policy and generated fallback policy.
+
+Acceptance:
+
+- Every example payload in this document parses and validates.
+- No agent consumes an unvalidated dictionary.
+- No loop or retry uses a hard-coded limit outside configuration defaults.
+
+### Phase 1 - TemplatePool foundation
+
+Tasks:
+
+1. Load packaged resources with `importlib.resources`.
+2. Validate manifest, schema version, requirement references, block references,
+   and chart-slot references.
+3. Expose lightweight descriptors without loading every template body.
+4. Support application templates with explicit precedence.
+5. Return immutable TemplateDefinitions.
+
+Acceptance:
+
+- Built-in templates load from an installed wheel.
+- Canonical definitions cannot be mutated by a run.
+
+### Phase 2 - Plan/Template negotiation
+
+Tasks:
+
+1. Upgrade PlanAgent output to ReportPlan and PlanRevisionResponse.
+2. Implement named PlanStep inputs and outputs.
+3. Implement TemplateAgent selection and cloning.
+4. Implement one-to-many TemplateBindings.
+5. Implement batched MissingDataRequests and RequestResolutions.
+6. Implement NegotiationRunner, revision history, hash progress detection, and
+   configured iteration limit.
+7. Record every revision and decision in EngineRunContext.
+
+Acceptance:
+
+- Execution receives exactly one validated FinalPlan and TemplateInstance.
+- Mixed feasible and infeasible missing requests resolve in one iteration.
+- Agents do not depend on hidden in-memory plan state.
+
+### Phase 3 - DAG Scheduler
+
+Tasks:
+
+1. Validate dependencies, output refs, and cycles.
+2. Implement node states and ready queue.
+3. Resolve upstream DataOutput refs before step dispatch.
+4. Implement bounded asyncio execution and cancellation.
+5. Implement required/optional dependency failure propagation.
+6. Emit output-ready events for chart scheduling.
+
+Acceptance:
+
+- Independent steps overlap under a controlled test.
+- Dependent steps never start before required outputs exist.
+
+### Phase 4 - Router and ToolExecutor
+
+Tasks:
+
+1. Make RouterAgent return validated RouteDecision only.
+2. Introduce ToolExecutionRequest and ToolExecutionResult.
+3. Route existing methods through ToolExecutor.
+4. Route validated generated methods through ToolExecutor.
+5. Centralize argument validation, trust checks, timeout, retry, tracing,
+   exception normalization, and named output validation.
+6. Implement the configured existing-to-generated fallback.
+
+Acceptance:
+
+- Existing and generated methods return identical result shapes.
+- No RouterAgent or AnalysisAgent directly invokes MethodHub callables.
+
+### Phase 5 - DataStepProcessor
+
+Tasks:
+
+1. Implement inline/artifact DataOutput storage.
+2. Implement deterministic schema, profile, sample, and redaction.
+3. Implement metric calculation from declared operations only.
+4. Implement AnalysisAgent with bounded verified context.
+5. Add deterministic no-LLM summary.
+6. Return validated DataStepResult and register outputs in the run index.
+
+Acceptance:
+
+- Metrics are computed once and reused by report and charts.
+- Large data remains outside prompts and trace metadata.
+- AnalysisAgent cannot alter deterministic values.
+
+### Phase 6 - ChartInputAssembler
+
+Tasks:
+
+1. Resolve chart slots through requirements and bindings.
+2. Support one or many source output refs.
+3. Load bounded inline/artifact data.
+4. Validate shapes, roles, units, cardinality, and point limits.
+5. Build one minimal ChartRequest per ready slot.
+6. Return structured failures without an LLM call for insufficient data.
+7. Preserve source output and artifact lineage.
+
+Acceptance:
+
+- One chart can consume outputs from multiple independent steps.
+- A derived metric cannot be created inside ChartInputAssembler.
+
+### Phase 7 - ChartAgent and validation
+
+Tasks:
+
+1. Invoke one stateless task per ChartRequest.
+2. Generate pure JSON ECharts options.
+3. Validate chart types, axes, series, encodings, legends, units, and URLs.
+4. Reject executable functions and arbitrary scripts.
+5. Implement bounded structural retry and template fallback.
+6. Run independent requests concurrently.
+
+Acceptance:
+
+- ChartResults are safe, deterministic in identity, and traceable to all source
+  outputs.
+
+### Phase 8 - StructuredReport and renderers
+
+Tasks:
+
+1. Implement StructuredReport schema and validator.
+2. Update ReportAgent to consume TemplateInstance, DataStepResults, and
+   ChartResults separately.
+3. Preserve block order, source refs, warnings, and fallback status.
+4. Implement deterministic offline report builder.
+5. Implement safe HTML/ECharts renderer.
+6. Implement Markdown renderer with table/message chart fallback.
+
+Acceptance:
+
+- The same StructuredReport renders to HTML and Markdown.
+- Renderer does not change metrics or narrative meaning.
+
+### Phase 9 - Observability, migration, and hardening
+
+Tasks:
+
+1. Record agent calls, revisions, task transitions, executions, outputs, charts,
+   fallbacks, and renders in EngineRunContext.
+2. Add correlation fields for run, plan revision, template instance, step,
+   execution, artifact, and chart IDs.
+3. Add `workflow_version="v1"|"v2"` to ReportEngine during migration.
+4. Compare v1 and v2 on deterministic fixtures.
+5. Update examples to demonstrate template and render-format selection.
+6. Build and inspect a wheel for all template resources.
+
+Acceptance:
+
+- Existing public construction remains valid.
+- The full offline test suite needs no external services.
+- v2 produces StructuredReport and at least one rendered format.
+
+## 12. Test strategy
 
 ### Unit tests
 
-- Template loading and validation.
-- DAG validation and scheduling.
-- Route and tool execution normalization.
-- Data profiling, sampling, aggregation, and chart shaping.
-- Chart input matching and ECharts validation.
-- Structured report validation.
-- Renderer escaping and fallbacks.
+- Contract serialization, validation, and error codes.
+- Template loading, immutability, and cross-references.
+- Plan DAG validation and output reference resolution.
+- Negotiation batching, mixed resolutions, progress hash, and iteration limit.
+- Scheduler state transitions, concurrency, cancellation, and failure propagation.
+- Router decisions and ToolExecutor normalization.
+- Inline/artifact storage, profiling, sampling, metrics, and redaction.
+- AnalysisAgent input bounding and deterministic fallback.
+- Chart binding, multi-output assembly, and insufficient-data handling.
+- ECharts validation and function/script rejection.
+- StructuredReport validation and renderer escaping.
 
 ### Contract tests
 
-- Agent prompt output parses into the declared contract.
-- Every template requirement reference exists.
-- Every TemplateInstance binding resolves to a plan output.
-- Every ChartRequest resolves to a compatible ChartDataset.
-- Every report chart block resolves to a ChartResult or fallback.
+- Every agent response parses into its declared contract.
+- Every TemplateBinding resolves to one or more real Plan outputs.
+- Every PlanStep input resolves to corpus data or an upstream DataOutput.
+- Every ToolExecutionResult output matches the PlanStep output definition.
+- Every ChartRequest source resolves to a DataOutput.
+- Every report chart block resolves to ChartResult or declared fallback.
+- Every numeric report fact references a deterministic metric or DataOutput.
 
 ### Integration scenarios
 
-1. Full data with executive template and two charts.
-2. Missing optional time dimension with a table/message fallback.
-3. Template asks for feasible missing data and PlanAgent adds a task.
-4. Template asks for impossible required data and negotiation fails cleanly.
-5. Existing tool succeeds.
-6. Existing tool fails and generated fallback is attempted when enabled.
-7. Generated tool fails validation repeatedly and stops at its limit.
-8. Independent DataScience and chart tasks overlap.
-9. One optional chart fails while the report completes partially.
-10. Empty corpus produces a deterministic no-data report.
+1. Executive overview with headline metrics and two charts.
+2. Missing optional time dimension activates a message fallback.
+3. Two missing requests: one feasible and one rejected in the same revision.
+4. Missing fatal requirement fails negotiation cleanly.
+5. Independent existing-tool and generated-tool branches overlap safely.
+6. Existing tool fails and uses generated fallback when policy permits.
+7. Generated code repeatedly fails validation and stops at its limit.
+8. A downstream step consumes two upstream DataOutputs.
+9. One chart consumes outputs from two independent steps.
+10. A derived chart metric is produced by an explicit downstream PlanStep.
+11. Optional chart failure produces a partial report.
+12. Empty corpus produces a deterministic no-data report.
+13. Large output uses an artifact while prompts contain bounded context only.
+14. The same StructuredReport renders to HTML and Markdown.
 
 ### Packaging tests
 
 - Build a wheel.
-- Inspect the wheel for manifest, schema, and all built-in templates.
-- Install the wheel in an isolated environment.
+- Inspect it for manifest, schema, and all built-in templates.
+- Install it into an isolated environment.
 - Load every template through `importlib.resources`.
 
-## 10. Rollout checkpoints
+## 13. Recommended implementation order
 
-### Milestone A — Template-ready
+1. Contracts and ReportWorkflowConfig.
+2. TemplatePool loader and immutable definitions.
+3. ReportPlan named outputs and DAG validation.
+4. TemplateAgent and NegotiationRunner.
+5. Scheduler and run-local output index.
+6. Router contract and unified ToolExecutor.
+7. DataOutput storage and DataStepProcessor.
+8. ChartInputAssembler with multi-output support.
+9. ChartAgent and ECharts validator.
+10. StructuredReport and report validation.
+11. HTML and Markdown renderers.
+12. Tracing, examples, failure tests, packaging tests, and migration flag.
 
-- Built-in pool is packaged.
-- Loader and contracts are stable.
-- Template selection works without modifying ReportEngine execution.
+Do not parallelize components that are still negotiating a shared contract.
+After contracts are frozen, TemplatePool, ToolExecutor, deterministic data
+helpers, chart validation, and renderers can be implemented independently.
 
-### Milestone B — Data-aware execution
+## 14. Rollout checkpoints
 
-- Named outputs and data dependencies work.
-- Tool results become artifacts with profiles and samples.
-- DataScience emits DataStepResult.
+### Milestone A - Template-ready
 
-### Milestone C — Parallel charts
+- Contracts and configuration are stable.
+- Built-in templates load from package resources.
+- Plan/Template negotiation returns FinalPlan and TemplateInstance.
 
-- Chart datasets bind to template slots.
-- Independent ECharts tasks run concurrently.
-- Invalid or missing chart inputs fall back safely.
+### Milestone B - Data-aware execution
 
-### Milestone D — Structured report
+- Named inputs and outputs carry real lineage.
+- Scheduler runs independent steps concurrently.
+- Existing and generated tools share ToolExecutor.
+- DataStepProcessor emits validated DataStepResults.
 
-- ReportAgent emits validated JSON.
-- HTML and Markdown renderers produce deterministic outputs.
+### Milestone C - Parallel charts
 
-### Milestone E — Production hardening
+- ChartInputAssembler resolves one or multiple outputs per slot.
+- Independent ChartAgent tasks run concurrently.
+- Invalid or missing chart inputs use explicit fallbacks.
 
-- Observability, redaction, timeouts, retries, and partial failures are covered.
+### Milestone D - Structured report
+
+- ReportAgent emits validated StructuredReport JSON.
+- HTML and Markdown renderers produce deterministic output.
+
+### Milestone E - Production hardening
+
+- Limits, timeouts, redaction, retries, partial failures, and lineage are tested.
 - v2 passes integration and packaging tests and becomes the default.
 
-## 11. Definition of done
+## 15. Definition of done
 
-The new report workflow is complete when:
+Report Engine v2 is complete when:
 
-- TemplateAgent selects and adapts a packaged template.
-- PlanAgent and TemplateAgent converge within a bounded loop.
-- Data dependencies pass real upstream artifacts to downstream steps.
-- Independent work runs concurrently under configured limits.
-- Existing and generated tools share one execution contract.
-- Large datasets remain outside LLM context and trace metadata.
+- PlanAgent and TemplateAgent converge within a bounded, auditable loop.
+- Every plan dependency carries a real named DataOutput reference.
+- Scheduler starts work only when required dependencies are available.
+- Existing and generated methods share one execution contract.
+- DataStepProcessor keeps deterministic values separate from LLM interpretation.
+- Large datasets stay outside LLM context and trace metadata.
+- A chart can consume one or multiple step outputs.
+- Derived chart metrics are explicit PlanSteps, never hidden chart calculations.
 - Every required chart resolves to safe ECharts JSON or an explicit fallback.
-- ReportAgent produces a validated StructuredReport.
-- HTML and Markdown can be rendered from the same report object.
-- Partial and failed states are user-visible and auditable.
-- All artifacts, facts, and charts have lineage in EngineTrace/EvidenceBundle.
-- Unit, integration, failure-path, and wheel packaging tests pass without live
-  external calls.
+- ReportAgent produces validated StructuredReport JSON.
+- HTML and Markdown render from the same report object.
+- Partial and failed states are visible and auditable.
+- Every fact and chart traces back to plan, execution, output, and source.
+- Unit, contract, integration, failure-path, and packaging tests pass offline.
 
-## 12. Immediate next implementation slice
+## 16. Immediate next implementation slice
 
-The first code slice after this plan should be deliberately small:
+The next mergeable slice should establish contracts without changing current
+v1 execution:
 
-1. Add report template dataclasses/contracts.
-2. Implement the `importlib.resources` TemplatePool loader.
-3. Validate manifest references and cross-references in all three templates.
-4. Add TemplatePool unit tests and wheel-content test.
-5. Add a read-only TemplateAgent selector that returns a cloned
-   TemplateInstance but does not yet modify the existing ReportEngine flow.
-
-This slice provides a stable foundation and can be merged without introducing
-concurrency or changing current report output behavior.
+1. Add `reporting/contracts.py` with ReportPlan, TemplateInstance,
+   TemplateBinding, MissingDataRequest, PlanRevisionResponse, and validators.
+2. Add ReportWorkflowConfig with negotiation and generation limits.
+3. Implement the `importlib.resources` TemplatePool loader.
+4. Add a read-only TemplateAgent selector that clones TemplateInstance.
+5. Implement pure binding validation for one and multiple output refs.
+6. Add contract and TemplatePool tests, including wheel-content coverage.
+7. Keep existing ReportEngine behavior behind `workflow_version="v1"` until the
+   negotiation contracts are stable.
