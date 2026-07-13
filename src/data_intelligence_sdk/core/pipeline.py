@@ -58,11 +58,11 @@ class DataIntelligencePipeline:
         self.log_store = log_store
         self.resource_manager = resource_manager
         self.logger = logger
+        self.max_spec_revision_rounds = max_spec_revision_rounds
 
     def _log(self, event: str, payload: dict[str, object] | None = None) -> None:
         if self.logger is not None:
             self.logger.log(event, payload or {})
-        self.max_spec_revision_rounds = max_spec_revision_rounds
 
     def run(
         self,
@@ -98,8 +98,6 @@ class DataIntelligencePipeline:
                 "data_requirement_count": len(spec.data_requirements),
             },
         )
-        confirmed_spec = self.spec_confirmation.confirm(
-            spec, session_context, user_context
         confirmed_spec = self._confirm_spec(
             spec,
             query,
