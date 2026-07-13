@@ -20,6 +20,7 @@ if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
+from data_intelligence_sdk.runtime import FileRuntimeLogger
 from basic_workflow import create_report_pipeline
 
 DEFAULT_PACKAGE = EXAMPLES_DIR / "data_corpus_package" / "data_corpus_package.json"
@@ -97,6 +98,21 @@ def main() -> None:
         default="Create a report about this data corpus.",
         help="Report request to send through the pipeline.",
     )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Write structured pipeline trace events. Enabled by default.",
+    )
+    parser.add_argument(
+        "--no-trace",
+        action="store_true",
+        help="Disable structured pipeline trace logging.",
+    )
+    parser.add_argument(
+        "--trace-log-path",
+        default="logs/pipeline.log",
+        help="Path used for structured pipeline trace events.",
+    )
     args = parser.parse_args()
 
     if args.package_path:
@@ -104,7 +120,9 @@ def main() -> None:
     else:
         corpus_package = DataCorpusPackage(sources=list(args.sources or []))
 
-    pipeline = create_report_pipeline()
+    pipeline = create_report_pipeline(
+        logger=None if args.no_trace else FileRuntimeLogger(args.trace_log_path)
+    )
     response = pipeline.run(UserQuery(args.query), corpus_package)
     report = response.answer
     if isinstance(report, str):

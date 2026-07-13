@@ -1,0 +1,24 @@
+{"event": "pipeline.start", "payload": {"query": "Create a report about this data corpus", "source_count": 2, "has_schema": true, "has_metadata": true}}
+{"event": "pipeline.intent_analyzed", "payload": {"intent": "report"}}
+{"event": "pipeline.spec_built", "payload": {"intent": "report", "objective": "Create a report about this data corpus", "capability_count": 4, "data_requirement_count": 2}}
+{"event": "pipeline.spec_confirmed", "payload": {"confirmed": true, "engine_hint": null}}
+{"event": "pipeline.engine_selected", "payload": {"engine_name": "report"}}
+{"event": "pipeline.engine_completed", "payload": {"engine_name": "report", "step_count": 1, "method_call_count": 0}}
+{"event": "pipeline.evidence_collected", "payload": {"source_count": 2, "step_count": 1, "method_call_count": 0}}
+{"event": "pipeline.completed", "payload": {"answer_type": "str", "engine_name": "report"}}
+{"event": "pipeline.start", "payload": {"query": "Create a report about this data corpus", "source_count": 2, "has_schema": true, "has_metadata": true}}
+{"event": "pipeline.intent_analyzed", "payload": {"intent": "report"}}
+{"event": "pipeline.spec_built", "payload": {"intent": "report", "objective": "Create a report about this data corpus", "capability_count": 4, "data_requirement_count": 2}}
+{"event": "pipeline.spec_confirmed", "payload": {"confirmed": true, "engine_hint": null}}
+{"event": "pipeline.engine_selected", "payload": {"engine_name": "report"}}
+{"event": "pipeline.engine_completed", "payload": {"engine_name": "report", "step_count": 1, "method_call_count": 0}}
+{"event": "pipeline.evidence_collected", "payload": {"source_count": 2, "step_count": 1, "method_call_count": 0}}
+{"event": "pipeline.completed", "payload": {"answer_type": "str", "engine_name": "report"}}
+{"event": "pipeline.start", "payload": {"query": "Create a report about this data corpus", "source_count": 2, "has_schema": true, "has_metadata": true}}
+{"event": "pipeline.intent_analyzed", "payload": {"intent": "report"}}
+{"event": "pipeline.spec_built", "payload": {"intent": "report", "objective": "Create a report about this data corpus", "capability_count": 4, "data_requirement_count": 2}}
+{"event": "pipeline.spec_confirmed", "payload": {"confirmed": true, "engine_hint": null}}
+{"event": "pipeline.engine_selected", "payload": {"engine_name": "general_purpose"}}
+{"event": "pipeline.engine_completed", "payload": {"engine_name": "general_purpose", "step_count": 1, "method_call_count": 8}}
+{"event": "pipeline.evidence_collected", "payload": {"source_count": 2, "step_count": 1, "method_call_count": 8}}
+{"event": "pipeline.completed", "payload": {"answer_type": "str", "engine_name": "general_purpose"}}

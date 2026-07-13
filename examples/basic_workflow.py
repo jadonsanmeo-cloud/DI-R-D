@@ -29,6 +29,7 @@ from data_intelligence_sdk.methods import register_csv_methods, register_vector_
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
+from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 
 
@@ -166,6 +167,7 @@ def create_example_pipeline(
     interface_registry: object | None = None,
     interface_builder: object | None = None,
     sandbox_executor: object | None = None,
+    logger: RuntimeLogger | None = None,
 ) -> DataIntelligencePipeline:
     method_hub = method_hub or MethodHub()
     if not method_hub.list_methods():
@@ -195,6 +197,7 @@ def create_example_pipeline(
         interface_registry=interface_registry,
         interface_builder=interface_builder,
         sandbox_executor=sandbox_executor,
+        logger=logger,
     )
 
 
@@ -202,6 +205,7 @@ def create_report_pipeline(
     *,
     method_hub: MethodHub | None = None,
     interface_registry: object | None = None,
+    logger: RuntimeLogger | None = None,
 ) -> DataIntelligencePipeline:
     """Create an offline report-generation pipeline for examples."""
 
@@ -209,4 +213,5 @@ def create_report_pipeline(
         engine=ReportEngine(),
         method_hub=method_hub,
         interface_registry=interface_registry,
+        logger=logger,
     )
