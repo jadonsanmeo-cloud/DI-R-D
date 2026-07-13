@@ -2,7 +2,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from data_intelligence_sdk.core.types import DataCorpusPackage, ExecutionSpec
+from data_intelligence_sdk.core.types import (
+    CapabilityRequirement,
+    DataCorpusPackage,
+    ExecutionSpec,
+)
 import data_intelligence_sdk.engines.report as report_module
 from data_intelligence_sdk.engines.report import ReportEngine
 from data_intelligence_sdk.methods.csv import register_csv_methods
@@ -83,7 +87,8 @@ class ReportEngineTests(unittest.TestCase):
         self.assertIn("code_agent", step_names)
         self.assertIn("validator_agent", step_names)
         self.assertIn("datascience_agent", step_names)
-        self.assertEqual(step_names[-1], "report_agent")
+        self.assertIn("report_agent", step_names)
+        self.assertEqual(step_names[-1], "renderer")
 
     def test_report_engine_routes_existing_method_to_datascience_agent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -131,11 +136,14 @@ class ReportEngineTests(unittest.TestCase):
     def test_prompt_constants_are_english(self) -> None:
         prompt_names = [
             "PLAN_AGENT_PROMPT",
+            "TEMPLATE_AGENT_PROMPT",
             "ROUTER_AGENT_PROMPT",
             "CODE_AGENT_PROMPT",
             "VALIDATOR_AGENT_PROMPT",
             "DATASCIENCE_AGENT_PROMPT",
+            "CHART_AGENT_PROMPT",
             "REPORT_AGENT_PROMPT",
+            "STRUCTURED_REPORT_AGENT_PROMPT",
         ]
 
         for prompt_name in prompt_names:
@@ -143,6 +151,145 @@ class ReportEngineTests(unittest.TestCase):
             self.assertIn("You are", prompt)
             self.assertNotIn("Bạn là", prompt)
             self.assertNotIn("Tác tử", prompt)
+
+    def test_confirmed_orders_spec_produces_scoped_structured_plan(self) -> None:
+        source = "postgresql://data_intelligence:data_intelligence@localhost:2345/data_corpus"
+        selected_columns = [
+            "order_id",
+            "customer_id",
+            "country",
+            "status",
+            "revenue",
+        ]
+        method_hub = MethodHub()
+        method_hub.register(
+            "inspect_orders",
+            lambda: [
+                {
+                    "country": "US",
+                    "status": "completed",
+                    "order_count": 2,
+                    "total_revenue": 30.0,
+                },
+                {
+                    "country": "CA",
+                    "status": "pending",
+                    "order_count": 1,
+                    "total_revenue": 7.0,
+                },
+            ],
+            capability_names=["inspect_data", "aggregate_data"],
+            metadata={"description": "Inspect and aggregate the orders table."},
+        )
+        spec = ExecutionSpec(
+            intent="report",
+            objective=(
+                "Create a structured report describing the orders table in the "
+                "available data package without using document chunks or document sources."
+            ),
+            data_requirements=[source],
+            capability_requirements=[
+                CapabilityRequirement(name="inspect_data"),
+                CapabilityRequirement(name="aggregate_data"),
+                CapabilityRequirement(name="generate_report"),
+            ],
+            constraints={
+                "scope": {
+                    "sources": [source],
+                    "tables": ["orders"],
+                    "vector_collections": [],
+                    "documents": [],
+                },
+                "columns": {"orders": selected_columns},
+                "filters": {},
+                "group_by": ["country", "status"],
+                "metrics": [
+                    {
+                        "name": "order_count",
+                        "field": "order_id",
+                        "aggregation": "count",
+                    },
+                    {
+                        "name": "total_revenue",
+                        "field": "revenue",
+                        "aggregation": "sum",
+                    },
+                ],
+                "output_format": "structured_report",
+                "language": None,
+                "evidence_required": True,
+                "selected_data_context": {
+                    "selected_sources": [source],
+                    "selected_tables": ["orders"],
+                    "selected_columns": {"orders": selected_columns},
+                    "selected_vector_collections": [],
+                    "selected_documents": [],
+                    "missing_information": [],
+                    "confidence": 0.99,
+                },
+            },
+            confirmed=True,
+            engine_hint="report",
+        )
+        corpus = DataCorpusPackage(
+            sources=[source, "postgresql://example/document_store"],
+            schemas={
+                "tables": {
+                    "orders": {"columns": selected_columns},
+                    "customers": {"columns": ["customer_id", "segment"]},
+                },
+                "vector_collections": {
+                    "document_chunks": {"columns": ["chunk_id", "content"]}
+                },
+            },
+            metadata={
+                "catalog": {
+                    "summary": "Orders plus document data.",
+                    "datasets": [
+                        {"name": "orders", "kind": "db_table"},
+                        {"name": "document_chunks", "kind": "vectordb_collection"},
+                    ],
+                }
+            },
+        )
+
+        output = ReportEngine().run(
+            spec,
+            corpus,
+            EngineRuntimeContext(method_hub=method_hub),
+        )
+
+        self.assertIsInstance(output.result, dict)
+        self.assertEqual(output.metadata["orchestration"], "langgraph")
+        self.assertEqual(output.metadata["report_format"], "structured_report")
+        self.assertEqual(output.metadata["plan"]["scope"]["tables"], ["orders"])
+        self.assertEqual(output.metadata["plan"]["scope"]["vector_collections"], [])
+        self.assertEqual(output.metadata["plan"]["scope"]["documents"], [])
+        self.assertEqual(
+            [step["step_id"] for step in output.metadata["plan"]["steps"]],
+            ["inspect-orders", "aggregate-orders"],
+        )
+        aggregate_step = output.metadata["plan"]["steps"][1]
+        self.assertEqual(
+            aggregate_step["operation"]["parameters"]["group_by"],
+            ["country", "status"],
+        )
+        self.assertEqual(
+            [metric["name"] for metric in aggregate_step["operation"]["parameters"]["metrics"]],
+            ["order_count", "total_revenue"],
+        )
+        self.assertEqual(
+            output.metadata["template_instance"]["template_id"],
+            "segment-comparison",
+        )
+        serialized_plan = report_module._json_dumps(output.metadata["plan"])
+        self.assertNotIn("document_chunks", serialized_plan)
+        self.assertNotIn("customers", serialized_plan)
+        trace_names = [step.name for step in output.trace.steps]
+        self.assertIn("template_agent", trace_names)
+        self.assertIn("dag_scheduler", trace_names)
+        self.assertIn("chart_input_assembler", trace_names)
+        self.assertEqual(trace_names[-1], "renderer")
 
 
 if __name__ == "__main__":

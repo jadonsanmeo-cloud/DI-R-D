@@ -10,7 +10,7 @@ generation, structured report output, and separate rendering.
 The target workflow is:
 
 ```text
-User goal + DataCorpusPackage
+User spec + DataCorpusPackage
         |
         v
 PlanAgent <------> TemplateAgent <------> TemplatePool
