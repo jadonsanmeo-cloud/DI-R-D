@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
+    ExecutionSpec,
     FinalResponse,
+    Intent,
     SessionContext,
     UserContext,
     UserQuery,
@@ -13,6 +15,7 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
+from data_intelligence_sdk.spec.default_confirmation import SpecConfirmationDecision
 
 
 class DataIntelligencePipeline:
@@ -39,6 +42,7 @@ class DataIntelligencePipeline:
         log_store: object | None = None,
         resource_manager: object | None = None,
         logger: RuntimeLogger | None = None,
+        max_spec_revision_rounds: int = 3,
     ) -> None:
         self.intent_analyzer = intent_analyzer
         self.spec_builder = spec_builder
@@ -58,6 +62,7 @@ class DataIntelligencePipeline:
     def _log(self, event: str, payload: dict[str, object] | None = None) -> None:
         if self.logger is not None:
             self.logger.log(event, payload or {})
+        self.max_spec_revision_rounds = max_spec_revision_rounds
 
     def run(
         self,
@@ -95,6 +100,13 @@ class DataIntelligencePipeline:
         )
         confirmed_spec = self.spec_confirmation.confirm(
             spec, session_context, user_context
+        confirmed_spec = self._confirm_spec(
+            spec,
+            query,
+            intent,
+            corpus_package,
+            session_context,
+            user_context,
         )
         self._log(
             "pipeline.spec_confirmed",
@@ -142,3 +154,43 @@ class DataIntelligencePipeline:
             },
         )
         return response
+        return self.synthesizer.synthesize(confirmed_spec, output, evidence)
+
+    def _confirm_spec(
+        self,
+        spec: ExecutionSpec,
+        query: UserQuery,
+        intent: Intent,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None,
+        user_context: UserContext | None,
+    ) -> ExecutionSpec:
+        for _ in range(self.max_spec_revision_rounds + 1):
+            confirmation_result = self.spec_confirmation.confirm(
+                spec, session_context, user_context
+            )
+            if isinstance(confirmation_result, SpecConfirmationDecision):
+                if confirmation_result.action != "revise":
+                    raise ValueError(
+                        f"Unsupported spec confirmation action: {confirmation_result.action}"
+                    )
+                if not confirmation_result.feedback:
+                    raise ValueError("Spec revision requires feedback.")
+                revise = getattr(self.spec_builder, "revise", None)
+                if revise is None:
+                    raise TypeError(
+                        "Spec confirmation requested revision, but spec_builder has no revise method."
+                    )
+                spec = revise(
+                    previous_spec=spec,
+                    user_feedback=confirmation_result.feedback,
+                    query=query,
+                    intent=intent,
+                    corpus_package=corpus_package,
+                    session_context=session_context,
+                    user_context=user_context,
+                )
+                continue
+            return confirmation_result
+
+        raise RuntimeError("Maximum spec revision rounds exceeded.")

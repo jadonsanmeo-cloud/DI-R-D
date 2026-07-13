@@ -1,4 +1,7 @@
-"""Context boundaries."""
+"""Compatibility exports for spec context builders.
+
+The implementation lives in :mod:`data_intelligence_sdk.spec.context`.
+"""
 
 from data_intelligence_sdk.spec.context import (
     CorpusSummary,
@@ -9,7 +12,6 @@ from data_intelligence_sdk.spec.context import (
     UserBrief,
     build_corpus_summary,
 )
-from data_intelligence_sdk.context.user_context import UserContextStore
 
 __all__ = [
     "CorpusSummary",
@@ -18,6 +20,5 @@ __all__ = [
     "SpecContextBuilder",
     "TaskHints",
     "UserBrief",
-    "UserContextStore",
     "build_corpus_summary",
 ]
