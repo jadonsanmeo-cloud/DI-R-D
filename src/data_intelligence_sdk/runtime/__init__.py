@@ -11,6 +11,10 @@ from data_intelligence_sdk.runtime.interfaces import (
     InterfaceRegistry,
     InMemoryInterfaceRegistry,
 )
+from data_intelligence_sdk.runtime.llm_client import (
+    LLMClient,
+    OpenAICompatibleLLMClient,
+)
 from data_intelligence_sdk.runtime.method_hub import MethodHub, RegisteredMethod
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
 
@@ -21,7 +25,9 @@ __all__ = [
     "InterfaceBuilder",
     "InterfaceRegistry",
     "InMemoryInterfaceRegistry",
+    "LLMClient",
     "MethodHub",
+    "OpenAICompatibleLLMClient",
     "OpenRouterSettings",
     "RegisteredMethod",
     "get_config_manager",
