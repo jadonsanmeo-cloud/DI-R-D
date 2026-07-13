@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://data-intelligence-sdk.local/schemas/report-template-v1.json",
+  "title": "Data Intelligence Report Template",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "template_id",
+    "version",
+    "name",
+    "description",
+    "selection",
+    "data_requirements",
+    "sections"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"const": "1.0"},
+    "template_id": {"$ref": "#/$defs/identifier"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "selection": {"$ref": "#/$defs/selection"},
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "locale": {"type": "string"},
+        "max_narrative_sentences": {"type": "integer", "minimum": 1},
+        "chart_library": {"const": "echarts"}
+      }
+    },
+    "data_requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/dataRequirement"}
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/section"}
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$"
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["report_intents", "keywords", "data_signals"],
+      "properties": {
+        "report_intents": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "keywords": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "data_signals": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        }
+      }
+    },
+    "semanticRoles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "measures": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "time_dimensions": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        }
+      }
+    },
+    "dataRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirement_id",
+        "description",
+        "required",
+        "semantic_roles",
+        "expected_output"
+      ],
+      "properties": {
+        "requirement_id": {"$ref": "#/$defs/identifier"},
+        "description": {"type": "string", "minLength": 1},
+        "required": {"type": "boolean"},
+        "semantic_roles": {"$ref": "#/$defs/semanticRoles"},
+        "calculation_hints": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "expected_output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["shape"],
+          "properties": {
+            "shape": {
+              "enum": ["scalar", "record", "table", "time_series", "category_series"]
+            },
+            "max_rows": {"type": "integer", "minimum": 1}
+          }
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action"],
+          "properties": {
+            "action": {"enum": ["omit", "message", "use_available_measure", "use_table"]},
+            "message": {"type": "string"}
+          }
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["columns"],
+      "properties": {
+        "columns": {"type": "integer", "minimum": 1, "maximum": 12},
+        "density": {"enum": ["compact", "comfortable", "detailed"]}
+      }
+    },
+    "chartSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chart_slot_id",
+        "intent",
+        "suggested_type",
+        "allowed_types",
+        "data_requirement_refs",
+        "encoding",
+        "constraints",
+        "fallback"
+      ],
+      "properties": {
+        "chart_slot_id": {"$ref": "#/$defs/identifier"},
+        "intent": {"type": "string", "minLength": 1},
+        "suggested_type": {
+          "enum": ["line", "bar", "stacked_bar", "area", "scatter", "pie", "heatmap"]
+        },
+        "allowed_types": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["line", "bar", "stacked_bar", "area", "scatter", "pie", "heatmap"]
+          },
+          "uniqueItems": true
+        },
+        "data_requirement_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/identifier"},
+          "uniqueItems": true
+        },
+        "encoding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x_role": {"type": "string"},
+            "y_roles": {
+              "type": "array",
+              "items": {"type": "string"},
+              "uniqueItems": true
+            },
+            "series_role": {"type": "string"},
+            "color_role": {"type": "string"}
+          }
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_points"],
+          "properties": {
+            "max_points": {"type": "integer", "minimum": 1},
+            "top_k": {"type": "integer", "minimum": 1},
+            "sort": {"enum": ["ascending", "descending", "chronological", "none"]},
+            "include_other": {"type": "boolean"}
+          }
+        },
+        "presentation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {"type": "string"},
+            "x_axis_label": {"type": "string"},
+            "y_axis_label": {"type": "string"},
+            "value_format": {"enum": ["number", "compact_number", "currency", "percent"]},
+            "show_legend": {"type": "boolean"}
+          }
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action"],
+          "properties": {
+            "action": {"enum": ["omit", "table", "kpi", "message"]},
+            "message": {"type": "string"}
+          }
+        }
+      }
+    },
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["block_id", "type", "required", "data_requirement_refs"],
+      "properties": {
+        "block_id": {"$ref": "#/$defs/identifier"},
+        "type": {"enum": ["narrative", "kpi_group", "chart", "table", "recommendations"]},
+        "title": {"type": "string"},
+        "required": {"type": "boolean"},
+        "data_requirement_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/identifier"},
+          "uniqueItems": true
+        },
+        "chart_slot": {"$ref": "#/$defs/chartSlot"},
+        "instructions": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"const": "chart"}}},
+          "then": {"required": ["chart_slot"]}
+        }
+      ]
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["section_id", "title", "purpose", "required", "layout", "blocks"],
+      "properties": {
+        "section_id": {"$ref": "#/$defs/identifier"},
+        "title": {"type": "string", "minLength": 1},
+        "purpose": {"type": "string", "minLength": 1},
+        "required": {"type": "boolean"},
+        "layout": {"$ref": "#/$defs/layout"},
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/block"}
+        }
+      }
+    }
+  }
+}

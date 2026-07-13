@@ -11,8 +11,12 @@ dependencies = [
     "dotenv>=0.9.9",
     "langchain>=1.3.11",
     "langchain-openai>=1.3.3",
+    "langgraph>=1.2.7",
     "psycopg[binary]>=3.2.13",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"data_intelligence_sdk.templates.pool" = ["*.json"]

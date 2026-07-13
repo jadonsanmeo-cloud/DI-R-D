@@ -1,0 +1,145 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "executive-overview",
+  "version": "1.0.0",
+  "name": "Executive Overview",
+  "description": "A concise decision-oriented report with headline KPIs, the most important trend, key drivers, and recommended actions.",
+  "tags": ["executive", "overview", "kpi", "trend", "recommendations"],
+  "selection": {
+    "report_intents": ["executive_summary", "management_brief", "performance_overview"],
+    "keywords": ["overview", "executive", "summary", "performance", "brief"],
+    "data_signals": ["one_or_more_numeric_measures", "optional_time_dimension", "optional_comparison_dimension"]
+  },
+  "defaults": {
+    "locale": "en-US",
+    "max_narrative_sentences": 5,
+    "chart_library": "echarts"
+  },
+  "data_requirements": [
+    {
+      "requirement_id": "headline-metrics",
+      "description": "The primary measures that best represent the report objective.",
+      "required": true,
+      "semantic_roles": {
+        "measures": ["primary_measure", "secondary_measure"]
+      },
+      "calculation_hints": ["Prefer totals, rates, averages, or counts that directly answer the user goal."],
+      "expected_output": {"shape": "record", "max_rows": 1},
+      "fallback": {"action": "use_available_measure", "message": "Show only the headline measures that can be computed reliably."}
+    },
+    {
+      "requirement_id": "primary-trend",
+      "description": "The primary measure over an ordered time dimension.",
+      "required": false,
+      "semantic_roles": {
+        "measures": ["primary_measure"],
+        "time_dimensions": ["time"]
+      },
+      "calculation_hints": ["Aggregate to a time grain that produces no more than 36 points."],
+      "expected_output": {"shape": "time_series", "max_rows": 36},
+      "fallback": {"action": "message", "message": "No reliable time dimension is available for trend analysis."}
+    },
+    {
+      "requirement_id": "key-drivers",
+      "description": "A ranked categorical breakdown explaining the primary measure.",
+      "required": false,
+      "semantic_roles": {
+        "measures": ["primary_measure"],
+        "dimensions": ["comparison_dimension"]
+      },
+      "calculation_hints": ["Rank categories by the primary measure and retain the top contributors."],
+      "expected_output": {"shape": "category_series", "max_rows": 10},
+      "fallback": {"action": "omit", "message": "Omit the drivers section when no useful comparison dimension exists."}
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "executive-summary",
+      "title": "Executive Summary",
+      "purpose": "State the answer, business impact, and most important caveat first.",
+      "required": true,
+      "layout": {"columns": 12, "density": "compact"},
+      "blocks": [
+        {
+          "block_id": "summary-narrative",
+          "type": "narrative",
+          "required": true,
+          "data_requirement_refs": ["headline-metrics"],
+          "instructions": ["Lead with the conclusion.", "Separate observed facts from interpretation."]
+        },
+        {
+          "block_id": "headline-kpis",
+          "type": "kpi_group",
+          "title": "Headline Metrics",
+          "required": true,
+          "data_requirement_refs": ["headline-metrics"],
+          "instructions": ["Show at most four KPIs and preserve their units."]
+        }
+      ]
+    },
+    {
+      "section_id": "performance-trend",
+      "title": "Performance Trend",
+      "purpose": "Show how the main measure changes over time.",
+      "required": false,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "trend-chart",
+          "type": "chart",
+          "title": "Primary Trend",
+          "required": false,
+          "data_requirement_refs": ["primary-trend"],
+          "chart_slot": {
+            "chart_slot_id": "primary-trend-chart",
+            "intent": "Show the direction, magnitude, and meaningful changes of the primary measure over time.",
+            "suggested_type": "line",
+            "allowed_types": ["line", "area", "bar"],
+            "data_requirement_refs": ["primary-trend"],
+            "encoding": {"x_role": "time", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 36, "sort": "chronological"},
+            "presentation": {"title": "Primary measure over time", "value_format": "compact_number", "show_legend": false},
+            "fallback": {"action": "table", "message": "Show the available time values as a compact table."}
+          },
+          "instructions": ["Annotate only material changes supported by the analysis result."]
+        }
+      ]
+    },
+    {
+      "section_id": "drivers-and-actions",
+      "title": "Drivers and Recommended Actions",
+      "purpose": "Explain the largest contributors and translate findings into decisions.",
+      "required": false,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "drivers-chart",
+          "type": "chart",
+          "title": "Key Drivers",
+          "required": false,
+          "data_requirement_refs": ["key-drivers"],
+          "chart_slot": {
+            "chart_slot_id": "key-drivers-chart",
+            "intent": "Compare the largest categorical contributors to the primary measure.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "pie"],
+            "data_requirement_refs": ["key-drivers"],
+            "encoding": {"x_role": "primary_measure", "y_roles": ["comparison_dimension"]},
+            "constraints": {"max_points": 10, "top_k": 8, "sort": "descending", "include_other": true},
+            "presentation": {"title": "Largest contributors", "value_format": "compact_number", "show_legend": false},
+            "fallback": {"action": "table", "message": "Show the ranked contributors as a table."}
+          },
+          "instructions": []
+        },
+        {
+          "block_id": "recommended-actions",
+          "type": "recommendations",
+          "required": false,
+          "data_requirement_refs": ["headline-metrics", "key-drivers"],
+          "instructions": ["Tie every recommendation to an observed result.", "Do not invent targets or causes."]
+        }
+      ]
+    }
+  ]
+}

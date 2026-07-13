@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "pool_id": "builtin-report-templates",
+  "description": "Built-in generic report templates available to TemplateAgent.",
+  "template_schema": "template.schema.json",
+  "templates": [
+    {
+      "template_id": "executive-overview",
+      "version": "1.0.0",
+      "path": "executive-overview.json",
+      "name": "Executive Overview",
+      "tags": ["executive", "overview", "kpi", "trend"],
+      "selection_hint": "Use for concise management reports that prioritize KPIs, movement over time, drivers, and actions."
+    },
+    {
+      "template_id": "time-series-analysis",
+      "version": "1.0.0",
+      "path": "time-series-analysis.json",
+      "name": "Time-series Analysis",
+      "tags": ["time-series", "trend", "growth", "anomaly"],
+      "selection_hint": "Use when the report goal centers on how one or more measures change over an ordered time dimension."
+    },
+    {
+      "template_id": "segment-comparison",
+      "version": "1.0.0",
+      "path": "segment-comparison.json",
+      "name": "Segment Comparison",
+      "tags": ["comparison", "ranking", "segment", "composition"],
+      "selection_hint": "Use when the report compares categories, cohorts, regions, products, or other business segments."
+    }
+  ]
+}
