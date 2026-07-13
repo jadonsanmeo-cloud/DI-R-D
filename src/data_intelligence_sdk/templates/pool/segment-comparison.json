@@ -1,0 +1,155 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "segment-comparison",
+  "version": "1.0.0",
+  "name": "Segment Comparison",
+  "description": "A comparative report for ranking segments, explaining contribution, and examining how composition changes across a second dimension or time.",
+  "tags": ["comparison", "ranking", "segment", "composition", "breakdown"],
+  "selection": {
+    "report_intents": ["segment_comparison", "ranking_report", "composition_analysis"],
+    "keywords": ["compare", "versus", "by region", "by product", "segment", "ranking", "share"],
+    "data_signals": ["numeric_measure", "categorical_dimension", "at_least_two_categories"]
+  },
+  "defaults": {
+    "locale": "en-US",
+    "max_narrative_sentences": 6,
+    "chart_library": "echarts"
+  },
+  "data_requirements": [
+    {
+      "requirement_id": "segment-ranking",
+      "description": "The primary measure aggregated and ranked across a comparison dimension.",
+      "required": true,
+      "semantic_roles": {
+        "measures": ["primary_measure"],
+        "dimensions": ["segment"]
+      },
+      "calculation_hints": ["Sort by the primary measure.", "Retain top segments and group the remainder as Other when appropriate."],
+      "expected_output": {"shape": "category_series", "max_rows": 15},
+      "fallback": {"action": "message", "message": "Segment comparison requires at least two comparable categories."}
+    },
+    {
+      "requirement_id": "segment-share",
+      "description": "Each segment's contribution to the total primary measure.",
+      "required": false,
+      "semantic_roles": {
+        "measures": ["primary_measure", "share_of_total"],
+        "dimensions": ["segment"]
+      },
+      "calculation_hints": ["Calculate shares against the same filtered population used for ranking."],
+      "expected_output": {"shape": "category_series", "max_rows": 15},
+      "fallback": {"action": "omit", "message": "Omit share calculations when the total is zero or undefined."}
+    },
+    {
+      "requirement_id": "segment-breakdown",
+      "description": "The primary measure across segment and a secondary dimension or time period.",
+      "required": false,
+      "semantic_roles": {
+        "measures": ["primary_measure"],
+        "dimensions": ["segment", "secondary_dimension"],
+        "time_dimensions": ["optional_time"]
+      },
+      "calculation_hints": ["Limit both dimensions to readable cardinalities.", "Use a consistent population across groups."],
+      "expected_output": {"shape": "table", "max_rows": 100},
+      "fallback": {"action": "use_table", "message": "Use a table when the dimensional combination is not readable as a chart."}
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "comparison-summary",
+      "title": "Comparison Summary",
+      "purpose": "Explain the leading and lagging segments and the size of the gap.",
+      "required": true,
+      "layout": {"columns": 12, "density": "compact"},
+      "blocks": [
+        {
+          "block_id": "comparison-kpis",
+          "type": "kpi_group",
+          "title": "Comparison Metrics",
+          "required": true,
+          "data_requirement_refs": ["segment-ranking", "segment-share"],
+          "instructions": ["Show the leader, laggard, absolute gap, and relative gap when valid."]
+        },
+        {
+          "block_id": "comparison-narrative",
+          "type": "narrative",
+          "required": true,
+          "data_requirement_refs": ["segment-ranking", "segment-share"],
+          "instructions": ["Describe comparisons without inferring causality from ranking alone."]
+        }
+      ]
+    },
+    {
+      "section_id": "segment-ranking-section",
+      "title": "Segment Ranking",
+      "purpose": "Make differences in magnitude across segments easy to compare.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "segment-ranking-chart",
+          "type": "chart",
+          "title": "Ranked Segments",
+          "required": true,
+          "data_requirement_refs": ["segment-ranking"],
+          "chart_slot": {
+            "chart_slot_id": "segment-ranking-chart",
+            "intent": "Rank segments by the primary measure and make magnitude differences easy to compare.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar"],
+            "data_requirement_refs": ["segment-ranking"],
+            "encoding": {"x_role": "primary_measure", "y_roles": ["segment"]},
+            "constraints": {"max_points": 15, "top_k": 10, "sort": "descending", "include_other": true},
+            "presentation": {"title": "Segment ranking", "value_format": "compact_number", "show_legend": false},
+            "fallback": {"action": "table", "message": "Show the segment ranking as a table."}
+          },
+          "instructions": ["Use a horizontal bar layout when segment labels are long."]
+        },
+        {
+          "block_id": "segment-share-table",
+          "type": "table",
+          "title": "Segment Contribution",
+          "required": false,
+          "data_requirement_refs": ["segment-share"],
+          "instructions": ["Include measure, share, rank, and data-quality warnings."]
+        }
+      ]
+    },
+    {
+      "section_id": "composition-detail",
+      "title": "Composition Detail",
+      "purpose": "Show how a secondary dimension contributes within each leading segment.",
+      "required": false,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {
+          "block_id": "composition-chart",
+          "type": "chart",
+          "title": "Segment Composition",
+          "required": false,
+          "data_requirement_refs": ["segment-breakdown"],
+          "chart_slot": {
+            "chart_slot_id": "segment-composition-chart",
+            "intent": "Compare the composition of the primary measure across segments and a secondary dimension.",
+            "suggested_type": "stacked_bar",
+            "allowed_types": ["stacked_bar", "heatmap", "bar"],
+            "data_requirement_refs": ["segment-breakdown"],
+            "encoding": {"x_role": "segment", "y_roles": ["primary_measure"], "series_role": "secondary_dimension"},
+            "constraints": {"max_points": 100, "top_k": 8, "sort": "descending", "include_other": true},
+            "presentation": {"title": "Segment composition", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "table", "message": "Show the segment-by-dimension breakdown as a table."}
+          },
+          "instructions": ["Avoid stacked bars when there are too many secondary categories; prefer heatmap or table fallback."]
+        },
+        {
+          "block_id": "comparison-actions",
+          "type": "recommendations",
+          "required": false,
+          "data_requirement_refs": ["segment-ranking", "segment-breakdown"],
+          "instructions": ["State which observed gaps deserve investigation rather than claiming an unobserved cause."]
+        }
+      ]
+    }
+  ]
+}

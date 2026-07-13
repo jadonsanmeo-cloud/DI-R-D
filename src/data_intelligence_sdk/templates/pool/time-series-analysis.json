@@ -1,0 +1,165 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "time-series-analysis",
+  "version": "1.0.0",
+  "name": "Time-series Analysis",
+  "description": "A detailed report for trends, period-over-period change, seasonality, and anomalies across an ordered time dimension.",
+  "tags": ["time-series", "trend", "growth", "anomaly", "seasonality"],
+  "selection": {
+    "report_intents": ["trend_analysis", "time_series_report", "growth_analysis"],
+    "keywords": ["trend", "over time", "growth", "monthly", "weekly", "daily", "anomaly"],
+    "data_signals": ["numeric_measure", "ordered_time_dimension", "multiple_time_periods"]
+  },
+  "defaults": {
+    "locale": "en-US",
+    "max_narrative_sentences": 7,
+    "chart_library": "echarts"
+  },
+  "data_requirements": [
+    {
+      "requirement_id": "time-series-values",
+      "description": "One or more measures aggregated over a consistent time grain.",
+      "required": true,
+      "semantic_roles": {
+        "measures": ["primary_measure"],
+        "time_dimensions": ["time"]
+      },
+      "calculation_hints": ["Select a grain appropriate to the requested period.", "Fill or explicitly mark missing periods before calculating growth."],
+      "expected_output": {"shape": "time_series", "max_rows": 120},
+      "fallback": {"action": "message", "message": "A time-series report cannot be produced without an ordered time dimension and at least two periods."}
+    },
+    {
+      "requirement_id": "period-change",
+      "description": "Absolute and percentage change between consecutive or comparable periods.",
+      "required": false,
+      "semantic_roles": {
+        "measures": ["primary_measure", "absolute_change", "percentage_change"],
+        "time_dimensions": ["time"]
+      },
+      "calculation_hints": ["Use the output of time-series-values.", "Do not calculate percentage change when the prior value is zero."],
+      "expected_output": {"shape": "time_series", "max_rows": 120},
+      "fallback": {"action": "omit", "message": "Omit change metrics when fewer than two comparable periods exist."}
+    },
+    {
+      "requirement_id": "anomaly-candidates",
+      "description": "Time points whose values materially differ from the local or expected pattern.",
+      "required": false,
+      "semantic_roles": {
+        "measures": ["primary_measure", "anomaly_score"],
+        "time_dimensions": ["time"]
+      },
+      "calculation_hints": ["Expose the detection method and threshold in lineage metadata.", "Treat anomalies as observations, not causes."],
+      "expected_output": {"shape": "time_series", "max_rows": 20},
+      "fallback": {"action": "omit", "message": "Omit anomaly markers when no reliable detection method is available."}
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "trend-summary",
+      "title": "Trend Summary",
+      "purpose": "Summarize direction, magnitude, turning points, and data coverage.",
+      "required": true,
+      "layout": {"columns": 12, "density": "compact"},
+      "blocks": [
+        {
+          "block_id": "trend-kpis",
+          "type": "kpi_group",
+          "title": "Trend Metrics",
+          "required": true,
+          "data_requirement_refs": ["time-series-values", "period-change"],
+          "instructions": ["Include start, end, minimum, maximum, and overall change when available."]
+        },
+        {
+          "block_id": "trend-narrative",
+          "type": "narrative",
+          "required": true,
+          "data_requirement_refs": ["time-series-values", "period-change"],
+          "instructions": ["Distinguish sustained trends from single-period movement."]
+        }
+      ]
+    },
+    {
+      "section_id": "trend-detail",
+      "title": "Trend Detail",
+      "purpose": "Visualize the full series without overwhelming the reader.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {
+          "block_id": "main-time-series-chart",
+          "type": "chart",
+          "title": "Measure Over Time",
+          "required": true,
+          "data_requirement_refs": ["time-series-values"],
+          "chart_slot": {
+            "chart_slot_id": "main-time-series-chart",
+            "intent": "Display the primary measure across time and preserve the correct chronological order.",
+            "suggested_type": "line",
+            "allowed_types": ["line", "area", "bar"],
+            "data_requirement_refs": ["time-series-values"],
+            "encoding": {"x_role": "time", "y_roles": ["primary_measure"], "series_role": "optional_series"},
+            "constraints": {"max_points": 120, "sort": "chronological"},
+            "presentation": {"title": "Measure over time", "x_axis_label": "Time", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "table", "message": "Show the ordered time-series values in a table."}
+          },
+          "instructions": ["Prefer downsampling over dropping the oldest periods when the series exceeds max_points."]
+        },
+        {
+          "block_id": "period-change-chart",
+          "type": "chart",
+          "title": "Period-over-period Change",
+          "required": false,
+          "data_requirement_refs": ["period-change"],
+          "chart_slot": {
+            "chart_slot_id": "period-change-chart",
+            "intent": "Show positive and negative period-over-period changes around a zero baseline.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line"],
+            "data_requirement_refs": ["period-change"],
+            "encoding": {"x_role": "time", "y_roles": ["percentage_change"]},
+            "constraints": {"max_points": 60, "sort": "chronological"},
+            "presentation": {"title": "Period-over-period change", "x_axis_label": "Time", "y_axis_label": "Change", "value_format": "percent", "show_legend": false},
+            "fallback": {"action": "omit", "message": "Omit the change chart when comparable periods are unavailable."}
+          },
+          "instructions": []
+        }
+      ]
+    },
+    {
+      "section_id": "anomalies",
+      "title": "Anomalies and Caveats",
+      "purpose": "Surface unusual observations and document limitations without asserting unsupported causes.",
+      "required": false,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "anomaly-chart",
+          "type": "chart",
+          "title": "Anomaly Candidates",
+          "required": false,
+          "data_requirement_refs": ["anomaly-candidates"],
+          "chart_slot": {
+            "chart_slot_id": "anomaly-chart",
+            "intent": "Highlight candidate anomalous time points in the context of the observed series.",
+            "suggested_type": "scatter",
+            "allowed_types": ["scatter", "line"],
+            "data_requirement_refs": ["anomaly-candidates", "time-series-values"],
+            "encoding": {"x_role": "time", "y_roles": ["primary_measure"], "color_role": "anomaly_score"},
+            "constraints": {"max_points": 120, "sort": "chronological"},
+            "presentation": {"title": "Candidate anomalies", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "message", "message": "No reliable anomaly candidates were produced."}
+          },
+          "instructions": ["Label points as candidates unless a domain rule confirms an anomaly."]
+        },
+        {
+          "block_id": "caveats",
+          "type": "narrative",
+          "required": true,
+          "data_requirement_refs": ["time-series-values"],
+          "instructions": ["Report missing periods, incomplete latest periods, and changes in time grain."]
+        }
+      ]
+    }
+  ]
+}
