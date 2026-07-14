@@ -143,7 +143,7 @@ Use the interactive demo to walk through the current query-to-response flow:
 ```bash
 uv run python examples/demo_workflow_cli.py \
   --package examples/data_corpus_package/data_corpus_package.json \
-  --config configs/development/proxy-openrouter.toml \
+  --config configs/proxy-openrouter.toml \
   --env-file docker/.env \
   --query "Summarize this data corpus package"
 ```
