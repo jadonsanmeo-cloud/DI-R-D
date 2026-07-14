@@ -23,6 +23,5 @@ docs/superpowers/
 .next/
 node_modules/
 .agents/
-,codex/
-
+.codex/
 #############

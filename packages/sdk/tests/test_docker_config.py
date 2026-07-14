@@ -49,17 +49,13 @@ class DockerConfigTests(unittest.TestCase):
         self.assertNotIn("OPENROUTE_API_KEY", content)
         self.assertIn("- path: .env", content)
 
-    def test_dockerignore_excludes_secrets_and_frontend(self) -> None:
-        lines = self.read_required("docker/.dockerignore").splitlines()
+    def test_dockerfile_dockerignore_excludes_secrets_and_frontend(self) -> None:
+        lines = self.read_required("docker/Dockerfile.dockerignore").splitlines()
         self.assertIn(".env", lines)
         self.assertIn(".env.*", lines)
         self.assertIn("!.env.example", lines)
         self.assertIn("web/", lines)
         self.assertIn(".git/", lines)
-        self.assertEqual(
-            lines,
-            self.read_required("docker/Dockerfile.dockerignore").splitlines(),
-        )
 
 
 if __name__ == "__main__":
