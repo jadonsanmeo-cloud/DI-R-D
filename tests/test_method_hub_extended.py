@@ -131,6 +131,126 @@ class MethodHubExtendedTests(unittest.TestCase):
         self.assertNotIn("blocked_lookup", catalog_json)
         self.assertIn("scan_csv", catalog_json)
 
+    def test_interface_list_inspect_validate_insert_and_call(self) -> None:
+        hub = MethodHub()
+        definition = {
+            "name": "alpha_lookup",
+            "method": alpha_lookup,
+            "capability_names": ["lookup"],
+            "description": "Lookup alpha values.",
+            "metadata": {"side_effects": False},
+            "tags": ["lookup"],
+            "priority": 5,
+        }
+
+        validation = hub.validate(definition)
+        inserted = hub.insert(definition)
+        listed = hub.list({"capability": "lookup"})
+        inspected = hub.inspect("alpha_lookup")
+        dry_run = hub.dry_run("alpha_lookup", {"value": "x"})
+        result = hub.call("alpha_lookup", {"value": "x"})
+
+        self.assertTrue(validation["valid"])
+        self.assertEqual(inserted.name, "alpha_lookup")
+        self.assertEqual(listed[0]["name"], "alpha_lookup")
+        self.assertEqual(inspected["signature"], "(value: 'str') -> 'str'")
+        self.assertTrue(dry_run["valid"])
+        self.assertEqual(result, "alpha:x")
+        self.assertEqual(hub.history("alpha_lookup", action="call")[-1]["status"], "completed")
+
+    def test_update_deprecate_and_remove_lifecycle(self) -> None:
+        hub = MethodHub()
+        hub.register("alpha_lookup", alpha_lookup, capability_names=["lookup"])
+
+        updated = hub.update(
+            "alpha_lookup",
+            {
+                "method": beta_lookup,
+                "description": "Updated lookup.",
+                "priority": 20,
+                "metadata": {"side_effects": False},
+            },
+        )
+        deprecated = hub.deprecate("alpha_lookup", reason="Use beta.")
+        removed = hub.remove("alpha_lookup")
+
+        self.assertIs(updated.method, beta_lookup)
+        self.assertEqual(updated.priority, 20)
+        self.assertEqual(deprecated.status, "deprecated")
+        self.assertEqual(deprecated.metadata["deprecation_reason"], "Use beta.")
+        self.assertEqual(removed["name"], "alpha_lookup")
+        self.assertEqual(hub.history(action="remove")[-1]["method_name"], "alpha_lookup")
+
+    def test_dry_run_reports_invalid_arguments_without_calling(self) -> None:
+        hub = MethodHub()
+        hub.register("alpha_lookup", alpha_lookup)
+
+        result = hub.dry_run("alpha_lookup", {})
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["missing"], ["value"])
+        self.assertEqual(hub.history("alpha_lookup", action="dry_run")[-1]["status"], "failed")
+
+    def test_in_memory_proposal_flow(self) -> None:
+        hub = MethodHub()
+        proposal = hub.propose(
+            {
+                "name": "alpha_lookup",
+                "method": alpha_lookup,
+                "capability_names": ["lookup"],
+                "metadata": {"side_effects": False},
+            },
+            proposal_id="proposal-alpha",
+        )
+
+        self.assertEqual(proposal["status"], "pending")
+        self.assertNotIn("method", proposal["definition"])
+        self.assertEqual(hub.proposals(status="pending")[0]["proposal_id"], "proposal-alpha")
+
+        approved = hub.approve("proposal-alpha")
+
+        self.assertEqual(approved.trust_level, "generated_validated")
+        self.assertEqual(hub.call("alpha_lookup", {"value": "ok"}), "alpha:ok")
+        self.assertEqual(hub.proposals(status="accepted")[0]["proposal_id"], "proposal-alpha")
+
+    def test_reject_proposal_and_select_for_task(self) -> None:
+        hub = MethodHub()
+        register_csv_methods(hub)
+        proposal = hub.propose(
+            {
+                "name": "gamma_lookup",
+                "method": gamma_lookup,
+                "capability_names": ["lookup"],
+                "metadata": {"side_effects": False},
+            },
+            proposal_id="proposal-gamma",
+        )
+
+        rejected = hub.reject(proposal["proposal_id"], reason="Not needed.")
+        selected = hub.select({"description": "preview csv columns"}, top_k=1)
+
+        self.assertEqual(rejected["status"], "rejected")
+        self.assertEqual(rejected["reason"], "Not needed.")
+        self.assertEqual(selected[0]["name"], "scan_csv")
+
+    def test_export_and_import_manifest_interfaces(self) -> None:
+        source_hub = MethodHub()
+        source_hub.register(
+            "alpha_lookup",
+            alpha_lookup,
+            capability_names=["lookup"],
+            metadata={"side_effects": False},
+        )
+
+        manifest = source_hub.export("alpha_lookup")
+        target_hub = MethodHub()
+        imported = target_hub.import_manifest(manifest)
+
+        self.assertEqual(manifest["entrypoint"], "test_method_hub_extended:alpha_lookup")
+        self.assertTrue(manifest["callable_exportable"])
+        self.assertEqual(imported.name, "alpha_lookup")
+        self.assertEqual(target_hub.call("alpha_lookup", {"value": "z"}), "alpha:z")
+
 
 if __name__ == "__main__":
     unittest.main()

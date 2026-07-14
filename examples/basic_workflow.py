@@ -25,7 +25,11 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.engines.report import ReportEngine
-from data_intelligence_sdk.methods import register_csv_methods, register_vector_methods
+from data_intelligence_sdk.methods import (
+    register_csv_methods,
+    register_local_data_methods,
+    register_vector_methods,
+)
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
@@ -72,10 +76,12 @@ def _seed_default_methods(method_hub: MethodHub) -> None:
                     priority=registered.priority,
                     source=registered.source,
                 )
+            register_local_data_methods(method_hub)
             return
 
     register_csv_methods(method_hub)
     register_vector_methods(method_hub)
+    register_local_data_methods(method_hub)
 
 
 class ExampleIntentAnalyzer:
