@@ -45,6 +45,7 @@ Supporting layers:
 - `runtime`: method hub, interface registry, interface builder boundary, engine runtime context, executor, logger, resource manager, cache.
 - `sandbox`: controlled execution, data/workspace/artifacts/logs boundaries.
 - `context`: user and session context placeholders.
+- `docs/method_hub.md`: Method Hub contract, manifest schema, catalog generation, and proposal/export workflow.
 
 ## Base Design Notes
 

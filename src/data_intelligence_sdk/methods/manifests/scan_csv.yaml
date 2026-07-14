@@ -1,0 +1,27 @@
+name: scan_csv
+version: "1.0.0"
+entrypoint: data_intelligence_sdk.methods.csv:scan_csv
+description: Inspect a CSV file before answering questions about its columns, row count, or sample rows.
+capability_names:
+  - scan_csv
+  - inspect_data
+  - inspect_tabular_data
+  - inspect_csv
+  - preview_data
+  - answer_csv_question
+tags:
+  - csv
+  - tabular
+  - inspection
+trust_level: builtin
+status: stable
+priority: 100
+use_when:
+  - You need a quick overview of a CSV file.
+  - You want columns, row counts, or sample rows.
+do_not_use_when:
+  - You already know the exact rows to aggregate without inspecting the file.
+metadata:
+  category: csv
+  deterministic: true
+  side_effects: false

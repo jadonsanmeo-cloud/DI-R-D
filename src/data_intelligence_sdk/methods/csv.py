@@ -131,29 +131,87 @@ def register_csv_methods(method_hub: MethodHub) -> None:
         "scan_csv",
         scan_csv,
         capability_names=["scan_csv", "inspect_data", *common],
+        tags=["csv", "tabular", "inspection"],
+        status="stable",
+        priority=100,
+        source=__name__,
         metadata={
-            "description": "Inspect a CSV file before answering questions about its columns, row count, or sample rows."
+            "description": "Inspect a CSV file before answering questions about its columns, row count, or sample rows.",
+            "category": "csv",
+            "deterministic": True,
+            "side_effects": False,
+            "use_when": [
+                "You need a quick overview of a CSV file.",
+                "You want columns, row counts, or sample rows.",
+            ],
+            "do_not_use_when": [
+                "You already know the exact rows to aggregate without inspecting the file.",
+            ],
         },
     )
     method_hub.register(
         "filter_csv",
         filter_csv,
         capability_names=["filter_csv", "filter_data", *common],
+        tags=["csv", "tabular", "filtering"],
+        status="stable",
+        priority=90,
+        source=__name__,
         metadata={
-            "description": "Filter CSV rows with eq/ne/gt/gte/lt/lte/contains when a question asks for matching records."
+            "description": "Filter CSV rows with eq/ne/gt/gte/lt/lte/contains when a question asks for matching records.",
+            "category": "csv",
+            "deterministic": True,
+            "side_effects": False,
+            "use_when": [
+                "You need a subset of rows that match a predicate.",
+                "The user asks for rows matching a condition.",
+            ],
+            "do_not_use_when": [
+                "You only need a total count or sum without row-level filtering.",
+            ],
         },
     )
     method_hub.register(
         "count_csv",
         count_csv,
         capability_names=["count_csv", "aggregate_data", *common],
-        metadata={"description": "Count CSV rows, optionally with a simple predicate."},
+        tags=["csv", "tabular", "aggregation", "count"],
+        status="stable",
+        priority=80,
+        source=__name__,
+        metadata={
+            "description": "Count CSV rows, optionally with a simple predicate.",
+            "category": "csv",
+            "deterministic": True,
+            "side_effects": False,
+            "use_when": [
+                "You need row counts or record totals.",
+                "The user asks how many records match a condition.",
+            ],
+            "do_not_use_when": [
+                "You need to sum or average numeric values instead of counting rows.",
+            ],
+        },
     )
     method_hub.register(
         "sum_csv",
         sum_csv,
         capability_names=["sum_csv", "aggregate_data", *common],
+        tags=["csv", "tabular", "aggregation", "sum"],
+        status="stable",
+        priority=85,
+        source=__name__,
         metadata={
-            "description": "Sum a numeric CSV column, optionally after filtering."
+            "description": "Sum a numeric CSV column, optionally after filtering.",
+            "category": "csv",
+            "deterministic": True,
+            "side_effects": False,
+            "use_when": [
+                "You need totals or revenue sums from a numeric column.",
+                "The user asks for a sum or total value.",
+            ],
+            "do_not_use_when": [
+                "You only need to count rows without aggregating a numeric column.",
+            ],
         },
     )
