@@ -17,6 +17,7 @@ SUPPORTED_INTENTS: tuple[Intent, ...] = (
     "unknown",
 )
 TraceStatus = Literal["pending", "running", "completed", "failed", "skipped"]
+MethodStatus = Literal["draft", "experimental", "stable", "deprecated"]
 TrustLevel = Literal[
     "builtin",
     "user_approved",

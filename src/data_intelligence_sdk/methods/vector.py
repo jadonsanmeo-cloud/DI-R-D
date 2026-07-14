@@ -214,12 +214,26 @@ def register_vector_methods(method_hub: MethodHub) -> None:
             "retrieve_documents",
             "answer_question",
         ],
+        tags=["vector", "retrieval", "semantic_search"],
+        status="stable",
+        priority=95,
+        source=__name__,
         metadata={
             "description": (
                 "Search document chunks in a Postgres pgvector source. Use this for "
                 "postgresql:// sources with schema=vectordb and questions about "
                 "documents, text content, retrieval, summaries, or what the corpus is about."
-            )
+            ),
+            "category": "vector",
+            "deterministic": True,
+            "side_effects": False,
+            "use_when": [
+                "You need relevant document chunks from a vector store.",
+                "The user asks what a document corpus is about or requests semantic retrieval.",
+            ],
+            "do_not_use_when": [
+                "You are querying tabular CSV data.",
+            ],
         },
     )
     method_hub.register(

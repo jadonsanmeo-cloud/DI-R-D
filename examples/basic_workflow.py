@@ -28,6 +28,7 @@ from data_intelligence_sdk.engines.report import ReportEngine
 from data_intelligence_sdk.methods import (
     register_csv_methods,
     register_postgres_methods,
+    register_local_data_methods,
     register_vector_methods,
 )
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
@@ -37,6 +38,7 @@ from data_intelligence_sdk.runtime.llm_client import LLMClient, OpenAICompatible
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.spec import LLMSpecBuilder
+from data_intelligence_sdk.runtime.method_loader import MethodManifestError, load_manifest_directory
 
 
 def _as_result_dict(value: Any) -> dict[str, Any]:
@@ -45,6 +47,44 @@ def _as_result_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {"result": value}
+
+
+def _default_method_manifest_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "src" / "data_intelligence_sdk" / "methods" / "manifests"
+
+
+def _seed_default_methods(method_hub: MethodHub) -> None:
+    if method_hub.list_methods():
+        return
+
+    manifest_dir = _default_method_manifest_dir()
+    if manifest_dir.exists():
+        temp_hub = MethodHub()
+        try:
+            load_manifest_directory(temp_hub, manifest_dir)
+        except MethodManifestError:
+            pass
+        else:
+            for registered in temp_hub.list_methods():
+                method_hub.register(
+                    registered.name,
+                    registered.method,
+                    capability_names=list(registered.capability_names),
+                    trust_level=registered.trust_level,
+                    metadata=dict(registered.metadata),
+                    version=registered.version,
+                    description=registered.description,
+                    tags=list(registered.tags),
+                    status=registered.status,
+                    priority=registered.priority,
+                    source=registered.source,
+                )
+            register_local_data_methods(method_hub)
+            return
+
+    register_csv_methods(method_hub)
+    register_vector_methods(method_hub)
+    register_local_data_methods(method_hub)
 
 
 class ExampleIntentAnalyzer:
@@ -233,6 +273,7 @@ def create_example_pipeline(
             )
         else:
             spec_builder = ExampleSpecBuilder()
+    _seed_default_methods(method_hub)
     if engine is None:
         if llm is not None:
             engine = GeneralPurposeEngine(llm=llm)

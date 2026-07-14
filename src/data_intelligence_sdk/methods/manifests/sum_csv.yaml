@@ -1,0 +1,27 @@
+name: sum_csv
+version: "1.0.0"
+entrypoint: data_intelligence_sdk.methods.csv:sum_csv
+description: Sum a numeric CSV column, optionally after filtering.
+capability_names:
+  - sum_csv
+  - aggregate_data
+  - sum_tabular_column
+  - aggregate_sum
+  - answer_csv_question
+tags:
+  - csv
+  - tabular
+  - aggregation
+  - sum
+trust_level: builtin
+status: stable
+priority: 85
+use_when:
+  - You need totals or revenue sums from a numeric column.
+  - The user asks for a sum or total value.
+do_not_use_when:
+  - You only need to count rows without aggregating a numeric column.
+metadata:
+  category: csv
+  deterministic: true
+  side_effects: false
