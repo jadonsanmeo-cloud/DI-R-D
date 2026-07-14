@@ -30,6 +30,216 @@ class FakePromptModel:
 
 
 class ReportEngineTests(unittest.TestCase):
+    def test_router_prefers_trusted_methods_for_postgres_and_vectordb(self) -> None:
+        router = report_module.RouterAgent(FakePromptModel("not json"))
+        methods = [
+            {"tool_name": "inspect_postgres_table"},
+            {"tool_name": "inspect_postgres_tables"},
+            {"tool_name": "count_postgres_tables"},
+            {"tool_name": "aggregate_postgres_table"},
+            {"tool_name": "inspect_vector_chunks"},
+            {"tool_name": "get_vector_stats"},
+        ]
+        sources = [
+            "postgresql://demo/db?schema=vectordb",
+            "postgresql://demo/db",
+        ]
+
+        table_route = router.run(
+            {
+                "description": "Inspect orders",
+                "required_data": {"tables": ["orders"], "columns": ["revenue"]},
+                "operation": {"kind": "inspect"},
+            },
+            methods,
+            sources,
+        )
+        vector_route = router.run(
+            {
+                "description": "Inspect document chunks",
+                "required_data": {"vector_collections": ["document_chunks"]},
+                "operation": {"kind": "inspect"},
+            },
+            methods,
+            sources,
+        )
+
+        self.assertEqual(table_route["tool_name"], "inspect_postgres_table")
+        self.assertEqual(table_route["arguments"]["table"], "orders")
+        self.assertEqual(vector_route["tool_name"], "inspect_vector_chunks")
+
+        count_route = router.run(
+            {
+                "description": "Fetch row counts for all core tables",
+                "required_data": {"tables": ["customers", "orders"]},
+                "operation": {"kind": "inspect"},
+            },
+            methods,
+            sources,
+        )
+        stats_route = router.run(
+            {
+                "description": "Fetch vector stats including chunk count",
+                "required_data": {"vector_collections": ["document_chunks"]},
+                "operation": {"kind": "inspect"},
+            },
+            methods,
+            sources,
+        )
+
+        self.assertEqual(count_route["tool_name"], "count_postgres_tables")
+        self.assertEqual(stats_route["tool_name"], "get_vector_stats")
+
+    def test_plan_agent_infers_known_data_for_underspecified_steps(self) -> None:
+        model = FakePromptModel(
+            '{"steps":['
+            '{"step_id":"load-core-tables","description":"Load all core tables",'
+            '"required_data":{},"operation":{"kind":"load"}},'
+            '{"step_id":"load-vectors","description":"Load document chunks from vectordb",'
+            '"required_data":{},"operation":{"kind":"load"}},'
+            '{"step_id":"compute-metrics","description":"Compute order count and revenue",'
+            '"required_data":{},"operation":{"kind":"aggregate",'
+            '"parameters":{"metrics":[]}}},'
+            '{"step_id":"assemble-final","description":"Assemble final report",'
+            '"required_data":{},"operation":{"kind":"assemble"}}]}'
+        )
+        corpus = DataCorpusPackage(
+            sources=[
+                "postgresql://demo/db?schema=vectordb",
+                "postgresql://demo/db",
+            ],
+            schemas={
+                "tables": {
+                    "customers": {"columns": ["customer_id", "segment"]},
+                    "orders": {"columns": ["order_id", "revenue"]},
+                },
+                "vector_collections": {"document_chunks": {}},
+            },
+        )
+
+        plan = report_module.PlanAgent(model).run(
+            ExecutionSpec(intent="report", objective="Summarize the corpus"),
+            corpus,
+        )
+        steps = {step["step_id"]: step for step in plan["steps"]}
+
+        self.assertEqual(
+            steps["load-core-tables"]["required_data"]["tables"],
+            ["customers", "orders"],
+        )
+        self.assertEqual(
+            steps["load-vectors"]["required_data"]["vector_collections"],
+            ["document_chunks"],
+        )
+        self.assertEqual(
+            steps["compute-metrics"]["required_data"]["tables"],
+            ["orders"],
+        )
+        self.assertNotIn("assemble-final", steps)
+    def test_vectordb_only_data_requirements_create_vector_only_scope(self) -> None:
+        vector_source = "postgresql://demo/db?schema=vectordb"
+        corpus = DataCorpusPackage(
+            sources=[vector_source, "postgresql://demo/db"],
+            schemas={
+                "tables": {"orders": {"columns": ["order_id"]}},
+                "vector_collections": {
+                    "document_chunks": {"columns": ["chunk_id", "content"]}
+                },
+            },
+        )
+
+        scope = report_module._scope_from_spec(
+            ExecutionSpec(
+                intent="report",
+                objective="Summarize the vectordb",
+                data_requirements=[vector_source],
+            ),
+            corpus,
+        )
+
+        self.assertEqual(scope["sources"], [vector_source])
+        self.assertEqual(scope["tables"], [])
+        self.assertEqual(scope["vector_collections"], ["document_chunks"])
+        self.assertTrue(scope["explicit"])
+
+    def test_plan_agent_normalizes_non_object_inputs_and_outputs(self) -> None:
+        model = FakePromptModel(
+            '{"steps":[{"step_id":"inspect-chunks","required_data":'
+            '{"tables":[],"vector_collections":["document_chunks"]},'
+            '"inputs":["document_chunks"],"outputs":["summary"],'
+            '"operation":"inspect","fallback":"omit"}]}'
+        )
+        corpus = DataCorpusPackage(
+            sources=["postgresql://demo/db?schema=vectordb"],
+            schemas={
+                "vector_collections": {
+                    "document_chunks": {"columns": ["chunk_id", "content"]}
+                }
+            },
+        )
+
+        plan = report_module.PlanAgent(model).run(
+            ExecutionSpec(intent="report", objective="Summarize document chunks"),
+            corpus,
+        )
+
+        step = plan["steps"][0]
+        self.assertEqual(step["inputs"], [])
+        self.assertIsInstance(step["outputs"][0], dict)
+        self.assertEqual(step["operation"], {"kind": "analyze"})
+        self.assertEqual(step["fallback"]["action"], "complete_no_data")
+
+    def test_plan_agent_omits_report_rendering_steps_from_data_dag(self) -> None:
+        model = FakePromptModel(
+            '{"steps":['
+            '{"step_id":"inspect-chunks","required_data":'
+            '{"tables":[],"vector_collections":["document_chunks"]},'
+            '"operation":{"kind":"inspect"}},'
+            '{"step_id":"generate-report","required_data":{},'
+            '"operation":{"kind":"generate_report"}}]}'
+        )
+        corpus = DataCorpusPackage(
+            sources=["postgresql://demo/db?schema=vectordb"],
+            schemas={"vector_collections": {"document_chunks": {}}},
+        )
+
+        plan = report_module.PlanAgent(model).run(
+            ExecutionSpec(intent="report", objective="Summarize document chunks"),
+            corpus,
+        )
+
+        self.assertEqual(
+            [step["step_id"] for step in plan["steps"]],
+            ["inspect-chunks"],
+        )
+
+    def test_report_agent_falls_back_for_malformed_structured_sections(self) -> None:
+        model = FakePromptModel(
+            '{"title":"Corpus report","summary":"Summary",'
+            '"sections":["invalid section"]}'
+        )
+        agent = report_module.ReportAgent(model)
+        spec = ExecutionSpec(intent="report", objective="Summarize the corpus")
+        template_instance = {
+            "template_id": "executive-overview",
+            "template_version": "1.0.0",
+            "instance_id": "template-instance",
+            "revision": 1,
+            "sections": [],
+        }
+
+        report = agent.run_structured(
+            spec,
+            template_instance,
+            [],
+            [],
+            {"sources": [], "scope": {}},
+        )
+        rendered = report_module.ReportRenderer().render(report)
+
+        self.assertEqual(report["title"], spec.objective)
+        self.assertEqual(rendered[0]["format"], "markdown")
+
     def test_report_engine_runs_full_fallback_agent_workflow_from_metadata(
         self,
     ) -> None:

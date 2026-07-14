@@ -1,10 +1,35 @@
 import unittest
 
-from data_intelligence_sdk.core.types import DataCorpusPackage, UserQuery
+from data_intelligence_sdk.core.types import (
+    DataCorpusPackage,
+    ExecutionSpec,
+    UserQuery,
+)
+from data_intelligence_sdk.spec import LLMSpecBuilder
 from examples.basic_workflow import ExampleIntentAnalyzer, create_example_pipeline
 
 
 class ExampleWorkflowTests(unittest.TestCase):
+    def test_pipeline_can_use_llm_spec_builder(self) -> None:
+        class FakeSpecLLMClient:
+            def complete_json(self, messages):
+                del messages
+                return {
+                    "objective": "Build a focused financial report.",
+                    "data_requirements": ["report.pdf"],
+                    "capability_requirements": [{"name": "extract_financials"}],
+                    "constraints": {"cite_sources": True},
+                    "engine_hint": "general_purpose",
+                }
+
+        pipeline = create_example_pipeline(
+            engine=object(),
+            spec_llm_client=FakeSpecLLMClient(),
+            use_llm_spec_builder=True,
+        )
+
+        self.assertIsInstance(pipeline.spec_builder, LLMSpecBuilder)
+
     def test_default_method_hub_includes_vector_search(self) -> None:
         pipeline = create_example_pipeline(llm=object())
 
@@ -28,6 +53,27 @@ class ExampleWorkflowTests(unittest.TestCase):
         )
 
         self.assertEqual(intent, "report")
+
+    def test_intent_analyzer_uses_report_for_corpus_summary_requests(self) -> None:
+        intent = ExampleIntentAnalyzer().analyze(
+            UserQuery("Summarize this data corpus package"),
+            DataCorpusPackage(sources=["postgresql://demo/db"]),
+        )
+
+        self.assertEqual(intent, "report")
+
+    def test_example_pipeline_routes_report_specs_to_report_engine(self) -> None:
+        pipeline = create_example_pipeline(llm=object())
+
+        engine = pipeline.engine_registry.select(
+            ExecutionSpec(
+                intent="report",
+                objective="Provide a concise corpus summary",
+                engine_hint="report",
+            )
+        )
+
+        self.assertEqual(engine.name, "report")
 
     def test_intent_analyzer_uses_unknown_for_outliers(self) -> None:
         intent = ExampleIntentAnalyzer().analyze(

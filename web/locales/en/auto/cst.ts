@@ -1,0 +1,15 @@
+export const AutoCstEn = {
+  'cst.operateSuccess': 'Operation succeeded',
+  'cst.updateSuccess': 'Updated successfully',
+  'cst.copySuccess': 'Copied successfully',
+  'cst.copyFailed': 'Copy failed',
+  'cst.permissionManagement': 'Permission Management',
+  'cst.adminLabel': 'Administrators (employee ID, remove leading 0):',
+  'cst.verificationPassed': 'Verification passed',
+  'cst.deleteSuccess': 'Deleted successfully',
+  'cst.confirmDelete': 'Are you sure you want to delete?',
+  'cst.resourceType': 'Resource type {{type}}',
+  'cst.viewDetails': 'View details',
+  'cst.selectPrompt': 'Select prompt',
+  'cst.uploadIcon': 'Upload icon',
+} as const;

@@ -48,6 +48,121 @@ class FakeDataSelector:
 
 
 class LLMSpecBuilderTests(unittest.TestCase):
+    def test_builder_can_default_missing_actionable_requirements(
+        self,
+    ) -> None:
+        llm = FakeLLMClient(
+            [
+                {
+                    "objective": "Summarize the available data corpus.",
+                    "data_requirements": [],
+                    "capability_requirements": [],
+                    "constraints": {"evidence_required": True},
+                    "engine_hint": None,
+                }
+            ]
+        )
+        builder = LLMSpecBuilder(
+            llm,
+            require_actionable_spec=True,
+            default_missing_requirements=True,
+        )
+        sources = [
+            "postgresql://demo/db?schema=vectordb",
+            "postgresql://demo/db",
+        ]
+
+        spec = builder.build(
+            UserQuery("Summarize this data corpus package"),
+            "reason",
+            DataCorpusPackage(sources=sources),
+        )
+
+        self.assertEqual(spec.data_requirements, sources)
+        self.assertEqual(
+            [requirement.name for requirement in spec.capability_requirements],
+            ["summarize_corpus"],
+        )
+        self.assertEqual(len(llm.messages), 1)
+
+    def test_default_capability_uses_intent_for_report_and_question_specs(self) -> None:
+        report_builder = LLMSpecBuilder(
+            FakeLLMClient([]), default_missing_requirements=True
+        )
+
+        report_name = report_builder._default_capability_name(
+            ExecutionSpec(intent="report", objective="Prepare an executive briefing")
+        )
+        question_name = report_builder._default_capability_name(
+            ExecutionSpec(intent="reason", objective="Find the highest revenue")
+        )
+
+        self.assertEqual(report_name, "generate_report")
+        self.assertEqual(question_name, "answer_question")
+
+    def test_default_data_requirements_honor_vectordb_objective(self) -> None:
+        vector_source = "postgresql://demo/db?schema=vectordb"
+        relational_source = "postgresql://demo/db"
+        builder = LLMSpecBuilder(
+            FakeLLMClient(
+                [
+                    {
+                        "objective": "Summarize document chunks stored in the vectordb",
+                        "data_requirements": [vector_source, relational_source],
+                        "capability_requirements": [{"name": "generate_report"}],
+                        "constraints": {},
+                        "engine_hint": None,
+                    }
+                ]
+            ),
+            require_actionable_spec=True,
+            default_missing_requirements=True,
+        )
+
+        spec = builder.build(
+            UserQuery("Summarize the vectordb"),
+            "report",
+            DataCorpusPackage(sources=[vector_source, relational_source]),
+        )
+
+        self.assertEqual(spec.data_requirements, [vector_source])
+
+    def test_build_retries_when_llm_payload_fails_validation(self) -> None:
+        llm = FakeLLMClient(
+            [
+                {
+                    "objective": "Generate a report.",
+                    "data_requirements": [],
+                    "capability_requirements": [],
+                    "constraints": {},
+                    "engine_hint": "report",
+                },
+                {
+                    "objective": "Create an evidence-backed report.",
+                    "data_requirements": ["report.pdf"],
+                    "capability_requirements": [{"name": "generate_report"}],
+                    "constraints": {"evidence_required": True},
+                    "engine_hint": "report",
+                },
+            ]
+        )
+        builder = LLMSpecBuilder(
+            llm,
+            max_validation_retries=1,
+            require_actionable_spec=True,
+        )
+
+        spec = builder.build(
+            UserQuery("Create a report"),
+            "report",
+            DataCorpusPackage(sources=["report.pdf"]),
+        )
+
+        self.assertEqual(spec.objective, "Create an evidence-backed report.")
+        self.assertEqual(len(llm.messages), 2)
+        self.assertIn("must reference at least one available source", llm.messages[1][-1]["content"])
+        self.assertIn("report.pdf", llm.messages[1][-1]["content"])
+
     def test_build_converts_llm_json_to_execution_spec(self) -> None:
         llm = FakeLLMClient(
             [

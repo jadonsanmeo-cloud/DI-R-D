@@ -25,12 +25,18 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.engines.report import ReportEngine
-from data_intelligence_sdk.methods import register_csv_methods, register_vector_methods
+from data_intelligence_sdk.methods import (
+    register_csv_methods,
+    register_postgres_methods,
+    register_vector_methods,
+)
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
+from data_intelligence_sdk.runtime.llm_client import LLMClient, OpenAICompatibleLLMClient
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
+from data_intelligence_sdk.spec import LLMSpecBuilder
 
 
 def _as_result_dict(value: Any) -> dict[str, Any]:
@@ -53,7 +59,16 @@ class ExampleIntentAnalyzer:
         text = query.text.lower()
         if any(
             term in text
-            for term in ("report", "dashboard", "write up", "write-up", "briefing")
+            for term in (
+                "report",
+                "dashboard",
+                "write up",
+                "write-up",
+                "briefing",
+                "summarize",
+                "summary",
+                "overview",
+            )
         ):
             return "report"
         if any(
@@ -111,6 +126,31 @@ class ExampleSpecBuilder:
             ],
         )
 
+    def revise(
+        self,
+        *,
+        previous_spec: ExecutionSpec,
+        user_feedback: str,
+        query: UserQuery,
+        intent: Intent,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        del query, corpus_package, session_context, user_context
+        return ExecutionSpec(
+            intent=intent,
+            objective=f"{previous_spec.objective}\nRevision: {user_feedback}",
+            data_requirements=list(previous_spec.data_requirements),
+            capability_requirements=list(previous_spec.capability_requirements),
+            constraints={
+                **previous_spec.constraints,
+                "user_revision_feedback": user_feedback,
+            },
+            confirmed=False,
+            engine_hint=previous_spec.engine_hint,
+        )
+
 
 class ExampleSpecConfirmation:
     def confirm(
@@ -162,6 +202,9 @@ def create_example_pipeline(
     api_key: str | None = None,
     config_path: str | Path | None = None,
     config_manager: ConfigManager | None = None,
+    spec_builder: object | None = None,
+    spec_llm_client: LLMClient | None = None,
+    use_llm_spec_builder: bool = False,
     allow_method_generation: bool = True,
     method_hub: MethodHub | None = None,
     interface_registry: object | None = None,
@@ -172,7 +215,24 @@ def create_example_pipeline(
     method_hub = method_hub or MethodHub()
     if not method_hub.list_methods():
         register_csv_methods(method_hub)
+        register_postgres_methods(method_hub)
         register_vector_methods(method_hub)
+    resolved_config_manager = config_manager or ConfigManager(config_path)
+    if spec_builder is None:
+        if use_llm_spec_builder:
+            settings = resolved_config_manager.openrouter_settings()
+            spec_llm_client = spec_llm_client or OpenAICompatibleLLMClient(
+                base_url=settings.base_url,
+                api_key=api_key or settings.api_key,
+                model=model or settings.model,
+            )
+            spec_builder = LLMSpecBuilder(
+                spec_llm_client,
+                require_actionable_spec=True,
+                default_missing_requirements=True,
+            )
+        else:
+            spec_builder = ExampleSpecBuilder()
     if engine is None:
         if llm is not None:
             engine = GeneralPurposeEngine(llm=llm)
@@ -181,14 +241,15 @@ def create_example_pipeline(
                 model=model,
                 api_key=api_key,
                 config_path=config_path,
-                config_manager=config_manager,
+                config_manager=resolved_config_manager,
                 allow_method_generation=allow_method_generation,
             )
     interface_registry = interface_registry or InMemoryInterfaceRegistry()
     registry = InMemoryEngineRegistry(fallback_engine=engine)
+    registry.register(ReportEngine())
     return DataIntelligencePipeline(
         intent_analyzer=ExampleIntentAnalyzer(),
-        spec_builder=ExampleSpecBuilder(),
+        spec_builder=spec_builder,
         spec_confirmation=ExampleSpecConfirmation(),
         engine_registry=registry,
         evidence_collector=ExampleEvidenceCollector(),
