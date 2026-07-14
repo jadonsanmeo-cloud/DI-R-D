@@ -1,6 +1,8 @@
 import unittest
 
 from data_intelligence_sdk.methods.vector import (
+    get_vector_stats_with_connection,
+    inspect_vector_chunks_with_connection,
     register_vector_methods,
     search_vector_chunks,
     search_vector_chunks_with_connection,
@@ -25,6 +27,9 @@ class FakeCursor:
     def fetchall(self):
         return self.rows
 
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
 
 class FakeConnection:
     def __init__(self, rows):
@@ -47,11 +52,49 @@ class VectorMethodTests(unittest.TestCase):
         register_vector_methods(method_hub)
 
         method_names = {method.name for method in method_hub.list_methods()}
-        self.assertEqual(method_names, {"search_vector_chunks"})
+        self.assertEqual(
+            method_names,
+            {"search_vector_chunks", "inspect_vector_chunks", "get_vector_stats"},
+        )
         definition = method_hub.get_definition("search_vector_chunks")
         self.assertIn("search_vectordb", definition.capability_names)
         self.assertIn("semantic_search", definition.capability_names)
         self.assertIn("Postgres pgvector", definition.metadata["description"])
+
+    def test_inspect_vector_chunks_returns_bounded_rows(self) -> None:
+        rows = [
+            (
+                "chunk_orders_summary_001",
+                "orders_summary",
+                "Orders cover revenue by country and status.",
+                {"source_file": "raw/txt/orders_summary.txt"},
+                1.0,
+            )
+        ]
+        connection = FakeConnection(rows)
+
+        result = inspect_vector_chunks_with_connection(
+            "postgresql://demo/db?schema=vectordb",
+            limit=4,
+            connection_factory=lambda dsn: connection,
+        )
+
+        self.assertEqual(result["row_count"], 1)
+        self.assertEqual(result["rows"][0]["document_id"], "orders_summary")
+        _, params = connection.cursor_obj.executed[0]
+        self.assertEqual(params, (4,))
+
+    def test_get_vector_stats_returns_exact_counts(self) -> None:
+        connection = FakeConnection([(12, 5)])
+
+        result = get_vector_stats_with_connection(
+            "postgresql://demo/db?schema=vectordb",
+            connection_factory=lambda dsn: connection,
+        )
+
+        self.assertEqual(result["chunk_count"], 12)
+        self.assertEqual(result["document_count"], 5)
+        self.assertEqual(result["rows"][0]["collection"], "vectordb.document_chunks")
 
     def test_search_vector_chunks_uses_pgvector_when_embedding_is_provided(
         self,

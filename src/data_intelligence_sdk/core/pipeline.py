@@ -7,6 +7,7 @@ from data_intelligence_sdk.core.types import (
     ExecutionSpec,
     FinalResponse,
     Intent,
+    PreparedExecution,
     SessionContext,
     UserContext,
     UserQuery,
@@ -73,6 +74,31 @@ class DataIntelligencePipeline:
     ) -> FinalResponse:
         """Run the full data intelligence flow."""
 
+        prepared = self.prepare_spec(
+            query,
+            corpus_package,
+            session_context,
+            user_context,
+        )
+        confirmed_spec = self._confirm_spec(
+            prepared.spec,
+            prepared.query,
+            prepared.intent,
+            prepared.corpus_package,
+            prepared.session_context,
+            prepared.user_context,
+        )
+        return self.execute_confirmed_spec(prepared, confirmed_spec)
+
+    def prepare_spec(
+        self,
+        query: UserQuery,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> PreparedExecution:
+        """Analyze intent and build a draft spec without selecting an engine."""
+
         self._log(
             "pipeline.start",
             {
@@ -98,14 +124,63 @@ class DataIntelligencePipeline:
                 "data_requirement_count": len(spec.data_requirements),
             },
         )
-        confirmed_spec = self._confirm_spec(
-            spec,
-            query,
-            intent,
-            corpus_package,
-            session_context,
-            user_context,
+        return PreparedExecution(
+            query=query,
+            intent=intent,
+            corpus_package=corpus_package,
+            spec=spec,
+            session_context=session_context,
+            user_context=user_context,
         )
+
+    def revise_spec(
+        self,
+        prepared: PreparedExecution,
+        previous_spec: ExecutionSpec,
+        feedback: str,
+    ) -> ExecutionSpec:
+        """Revise a prepared execution spec from explicit user feedback."""
+
+        if not feedback.strip():
+            raise ValueError("Spec revision requires feedback.")
+        revise = getattr(self.spec_builder, "revise", None)
+        if revise is None:
+            raise TypeError(
+                "Spec confirmation requested revision, but spec_builder has no revise method."
+            )
+        self._log(
+            "pipeline.spec_revision_started",
+            {"intent": prepared.intent, "feedback": feedback},
+        )
+        revised = revise(
+            previous_spec=previous_spec,
+            user_feedback=feedback,
+            query=prepared.query,
+            intent=prepared.intent,
+            corpus_package=prepared.corpus_package,
+            session_context=prepared.session_context,
+            user_context=prepared.user_context,
+        )
+        self._log(
+            "pipeline.spec_revised",
+            {
+                "intent": revised.intent,
+                "objective": revised.objective,
+                "capability_count": len(revised.capability_requirements),
+                "data_requirement_count": len(revised.data_requirements),
+            },
+        )
+        return revised
+
+    def execute_confirmed_spec(
+        self,
+        prepared: PreparedExecution,
+        confirmed_spec: ExecutionSpec,
+    ) -> FinalResponse:
+        """Execute a previously prepared and explicitly confirmed spec."""
+
+        if not confirmed_spec.confirmed:
+            raise ValueError("Execution spec must be confirmed before engine selection.")
         self._log(
             "pipeline.spec_confirmed",
             {"confirmed": confirmed_spec.confirmed, "engine_hint": confirmed_spec.engine_hint},
@@ -125,7 +200,12 @@ class DataIntelligencePipeline:
             log_store=self.log_store,
             resource_manager=self.resource_manager,
         )
-        output = engine.run(confirmed_spec, corpus_package, runtime, user_context)
+        output = engine.run(
+            confirmed_spec,
+            prepared.corpus_package,
+            runtime,
+            prepared.user_context,
+        )
         self._log(
             "pipeline.engine_completed",
             {
@@ -152,7 +232,6 @@ class DataIntelligencePipeline:
             },
         )
         return response
-        return self.synthesizer.synthesize(confirmed_spec, output, evidence)
 
     def _confirm_spec(
         self,
@@ -174,19 +253,18 @@ class DataIntelligencePipeline:
                     )
                 if not confirmation_result.feedback:
                     raise ValueError("Spec revision requires feedback.")
-                revise = getattr(self.spec_builder, "revise", None)
-                if revise is None:
-                    raise TypeError(
-                        "Spec confirmation requested revision, but spec_builder has no revise method."
-                    )
-                spec = revise(
-                    previous_spec=spec,
-                    user_feedback=confirmation_result.feedback,
+                prepared = PreparedExecution(
                     query=query,
                     intent=intent,
                     corpus_package=corpus_package,
+                    spec=spec,
                     session_context=session_context,
                     user_context=user_context,
+                )
+                spec = self.revise_spec(
+                    prepared,
+                    spec,
+                    confirmation_result.feedback,
                 )
                 continue
             return confirmation_result

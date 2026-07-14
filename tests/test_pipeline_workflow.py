@@ -10,6 +10,7 @@ from data_intelligence_sdk.core.types import (
     EvidenceBundle,
     ExecutionSpec,
     FinalResponse,
+    PreparedExecution,
     UserQuery,
 )
 from examples.basic_workflow import create_example_pipeline
@@ -37,8 +38,10 @@ class FakeConfirmation:
 class FakeRegistry:
     def __init__(self, engine):
         self.engine = engine
+        self.select_count = 0
 
     def select(self, spec):
+        self.select_count += 1
         return self.engine
 
 
@@ -75,6 +78,66 @@ class FakeLogger:
 
 
 class PipelineWorkflowTests(unittest.TestCase):
+    def _pipeline(self, *, logger=None):
+        engine = FakeEngine()
+        registry = FakeRegistry(engine)
+        pipeline = DataIntelligencePipeline(
+            intent_analyzer=FakeAnalyzer(),
+            spec_builder=FakeSpecBuilder(),
+            spec_confirmation=FakeConfirmation(),
+            engine_registry=registry,
+            evidence_collector=FakeEvidenceCollector(),
+            synthesizer=FakeSynthesizer(),
+            logger=logger,
+        )
+        return pipeline, registry
+
+    def test_prepare_spec_stops_before_engine_selection(self) -> None:
+        logger = FakeLogger()
+        pipeline, registry = self._pipeline(logger=logger)
+
+        prepared = pipeline.prepare_spec(
+            UserQuery("answer"), DataCorpusPackage(sources=["sales.csv"])
+        )
+
+        self.assertIsInstance(prepared, PreparedExecution)
+        self.assertEqual(prepared.intent, "reason")
+        self.assertFalse(prepared.spec.confirmed)
+        self.assertEqual(registry.select_count, 0)
+        self.assertEqual(
+            [event for event, _ in logger.events],
+            ["pipeline.start", "pipeline.intent_analyzed", "pipeline.spec_built"],
+        )
+
+    def test_execute_confirmed_spec_rejects_unconfirmed_spec(self) -> None:
+        pipeline, _ = self._pipeline()
+        prepared = pipeline.prepare_spec(UserQuery("answer"), DataCorpusPackage())
+
+        with self.assertRaisesRegex(ValueError, "confirmed"):
+            pipeline.execute_confirmed_spec(prepared, prepared.spec)
+
+    def test_execute_confirmed_spec_runs_from_engine_selection(self) -> None:
+        logger = FakeLogger()
+        pipeline, registry = self._pipeline(logger=logger)
+        prepared = pipeline.prepare_spec(UserQuery("answer"), DataCorpusPackage())
+        logger.events.clear()
+        prepared.spec.confirmed = True
+
+        response = pipeline.execute_confirmed_spec(prepared, prepared.spec)
+
+        self.assertEqual(response.answer, "answer")
+        self.assertEqual(registry.select_count, 1)
+        self.assertEqual(
+            [event for event, _ in logger.events],
+            [
+                "pipeline.spec_confirmed",
+                "pipeline.engine_selected",
+                "pipeline.engine_completed",
+                "pipeline.evidence_collected",
+                "pipeline.completed",
+            ],
+        )
+
     def test_pipeline_orchestrates_components(self) -> None:
         engine = FakeEngine()
         pipeline = DataIntelligencePipeline(

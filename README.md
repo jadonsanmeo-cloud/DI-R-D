@@ -115,6 +115,191 @@ OPENROUTER_API_KEY
 LLM_MODEL_NAME
 ```
 
+### Interactive workflow CLI
+
+Use the interactive demo to walk through the current query-to-response flow:
+
+```bash
+uv run python examples/demo_workflow_cli.py \
+  --package examples/data_corpus_package/data_corpus_package.json \
+  --config configs/proxy-openrouter.toml \
+  --env-file docker/.env \
+  --query "Summarize this data corpus package"
+```
+
+The CLI uses the LLM-backed spec builder, displays the inferred intent and
+draft `ExecutionSpec`, then pauses for an explicit decision:
+
+```text
+Decision [c]onfirm / [r]evise / [q]uit: r
+Revision feedback: Focus on monthly revenue and cite the source datasets
+
+Decision [c]onfirm / [r]evise / [q]uit: c
+```
+
+The engine does not run before confirmation. Use `q` to stop without executing
+the spec, or add `--verbose` to print the full spec, evidence, engine steps,
+MethodHub calls, artifact/log references, and response metadata:
+
+```bash
+uv run python examples/demo_workflow_cli.py \
+  --query "Explain the main findings" \
+  --verbose
+```
+
+Provider settings normally come from `configs/proxy-openrouter.toml` and the
+environment. The CLI loads `docker/.env` by default so the checked-in TOML's
+`${env:...}` placeholders work in local runs. Use `--env-file PATH` to load a
+different env file; values already exported in the shell take precedence.
+Provider settings can also be overridden with `--config`, `--model`,
+`--api-key`, and `--base-url`. Structured pipeline events are written to
+`logs/pipeline.log` by default; pass `--no-trace` to disable that file.
+
+Known PostgreSQL tables and pgvector document chunks use trusted, read-only
+MethodHub methods, so the demo does not require a generated-code sandbox for
+those sources. Start the checked-in corpus database before confirming a run:
+
+```bash
+docker compose -f examples/data_corpus_package/docker-compose.yml up -d
+```
+
+Generated tools for capabilities outside the trusted method set still require
+a separately configured `SandboxExecutor`.
+
+`--config` accepts either a repository-relative path or an absolute path:
+
+```bash
+uv run python examples/demo_workflow_cli.py \
+  --config /absolute/path/to/proxy-openrouter.toml \
+  --env-file /absolute/path/to/.env \
+  --query "Summarize this data corpus package"
+```
+
 CSV MethodHub methods live in `data_intelligence_sdk.methods` and include `scan_csv`, `filter_csv`, `count_csv`, and `sum_csv`. Example pipeline factories live in `examples.basic_workflow` as app-owned wiring outside the SDK package.
 
 Tests use fake engines or fake LLMs and do not call OpenRouter.
+
+## FastAPI Responses Backend
+
+The repository includes a FastAPI consuming application that runs the example
+Data Intelligence workflow and streams lifecycle and final-output events.
+
+Configure the workflow and API:
+
+```text
+OPENROUTER_API_KEY=...
+LLM_MODEL_NAME=...
+DATA_CORPUS_ROOT=/absolute/path/to/Data-Intelligence-SDK
+DATABASE_URL=postgresql://data_intelligence:data_intelligence@127.0.0.1:5432/data_intelligence
+MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/proxy-openrouter.toml
+API_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+PIPELINE_TIMEOUT_SECONDS=300
+SPEC_CONFIRMATION_TTL_SECONDS=86400
+MAX_SPEC_REVISION_ROUNDS=5
+```
+
+Start the backend:
+
+```bash
+uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Check health:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Run a streaming response against a local corpus source:
+
+```bash
+curl --no-buffer \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "input": "What is the total revenue?",
+    "data_corpus_package": {
+      "sources": ["data/data.csv"],
+      "schemas": {},
+      "metadata": {}
+    }
+  }' \
+  http://127.0.0.1:8000/api/v1/responses
+```
+
+The workflow infers whether to answer, reason, or create a report from the query.
+The initial stream ends with `response.requires_confirmation` and includes a
+`response_id`, `confirmation_token`, revision, intent, and editable spec. No
+engine runs before this event is confirmed.
+
+Revise the pending spec (repeat as needed):
+
+```bash
+curl -N http://127.0.0.1:8000/api/v1/responses/RESP_ID/decision \
+  -H 'Content-Type: application/json' \
+  -H 'X-Confirmation-Token: TOKEN' \
+  -d '{"action":"revise","revision":1,"feedback":"Use monthly totals"}'
+```
+
+Confirm and stream the answer/report:
+
+```bash
+curl -N http://127.0.0.1:8000/api/v1/responses/RESP_ID/decision \
+  -H 'Content-Type: application/json' \
+  -H 'X-Confirmation-Token: TOKEN' \
+  -d '{"action":"confirm","revision":2}'
+```
+
+Recover a paused response with `GET /api/v1/responses/RESP_ID` and the same
+`X-Confirmation-Token` header.
+
+### Backend Docker Service
+
+The Compose configuration at `docker/docker-compose.yaml` runs the FastAPI
+backend and a private PostgreSQL 17 service. It exposes only the API at
+`http://127.0.0.1:8000`, mounts `./data` read-only, and persists both uploaded
+corpus files and confirmation state in Docker volumes. Optional model-provider
+credentials and `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are read
+from `docker/.env` at container startup. The API loads its model definition from
+`/app/configs/proxy-openrouter.toml` through `MODEL_CONFIG_PATH`; values such as
+`LLM_MODEL_NAME` and `OPENROUTER_API_KEY` are resolved from `docker/.env`.
+
+Build and start the API:
+
+```bash
+docker compose -f docker/docker-compose.yaml up --build -d
+```
+
+Check container status and logs:
+
+```bash
+docker compose -f docker/docker-compose.yaml ps
+docker compose -f docker/docker-compose.yaml logs -f api
+```
+
+Check API health:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Run a streaming response:
+
+```bash
+curl -N http://127.0.0.1:8000/api/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "input": "Analyze this dataset",
+    "data_corpus_package": {
+      "sources": ["data/data.csv"],
+      "schemas": {},
+      "metadata": {}
+    },
+    "session_id": "docker-test"
+  }'
+```
+
+Stop the API container:
+
+```bash
+docker compose -f docker/docker-compose.yaml down
+```

@@ -1,0 +1,55 @@
+name: data-intelligence-sdk
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: data-intelligence-sdk-api:local
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_CORPUS_ROOT: /app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-data_intelligence}:${POSTGRES_PASSWORD:-data_intelligence}@db:5432/${POSTGRES_DB:-data_intelligence}
+      API_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      PIPELINE_TIMEOUT_SECONDS: "300"
+      SPEC_CONFIRMATION_TTL_SECONDS: "86400"
+      MAX_SPEC_REVISION_ROUNDS: "5"
+      MODEL_CONFIG_PATH: /app/configs/proxy-openrouter.toml
+      PYTHONUNBUFFERED: "1"
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../data:/app/data:ro
+      - api_uploads:/app/.uploads
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-data_intelligence}
+      POSTGRES_USER: ${POSTGRES_USER:-data_intelligence}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-data_intelligence}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-data_intelligence} -d ${POSTGRES_DB:-data_intelligence}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  api_uploads:
+  postgres_data:

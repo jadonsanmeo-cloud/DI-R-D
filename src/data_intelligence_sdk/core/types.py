@@ -69,6 +69,18 @@ class SessionContext:
 
 
 @dataclass(slots=True)
+class PreparedExecution:
+    """Prepared workflow state that can pause before engine selection."""
+
+    query: UserQuery
+    intent: Intent
+    corpus_package: DataCorpusPackage
+    spec: "ExecutionSpec"
+    session_context: SessionContext | None = None
+    user_context: UserContext | None = None
+
+
+@dataclass(slots=True)
 class CapabilityRequirement:
     """A capability the selected engine/runtime must resolve."""
 

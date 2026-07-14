@@ -9,11 +9,15 @@ description = "Base package skeleton for a data intelligence engine orchestratio
 requires-python = ">=3.11"
 dependencies = [
     "dotenv>=0.9.9",
+    "fastapi>=0.139.0",
+    "httpx>=0.28.1",
     "langchain>=1.3.11",
     "langchain-openai>=1.3.3",
     "PyYAML>=6.0.3",
     "langgraph>=1.2.7",
-    "psycopg[binary]>=3.2.13",
+    "psycopg[binary]>=3.3.4",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.51.0",
 ]
 
 [tool.setuptools.packages.find]

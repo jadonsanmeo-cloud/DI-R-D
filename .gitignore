@@ -19,4 +19,9 @@ data.zip
 docs/superpowers/
 .claude/
 .env
+.next/
+node_modules/
+.agents/
+,codex/
+
 #############
