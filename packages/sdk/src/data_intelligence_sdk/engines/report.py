@@ -364,20 +364,6 @@ def _scope_from_spec(spec: ExecutionSpec, corpus_package: DataCorpusPackage) -> 
     selected_sources = selected.get("selected_sources") or scope.get("sources") or spec.data_requirements
     if not selected_sources:
         selected_sources = corpus_package.sources
-    selected_sources = [str(item) for item in selected_sources]
-    source_scope_explicit = bool(spec.data_requirements) and set(selected_sources) != set(
-        corpus_package.sources
-    )
-    vector_source_selected = any(
-        "schema=vectordb" in source.lower()
-        or source.lower().rstrip("/").endswith("/vectordb")
-        for source in selected_sources
-    )
-    relational_source_selected = any(
-        source.lower().startswith(("postgresql://", "postgres://"))
-        and "schema=vectordb" not in source.lower()
-        for source in selected_sources
-    )
     selected_tables = selected.get("selected_tables") or scope.get("tables")
     selected_vectors = selected.get("selected_vector_collections")
     if selected_vectors is None:
@@ -386,27 +372,17 @@ def _scope_from_spec(spec: ExecutionSpec, corpus_package: DataCorpusPackage) -> 
     if selected_documents is None:
         selected_documents = scope.get("documents")
     columns = selected.get("selected_columns") or constraints.get("columns") or {}
-    has_explicit_scope = bool(scope or selected or source_scope_explicit)
+    has_explicit_scope = bool(scope or selected)
     if selected_tables is None:
-        selected_tables = (
-            list(corpus_package.schemas.get("tables", {}))
-            if not source_scope_explicit or relational_source_selected
-            else []
-        )
+        selected_tables = list(corpus_package.schemas.get("tables", {}))
     if selected_vectors is None:
         selected_vectors = (
-            list(corpus_package.schemas.get("vector_collections", {}))
-            if vector_source_selected
-            else (
-                []
-                if has_explicit_scope
-                else list(corpus_package.schemas.get("vector_collections", {}))
-            )
+            [] if has_explicit_scope else list(corpus_package.schemas.get("vector_collections", {}))
         )
     if selected_documents is None:
         selected_documents = []
     return {
-        "sources": selected_sources,
+        "sources": [str(item) for item in selected_sources or []],
         "tables": [str(item) for item in selected_tables or []],
         "vector_collections": [str(item) for item in selected_vectors or []],
         "documents": [str(item) for item in selected_documents or []],
@@ -609,53 +585,11 @@ class PlanAgent(_PromptAgent):
         for index, raw_step in enumerate(payload.get("steps", []), start=1):
             if not isinstance(raw_step, dict):
                 continue
-            raw_operation = raw_step.get("operation")
-            operation_kind = (
-                str(raw_operation.get("kind", "")).lower()
-                if isinstance(raw_operation, dict)
-                else ""
-            )
-            step_text = _json_dumps(raw_step).lower()
-            if operation_kind in {"generate_report", "report", "render", "assemble_report"}:
-                continue
             required_data = raw_step.get("required_data", {})
             if not isinstance(required_data, dict):
                 required_data = {}
             tables = [str(item) for item in required_data.get("tables", [])]
             vectors = [str(item) for item in required_data.get("vector_collections", [])]
-            if not tables:
-                tables = self._infer_tables_from_step(
-                    step_text,
-                    scope["tables"],
-                    corpus_package,
-                )
-                if not tables and any(
-                    token in step_text
-                    for token in ("row count", "row_count", "table count", "table sizes")
-                ):
-                    tables = list(scope["tables"])
-            if not vectors:
-                vectors = [
-                    name
-                    for name in scope["vector_collections"]
-                    if name.lower() in step_text
-                ]
-                if not vectors and any(
-                    token in step_text
-                    for token in ("vectordb", "vector collection", "document chunk")
-                ):
-                    vectors = list(scope["vector_collections"])
-            if not tables and not vectors and "report" in step_text and any(
-                token in step_text
-                for token in (
-                    "assemble",
-                    "render",
-                    "final report",
-                    "generate_summary_report",
-                    "generate summary report",
-                )
-            ):
-                continue
             if scope["explicit"] and (
                 any(item not in allowed_tables for item in tables)
                 or any(item not in allowed_vectors for item in vectors)
@@ -668,13 +602,8 @@ class PlanAgent(_PromptAgent):
             columns = [str(item) for item in required_data.get("columns", [])]
             if tables and scope["columns"].get(tables[0]):
                 columns = [item for item in columns if item in scope["columns"][tables[0]]]
-            raw_outputs = raw_step.get("outputs")
-            outputs = (
-                [deepcopy(item) for item in raw_outputs if isinstance(item, dict)]
-                if isinstance(raw_outputs, list)
-                else []
-            )
-            if not outputs:
+            outputs = raw_step.get("outputs")
+            if not isinstance(outputs, list) or not outputs:
                 outputs = [
                     {
                         "name": f"{step_id}-result",
@@ -683,27 +612,12 @@ class PlanAgent(_PromptAgent):
                         "consumer_hints": ["analysis", "report"],
                     }
                 ]
-            raw_inputs = raw_step.get("inputs")
-            inputs = (
-                [deepcopy(item) for item in raw_inputs if isinstance(item, dict)]
-                if isinstance(raw_inputs, list)
-                else []
-            )
-            operation = raw_step.get("operation")
-            if not isinstance(operation, dict):
-                operation = {"kind": "analyze"}
-            fallback = raw_step.get("fallback")
-            if not isinstance(fallback, dict):
-                fallback = {
-                    "action": "complete_no_data",
-                    "message": "No matching data was found.",
-                }
             normalized_steps.append(
                 {
                     **raw_step,
                     "step_id": step_id,
                     "required": bool(raw_step.get("required", True)),
-                    "inputs": inputs,
+                    "inputs": raw_step.get("inputs", []),
                     "depends_on": [str(item) for item in raw_step.get("depends_on", [])],
                     "required_data": {
                         **required_data,
@@ -711,9 +625,12 @@ class PlanAgent(_PromptAgent):
                         "vector_collections": vectors,
                         "columns": columns,
                     },
-                    "operation": operation,
+                    "operation": raw_step.get("operation", {"kind": "analyze"}),
                     "outputs": outputs,
-                    "fallback": fallback,
+                    "fallback": raw_step.get(
+                        "fallback",
+                        {"action": "complete_no_data", "message": "No matching data was found."},
+                    ),
                 }
             )
         revision = int(payload.get("revision", (previous_plan or {}).get("revision", 0) + 1))
@@ -726,35 +643,6 @@ class PlanAgent(_PromptAgent):
             "steps": normalized_steps,
             "warnings": payload.get("warnings", []),
         }
-
-    def _infer_tables_from_step(
-        self,
-        step_text: str,
-        allowed_tables: list[str],
-        corpus_package: DataCorpusPackage,
-    ) -> list[str]:
-        direct = [name for name in allowed_tables if name.lower() in step_text]
-        if direct:
-            return direct
-        if any(token in step_text for token in ("core table", "all table", "warehouse table")):
-            return list(allowed_tables)
-
-        ranked: list[tuple[int, str]] = []
-        schemas = corpus_package.schemas.get("tables", {})
-        for table in allowed_tables:
-            metadata = schemas.get(table, {}) if isinstance(schemas, dict) else {}
-            columns = _table_columns(metadata) if isinstance(metadata, dict) else []
-            score = sum(
-                1
-                for column in columns
-                if len(column) > 3 and column.lower() in step_text
-            )
-            if score:
-                ranked.append((score, table))
-        if not ranked:
-            return []
-        best_score = max(score for score, _ in ranked)
-        return [table for score, table in ranked if score == best_score]
 
     def _fallback_plan(
         self,
@@ -1116,9 +1004,6 @@ class RouterAgent(_PromptAgent):
         method_hub: list[dict[str, Any]],
         sources: list[str],
     ) -> dict[str, Any]:
-        trusted_route = self._trusted_route(step_request, method_hub, sources)
-        if trusted_route is not None:
-            return trusted_route
         payload = self._invoke_json(
             step_request=step_request,
             method_hub=method_hub,
@@ -1134,121 +1019,6 @@ class RouterAgent(_PromptAgent):
                 payload.setdefault("reason", "Selected by Routing Agent.")
                 return payload
         return self._fallback_route(step_request, method_hub, sources)
-
-    def _trusted_route(
-        self,
-        step_request: dict[str, Any],
-        method_hub: list[dict[str, Any]],
-        sources: list[str],
-    ) -> dict[str, Any] | None:
-        method_names = {str(item.get("tool_name")) for item in method_hub}
-        required_data = step_request.get("required_data", {})
-        if not isinstance(required_data, dict):
-            required_data = {}
-        tables = [str(item) for item in required_data.get("tables", [])]
-        vectors = [str(item) for item in required_data.get("vector_collections", [])]
-        operation = step_request.get("operation", {})
-        if not isinstance(operation, dict):
-            operation = {}
-        parameters = operation.get("parameters", {})
-        if not isinstance(parameters, dict):
-            parameters = {}
-
-        vector_source = next(
-            (source for source in sources if "schema=vectordb" in source.lower()),
-            None,
-        )
-        if vectors and vector_source and "inspect_vector_chunks" in method_names:
-            step_text = _json_dumps(step_request).lower()
-            if (
-                "get_vector_stats" in method_names
-                and any(token in step_text for token in ("vector stat", "chunk count", "document count"))
-            ):
-                return {
-                    "route": "existing_tool",
-                    "tool_name": "get_vector_stats",
-                    "arguments": {"vectordb": vector_source},
-                    "reason": "A trusted pgvector statistics method matches the plan step.",
-                }
-            return {
-                "route": "existing_tool",
-                "tool_name": "inspect_vector_chunks",
-                "arguments": {"vectordb": vector_source, "limit": 20},
-                "reason": "A trusted pgvector inspection method matches the plan step.",
-            }
-
-        database_source = next(
-            (
-                source
-                for source in sources
-                if source.lower().startswith(("postgresql://", "postgres://"))
-                and "schema=vectordb" not in source.lower()
-            ),
-            None,
-        )
-        if not tables or database_source is None:
-            return None
-        step_text = _json_dumps(step_request).lower()
-        if "count_postgres_tables" in method_names and any(
-            token in step_text
-            for token in ("row count", "row_count", "table count", "table sizes")
-        ):
-            return {
-                "route": "existing_tool",
-                "tool_name": "count_postgres_tables",
-                "arguments": {"database": database_source, "tables": tables},
-                "reason": "A trusted PostgreSQL row-count method matches the plan step.",
-            }
-        if len(tables) > 1 and "inspect_postgres_tables" in method_names:
-            return {
-                "route": "existing_tool",
-                "tool_name": "inspect_postgres_tables",
-                "arguments": {
-                    "database": database_source,
-                    "tables": tables,
-                    "columns_by_table": {},
-                    "limit_per_table": 20,
-                },
-                "reason": "A trusted multi-table PostgreSQL inspection matches the plan step.",
-            }
-        table = tables[0]
-        operation_kind = str(operation.get("kind", "inspect")).lower()
-        if operation_kind == "aggregate" and "aggregate_postgres_table" in method_names:
-            metrics = parameters.get("metrics", [])
-            if not isinstance(metrics, list):
-                metrics = []
-            metrics = [item for item in metrics if isinstance(item, dict)]
-            group_by = parameters.get("group_by", [])
-            if not isinstance(group_by, list):
-                group_by = []
-            filters = parameters.get("filters", {})
-            if not isinstance(filters, dict):
-                filters = {}
-            return {
-                "route": "existing_tool",
-                "tool_name": "aggregate_postgres_table",
-                "arguments": {
-                    "database": database_source,
-                    "table": table,
-                    "metrics": metrics,
-                    "group_by": group_by,
-                    "filters": filters,
-                },
-                "reason": "A trusted PostgreSQL aggregation method matches the plan step.",
-            }
-        if "inspect_postgres_table" in method_names:
-            return {
-                "route": "existing_tool",
-                "tool_name": "inspect_postgres_table",
-                "arguments": {
-                    "database": database_source,
-                    "table": table,
-                    "columns": required_data.get("columns", []),
-                    "limit": 20,
-                },
-                "reason": "A trusted PostgreSQL inspection method matches the plan step.",
-            }
-        return None
 
     def _fallback_route(
         self,
@@ -1382,12 +1152,9 @@ class DataScienceAgent(_PromptAgent):
         if isinstance(payload, dict):
             payload.setdefault("status", "completed")
             payload.setdefault("analysis_summary", "No analysis summary was produced.")
-            if not isinstance(payload.get("observations"), list):
-                payload["observations"] = []
-            if not isinstance(payload.get("aggregated_data"), dict):
-                payload["aggregated_data"] = {}
-            if not isinstance(payload.get("warnings"), list):
-                payload["warnings"] = []
+            payload.setdefault("observations", [])
+            payload.setdefault("aggregated_data", {})
+            payload.setdefault("warnings", [])
             return payload
         return self._fallback_analysis(step, materialized_result, raw_data)
 
@@ -1538,7 +1305,7 @@ class ReportAgent(_PromptAgent):
             chart_results=chart_results,
             source_summary={"sources": scoped_payload.get("sources", [])},
         )
-        if self._is_valid_structured_payload(payload):
+        if isinstance(payload, dict) and isinstance(payload.get("sections"), list):
             payload.setdefault("schema_version", "1.0")
             payload.setdefault("status", "completed")
             payload.setdefault("template", self._template_ref(template_instance))
@@ -1550,22 +1317,6 @@ class ReportAgent(_PromptAgent):
         return self._fallback_structured(
             spec, template_instance, data_step_results, chart_results, scoped_payload
         )
-
-    def _is_valid_structured_payload(self, payload: Any) -> bool:
-        if not isinstance(payload, dict) or not isinstance(payload.get("sections"), list):
-            return False
-        for section in payload["sections"]:
-            if not isinstance(section, dict):
-                return False
-            blocks = section.get("blocks", [])
-            if not isinstance(blocks, list):
-                return False
-            for block in blocks:
-                if not isinstance(block, dict):
-                    return False
-                if "content" in block and not isinstance(block["content"], dict):
-                    return False
-        return True
 
     def _fallback_structured(
         self,
