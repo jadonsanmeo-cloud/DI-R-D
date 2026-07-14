@@ -75,10 +75,56 @@ class CreateReportExampleTests(unittest.TestCase):
                 module.main()
 
         rendered = stdout.getvalue()
-        self.assertIn("# Data Corpus Report", rendered)
+        self.assertIn("# Data Intelligence Report", rendered)
         self.assertIn("A small sales corpus.", rendered)
         self.assertIn("## Datasets", rendered)
         self.assertIn("orders", rendered)
+
+    def test_default_trace_writes_pipeline_log_file(self) -> None:
+        module = load_create_report_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            package_dir = Path(temp_dir)
+            schema_path = package_dir / "schema.json"
+            schema_path.write_text(json.dumps({"tables": {}}), encoding="utf-8")
+            catalog_path = package_dir / "catalog.json"
+            catalog_path.write_text(
+                json.dumps({"summary": "Trace report.", "datasets": []}),
+                encoding="utf-8",
+            )
+            package_path = package_dir / "data_corpus_package.json"
+            package_path.write_text(
+                json.dumps(
+                    {
+                        "vectordb": "postgresql://demo:demo@localhost:5432/data_corpus?schema=vectordb",
+                        "db": "postgresql://demo:demo@localhost:5432/data_corpus",
+                        "schema": "schema.json",
+                        "catalog": "catalog.json",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            log_path = package_dir / "logs" / "pipeline.log"
+            argv = [
+                "create_report.py",
+                "--package",
+                str(package_path),
+                "--trace-log-path",
+                str(log_path),
+            ]
+
+            with (
+                patch.object(sys, "argv", argv),
+                redirect_stdout(io.StringIO()),
+            ):
+                module.main()
+
+            log_lines = log_path.read_text(encoding="utf-8").splitlines()
+
+        events = [json.loads(line)["event"] for line in log_lines]
+        self.assertIn("pipeline.start", events)
+        self.assertIn("pipeline.engine_selected", events)
+        self.assertIn("pipeline.completed", events)
 
 
 if __name__ == "__main__":

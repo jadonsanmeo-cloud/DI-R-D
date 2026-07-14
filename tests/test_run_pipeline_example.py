@@ -58,10 +58,44 @@ class RunPipelineExampleTests(unittest.TestCase):
             ):
                 module.main()
 
-        create_pipeline.assert_called_once_with()
+        create_pipeline.assert_called_once()
+        self.assertIsInstance(
+            create_pipeline.call_args.kwargs["logger"], module.FileRuntimeLogger
+        )
         self.assertEqual(fake_pipeline.query.text, "What columns are in this file?")
         self.assertEqual(fake_pipeline.corpus_package.sources, [str(csv_path)])
         self.assertEqual(stdout.getvalue().strip(), "openrouter answer")
+
+    def test_no_trace_flag_disables_pipeline_log_file(self) -> None:
+        module = load_run_pipeline_module()
+        fake_pipeline = FakePipeline()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "sales.csv"
+            csv_path.write_text(
+                "country,status,revenue\nUS,complete,10\n", encoding="utf-8"
+            )
+            argv = [
+                "run_pipeline.py",
+                "--source",
+                str(csv_path),
+                "--query",
+                "What columns are in this file?",
+                "--no-trace",
+            ]
+
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(
+                    module,
+                    "create_example_pipeline",
+                    return_value=fake_pipeline,
+                ) as create_pipeline,
+                redirect_stdout(io.StringIO()),
+            ):
+                module.main()
+
+        create_pipeline.assert_called_once_with(logger=None)
 
     def test_repeated_source_arguments_build_corpus_sources(self) -> None:
         module = load_run_pipeline_module()
