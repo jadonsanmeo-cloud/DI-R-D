@@ -160,7 +160,6 @@ into a `MethodHub`.
 ## NAPH DataHub
 
 The repository also includes a static parsed-file catalog in
-`data_intelligence_sdk.datahub.NAPH_DATAHUB`. It is separate from Method Hub
+`examples.naph_corpus.catalog.NAPH_DATAHUB`. It is separate from Method Hub
 but follows the same idea: a deterministic, inspectable contract around
 metadata, discovery, and context generation.
-

@@ -1,8 +1,29 @@
+## Repository Layout
+
+```text
+packages/
+  sdk/       # reusable Python library
+  api/       # FastAPI application built on the SDK
+web/         # separate Next.js frontend
+examples/    # runnable examples and sample corpus packages
+data/samples/ # small checked-in fixtures
+configs/     # development and example configuration
+docs/
+docker/
+```
+
+The SDK and API are separate Python workspace packages. The API owns application
+composition; the SDK does not import the API, web client, examples, or repository
+datasets at runtime.
+
+The API layering and planned worker/RabbitMQ boundary are documented in
+[`docs/api-architecture.md`](docs/api-architecture.md).
+
 ## Setup
 
 ```
 uv venv --python 3.11
-uv sync
+uv pip install -e packages/sdk -e packages/api
 
 docker compose -f examples/data_corpus_package/docker-compose.yml up -d
 ```
@@ -122,7 +143,7 @@ Use the interactive demo to walk through the current query-to-response flow:
 ```bash
 uv run python examples/demo_workflow_cli.py \
   --package examples/data_corpus_package/data_corpus_package.json \
-  --config configs/proxy-openrouter.toml \
+  --config configs/development/proxy-openrouter.toml \
   --env-file docker/.env \
   --query "Summarize this data corpus package"
 ```
@@ -147,7 +168,7 @@ uv run python examples/demo_workflow_cli.py \
   --verbose
 ```
 
-Provider settings normally come from `configs/proxy-openrouter.toml` and the
+Provider settings normally come from `configs/development/proxy-openrouter.toml` and the
 environment. The CLI loads `docker/.env` by default so the checked-in TOML's
 `${env:...}` placeholders work in local runs. Use `--env-file PATH` to load a
 different env file; values already exported in the shell take precedence.
@@ -191,17 +212,17 @@ OPENROUTER_API_KEY=...
 LLM_MODEL_NAME=...
 DATA_CORPUS_ROOT=/absolute/path/to/Data-Intelligence-SDK
 DATABASE_URL=postgresql://data_intelligence:data_intelligence@127.0.0.1:5432/data_intelligence
-MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/proxy-openrouter.toml
+MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/development/proxy-openrouter.toml
 API_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 PIPELINE_TIMEOUT_SECONDS=300
 SPEC_CONFIRMATION_TTL_SECONDS=86400
 MAX_SPEC_REVISION_ROUNDS=5
 ```
 
-Start the backend:
+Start the data_intelligence_api:
 
 ```bash
-uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Check health:
@@ -218,7 +239,7 @@ curl --no-buffer \
   -d '{
     "input": "What is the total revenue?",
     "data_corpus_package": {
-      "sources": ["data/data.csv"],
+      "sources": ["data/samples/data.csv"],
       "schemas": {},
       "metadata": {}
     }
@@ -255,12 +276,12 @@ Recover a paused response with `GET /api/v1/responses/RESP_ID` and the same
 ### Backend Docker Service
 
 The Compose configuration at `docker/docker-compose.yaml` runs the FastAPI
-backend and a private PostgreSQL 17 service. It exposes only the API at
+data_intelligence_api and a private PostgreSQL 17 service. It exposes only the API at
 `http://127.0.0.1:8000`, mounts `./data` read-only, and persists both uploaded
 corpus files and confirmation state in Docker volumes. Optional model-provider
 credentials and `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are read
 from `docker/.env` at container startup. The API loads its model definition from
-`/app/configs/proxy-openrouter.toml` through `MODEL_CONFIG_PATH`; values such as
+`/app/configs/development/proxy-openrouter.toml` through `MODEL_CONFIG_PATH`; values such as
 `LLM_MODEL_NAME` and `OPENROUTER_API_KEY` are resolved from `docker/.env`.
 
 Build and start the API:
@@ -290,7 +311,7 @@ curl -N http://127.0.0.1:8000/api/v1/responses \
   -d '{
     "input": "Analyze this dataset",
     "data_corpus_package": {
-      "sources": ["data/data.csv"],
+      "sources": ["data/samples/data.csv"],
       "schemas": {},
       "metadata": {}
     },

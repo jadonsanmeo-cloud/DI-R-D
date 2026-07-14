@@ -64,7 +64,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", help="OpenAI-compatible base URL override.")
     parser.add_argument(
         "--config",
-        default="configs/proxy-openrouter.toml",
+        default="configs/development/proxy-openrouter.toml",
         help="Model configuration TOML path.",
     )
     parser.add_argument(
