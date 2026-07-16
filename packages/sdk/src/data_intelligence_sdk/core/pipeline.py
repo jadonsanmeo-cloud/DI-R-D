@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import asdict
+from typing import Any
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     ExecutionSpec,
     FinalResponse,
-    Intent,
     PreparedExecution,
     SessionContext,
     UserContext,
@@ -76,6 +77,23 @@ class DataIntelligencePipeline:
         if self.logger is not None:
             self.logger.log(event, payload or {})
 
+    @staticmethod
+    def _record_artifact_event(
+        run_artifact: RunArtifactSession | None,
+        *,
+        phase: str,
+        event_type: str,
+        status: str = "completed",
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if run_artifact is not None:
+            run_artifact.record_event(
+                phase=phase,
+                event_type=event_type,
+                status=status,
+                payload=payload,
+            )
+
     def run(
         self,
         query: UserQuery,
@@ -92,14 +110,7 @@ class DataIntelligencePipeline:
             user_context,
         )
         try:
-            confirmed_spec = self._confirm_spec(
-                prepared.spec,
-                prepared.query,
-                prepared.intent,
-                prepared.corpus_package,
-                prepared.session_context,
-                prepared.user_context,
-            )
+            confirmed_spec = self._confirm_spec(prepared)
         except Exception as exc:
             if prepared.run_artifact is not None:
                 prepared.run_artifact.finalize(
@@ -142,6 +153,12 @@ class DataIntelligencePipeline:
                 query, corpus_package, session_context, user_context
             )
             self._log("pipeline.intent_analyzed", {"intent": intent})
+            self._record_artifact_event(
+                run_artifact,
+                phase="intent",
+                event_type="intent.analyzed",
+                payload={"intent": intent},
+            )
             spec = self.spec_builder.build(
                 query, intent, corpus_package, session_context, user_context
             )
@@ -153,6 +170,12 @@ class DataIntelligencePipeline:
                     "capability_count": len(spec.capability_requirements),
                     "data_requirement_count": len(spec.data_requirements),
                 },
+            )
+            self._record_artifact_event(
+                run_artifact,
+                phase="spec_builder",
+                event_type="spec.built",
+                payload=asdict(spec),
             )
         except Exception as exc:
             if run_artifact is not None:
@@ -185,6 +208,16 @@ class DataIntelligencePipeline:
 
         if not feedback.strip():
             raise ValueError("Spec revision requires feedback.")
+        run_artifact = self._resolve_run_artifact(prepared)
+        self._record_artifact_event(
+            run_artifact,
+            phase="spec_builder",
+            event_type="spec.revision_requested",
+            payload={
+                "feedback": feedback,
+                "previous_spec": asdict(previous_spec),
+            },
+        )
         revise = getattr(self.spec_builder, "revise", None)
         if revise is None:
             raise TypeError(
@@ -212,6 +245,12 @@ class DataIntelligencePipeline:
                 "data_requirement_count": len(revised.data_requirements),
             },
         )
+        self._record_artifact_event(
+            run_artifact,
+            phase="spec_builder",
+            event_type="spec.revised",
+            payload=asdict(revised),
+        )
         return revised
 
     def execute_confirmed_spec(
@@ -224,14 +263,35 @@ class DataIntelligencePipeline:
         if not confirmed_spec.confirmed:
             raise ValueError("Execution spec must be confirmed before engine selection.")
         run_artifact = self._resolve_run_artifact(prepared)
+        self._record_artifact_event(
+            run_artifact,
+            phase="spec_builder",
+            event_type="spec.confirmed",
+            payload=asdict(confirmed_spec),
+        )
         self._log(
             "pipeline.spec_confirmed",
-            {"confirmed": confirmed_spec.confirmed, "engine_hint": confirmed_spec.engine_hint},
+            {
+                "confirmed": confirmed_spec.confirmed,
+                "engine_hint": confirmed_spec.engine_hint,
+            },
         )
         phase = "engine_selection"
         engine = None
         try:
             engine = self.engine_registry.select(confirmed_spec)
+            self._record_artifact_event(
+                run_artifact,
+                phase="engine_selection",
+                event_type="engine.selected",
+                payload={
+                    "engine_name": getattr(
+                        engine,
+                        "name",
+                        type(engine).__name__,
+                    )
+                },
+            )
             self._log(
                 "pipeline.engine_selected",
                 {"engine_name": getattr(engine, "name", type(engine).__name__)},
@@ -245,7 +305,13 @@ class DataIntelligencePipeline:
             with sandbox_context as sandbox:
                 phase = "engine_execution"
                 runtime = EngineRuntimeContext(
-                    run_context=EngineRunContext(),
+                    run_context=EngineRunContext(
+                        event_recorder=(
+                            run_artifact.record_event
+                            if run_artifact is not None
+                            else None
+                        )
+                    ),
                     mcp_client=self.mcp_client,
                     method_hub=self.method_hub or MethodHub(),
                     interface_registry=self.interface_registry,
@@ -316,17 +382,21 @@ class DataIntelligencePipeline:
                 )
             raise
 
-        artifact_ref = (
+        artifact_ref = run_artifact.artifact_ref if run_artifact is not None else None
+        if artifact_ref is not None:
+            response.metadata["artifact_ref"] = artifact_ref
+        self._record_artifact_event(
+            run_artifact,
+            phase="response",
+            event_type="response.completed",
+            payload=asdict(response),
+        )
+        if run_artifact is not None:
             run_artifact.finalize(
                 status="completed",
                 engine_name=output.engine_name,
                 final_answer=response.answer,
             )
-            if run_artifact is not None
-            else None
-        )
-        if artifact_ref is not None:
-            response.metadata["artifact_ref"] = artifact_ref
         self._log(
             "pipeline.completed",
             {
@@ -355,16 +425,14 @@ class DataIntelligencePipeline:
 
     def _confirm_spec(
         self,
-        spec: ExecutionSpec,
-        query: UserQuery,
-        intent: Intent,
-        corpus_package: DataCorpusPackage,
-        session_context: SessionContext | None,
-        user_context: UserContext | None,
+        prepared: PreparedExecution,
     ) -> ExecutionSpec:
+        spec = prepared.spec
         for _ in range(self.max_spec_revision_rounds + 1):
             confirmation_result = self.spec_confirmation.confirm(
-                spec, session_context, user_context
+                spec,
+                prepared.session_context,
+                prepared.user_context,
             )
             if isinstance(confirmation_result, SpecConfirmationDecision):
                 if confirmation_result.action != "revise":
@@ -373,14 +441,6 @@ class DataIntelligencePipeline:
                     )
                 if not confirmation_result.feedback:
                     raise ValueError("Spec revision requires feedback.")
-                prepared = PreparedExecution(
-                    query=query,
-                    intent=intent,
-                    corpus_package=corpus_package,
-                    spec=spec,
-                    session_context=session_context,
-                    user_context=user_context,
-                )
                 spec = self.revise_spec(
                     prepared,
                     spec,
