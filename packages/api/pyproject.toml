@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-intelligence-api"
+version = "0.1.0"
+description = "FastAPI application for the Data Intelligence SDK."
+requires-python = ">=3.11"
+dependencies = [
+    "data-intelligence-sdk",
+    "fastapi>=0.139.0",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.51.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+data-intelligence-sdk = { workspace = true }

@@ -1,23 +1,4 @@
-[system]
-language = "en"
-api_keys = []
-encrypt_key = "your_secret_key"
-
-# Server Configurations
-[service.web]
-host = "0.0.0.0"
-port = 8000
-
-[service.web.database]
-type = "sqlite"
-path = "pilot/meta_data/disdk.db"
-
-[rag.storage]
-[rag.storage.vector]
-type = ""
-persist_path = ""
-
-# Model Configurations
+# Model provider configuration. Runtime secrets are resolved from the environment.
 [models]
 [[models.llms]]
 name = "${env:LLM_MODEL_NAME}"
@@ -28,5 +9,5 @@ api_key = "${env:OPENROUTER_API_KEY}"
 [[models.embeddings]]
 name = "${env:EMBEDDING_MODEL_NAME}"
 provider = "proxy/openrouter"
-api_url = "${https://openrouter.ai/api/v1/embeddings}"
+api_url = "https://openrouter.ai/api/v1/embeddings"
 api_key = "${env:OPENROUTER_API_KEY}"

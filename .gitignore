@@ -14,6 +14,7 @@ build/
 dist/
 *.egg-info/
 data.zip
+logs/*.log
 
 ### Shiny ###
 docs/superpowers/
@@ -22,6 +23,7 @@ docs/superpowers/
 .next/
 node_modules/
 .agents/
-,codex/
-
+.codex/
+logs/
+artifacts/
 #############

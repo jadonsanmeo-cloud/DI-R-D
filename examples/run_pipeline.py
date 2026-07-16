@@ -19,6 +19,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
@@ -26,9 +27,9 @@ EXAMPLES_DIR = Path(__file__).resolve().parent
 if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
-from data_intelligence_sdk import DataCorpusPackage, UserQuery
-from data_intelligence_sdk.runtime import FileRuntimeLogger
-from basic_workflow import create_example_pipeline
+from data_intelligence_sdk import DataCorpusPackage, UserQuery  # noqa: E402
+from data_intelligence_sdk.runtime import FileRuntimeLogger  # noqa: E402
+from basic_workflow import create_example_pipeline  # noqa: E402
 
 load_dotenv()
 
@@ -56,9 +57,34 @@ def _resolve_package_ref(package_path: Path, ref: str) -> str:
     return str(path)
 
 
+def _load_json_document(path: Path) -> dict[str, Any]:
+    """Load JSON manifests while tolerating standalone ``//`` comment lines."""
+
+    text = path.read_text(encoding="utf-8")
+    uncommented = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("//")
+    )
+    payload = json.loads(uncommented)
+    if not isinstance(payload, dict):
+        raise ValueError(f"JSON document must contain an object: {path}")
+    return payload
+
+
 def _load_package_json(path: str) -> DataCorpusPackage:
     package_path = Path(path)
-    package_payload = json.loads(package_path.read_text(encoding="utf-8"))
+    package_payload = _load_json_document(package_path)
+
+    # Allow local file manifests that do not require database services.
+    if "sources" in package_payload:
+        sources = [
+            _resolve_package_ref(package_path, source)
+            for source in package_payload["sources"]
+        ]
+        return DataCorpusPackage(
+            sources=sources,
+            schemas=package_payload.get("schemas", {}),
+            metadata=package_payload.get("metadata", {}),
+        )
 
     vectordb_path = _resolve_package_ref(package_path, package_payload["vectordb"])
     db_path = _resolve_package_ref(package_path, package_payload["db"])
@@ -141,6 +167,8 @@ def main() -> None:
         )
 
         print(response.answer)
+        if artifact_ref := response.metadata.get("artifact_ref"):
+            print(f"Artifact: {artifact_ref}")
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()

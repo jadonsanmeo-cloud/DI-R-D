@@ -902,7 +902,7 @@ generation and sandbox work use their own smaller semaphores.
 ## 10. Target modules
 
 ```text
-src/data_intelligence_sdk/reporting/
+packages/sdk/src/data_intelligence_sdk/reporting/
 |-- contracts.py
 |-- configuration.py
 |-- planning.py
@@ -924,7 +924,7 @@ src/data_intelligence_sdk/reporting/
     |-- html.py
     `-- markdown.py
 
-src/data_intelligence_sdk/runtime/
+packages/sdk/src/data_intelligence_sdk/runtime/
 |-- tool_executor.py
 |-- data_artifacts.py
 |-- data_profiler.py

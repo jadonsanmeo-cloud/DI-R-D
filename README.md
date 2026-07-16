@@ -1,8 +1,29 @@
+## Repository Layout
+
+```text
+packages/
+  sdk/       # reusable Python library
+  api/       # FastAPI application built on the SDK
+web/         # separate Next.js frontend
+examples/    # runnable examples and sample corpus packages
+data/samples/ # small checked-in fixtures
+configs/     # development and example configuration
+docs/
+docker/
+```
+
+The SDK and API are separate Python workspace packages. The API owns application
+composition; the SDK does not import the API, web client, examples, or repository
+datasets at runtime.
+
+The API layering and planned worker/RabbitMQ boundary are documented in
+[`docs/api-architecture.md`](docs/api-architecture.md).
+
 ## Setup
 
 ```
 uv venv --python 3.11
-uv sync
+uv pip install -e packages/sdk -e packages/api
 
 docker compose -f examples/data_corpus_package/docker-compose.yml up -d
 ```
@@ -21,29 +42,23 @@ implementations.
 User Query + DataCorpusPackage
   -> Intent Analyzer
   -> Spec Builder
-  -> Spec Confirmation
   -> Engine Registry
-  -> Selected Engine
-  -> EngineRuntimeContext
-       -> MethodHub
-       -> InterfaceRegistry
-       -> InterfaceBuilder
-       -> SandboxExecutor
-       -> Artifacts / Logs / Resources
-  -> Engine Execution
-       -> reuse trusted interface/method
-       -> or create generated interface
-       -> validate/run generated interface in sandbox
-       -> emit EngineOutput + EngineTrace
-  -> Evidence Collector
-  -> Synthesizer
-  -> FinalResponse(answer + evidence)
+  -> GeneralPurposeEngine
+  -> one request-scoped AXIOM sandbox
+  -> one Deep Agent
+       -> execute_python(code)
+            -> persist code artifact
+            -> sandbox.run(runtime runner)
+            -> persist execution artifact
+       -> observe and correct when needed
+  -> FinalResponse(answer, artifact_ref, evidence=None)
 ```
 
 Supporting layers:
 
-- `runtime`: method hub, interface registry, interface builder boundary, engine runtime context, executor, logger, resource manager, cache.
-- `sandbox`: controlled execution, data/workspace/artifacts/logs boundaries.
+- `runtime`: request orchestration, engine runtime context, logging, and the Deep Agents sandbox backend.
+- `sandbox`: one isolated AXIOM environment per request with staged input data and direct source execution.
+- `artifacts`: one persistent filesystem bundle per pipeline invocation, containing every generated-code attempt and execution observation.
 - `context`: user and session context placeholders.
 - `docs/method_hub.md`: Method Hub contract, manifest schema, catalog generation, and proposal/export workflow.
 
@@ -51,18 +66,18 @@ Supporting layers:
 
 - `DataCorpusPackage` describes the available data universe for a task. It may contain source refs, schemas, semantic metadata, and policy metadata; it does not necessarily contain raw data.
 - `DataHubContext` remains available as a compatibility alias for `DataCorpusPackage` during the transition.
-- `Intent` is a controlled string selected from `SUPPORTED_INTENTS`: `reason` for questions about data, `report` for report generation, and `unknown` for outliers. The spec carries the richer objective, constraints, and capability requirements.
+- `Intent` is a controlled string selected from `SUPPORTED_INTENTS`: `reason` for data questions, `report` for report generation, `general` for general-purpose queries handled by `GeneralPurposeEngine`, and `unknown` for classifier failures or legacy payloads. The spec carries the richer objective, constraints, and capability requirements.
 - `ExecutionSpec.capability_requirements` describes what the selected engine/runtime must resolve.
-- Engines receive an `EngineRuntimeContext`, which owns an `EngineRunContext` for trace recording and exposes runtime services such as `MethodHub`, `InterfaceRegistry`, `InterfaceBuilder`, and `SandboxExecutor`.
-- Engines should request capabilities from runtime services. They should not each reimplement interface discovery, generated interface lifecycle, sandbox policy, trust promotion, artifact/log policy, or evidence construction.
-- Generated interfaces start as `generated_unvalidated` and should be validated through sandbox execution before reuse.
+- Engines receive an `EngineRuntimeContext`, which owns an `EngineRunContext` and the request-scoped sandbox session.
+- `GeneralPurposeEngine` contains one Deep Agent. Method Hub, MCP, generated interface registration, and evidence synthesis are outside this first runtime flow.
+- The agent sees exactly one custom `execute_python(code)` tool. The runtime stores the source before submitting it to the sandbox.
 - `EngineOutput` contains raw engine output plus `EngineTrace`.
 - `EvidenceBundle` uses engine trace, method calls, interface definitions, sandbox results, observations, artifact refs, and log refs for audit and final response generation.
 - `SessionContext` is separate from `UserContext`: session context is short-lived conversation/task state, while user context is longer-lived preference and history.
 
 ## Base Query-to-Answer Workflow
 
-The SDK exposes interfaces/contracts and reusable runtime capabilities. Concrete analyzer/spec/evidence/synthesis implementations live in consuming applications or examples, not in the SDK package. `GeneralPurposeEngine` is the fallback/general engine, OpenRouter is the first supported LLM provider through LangChain, and concrete CSV capabilities are exposed through MethodHub methods.
+The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, and AXIOM sandbox-service. `GeneralPurposeEngine` is the selected analysis engine and uses `deepagents==0.6.12` to generate, execute, observe, and correct Python analysis through one tool.
 
 ```python
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
@@ -74,6 +89,7 @@ response = pipeline.run(
     DataCorpusPackage(sources=["sales.csv"]),
 )
 print(response.answer)
+print(response.metadata["artifact_ref"])
 ```
 
 Run the example pipeline from the command line:
@@ -115,9 +131,9 @@ OPENROUTER_API_KEY
 LLM_MODEL_NAME
 ```
 
-### Interactive workflow CLI
+### Runtime workflow CLI
 
-Use the interactive demo to walk through the current query-to-response flow:
+Use the demo to run the complete non-interactive query-to-answer flow:
 
 ```bash
 uv run python examples/demo_workflow_cli.py \
@@ -127,19 +143,9 @@ uv run python examples/demo_workflow_cli.py \
   --query "Summarize this data corpus package"
 ```
 
-The CLI uses the LLM-backed spec builder, displays the inferred intent and
-draft `ExecutionSpec`, then pauses for an explicit decision:
-
-```text
-Decision [c]onfirm / [r]evise / [q]uit: r
-Revision feedback: Focus on monthly revenue and cite the source datasets
-
-Decision [c]onfirm / [r]evise / [q]uit: c
-```
-
-The engine does not run before confirmation. Use `q` to stop without executing
-the spec, or add `--verbose` to print the full spec, evidence, engine steps,
-MethodHub calls, artifact/log references, and response metadata:
+The CLI builds the spec, selects the engine, provisions one sandbox, stages the
+local source files, runs the Deep Agent, and prints the answer. Add `--verbose`
+to enable AXIOM debug logs and print response metadata:
 
 ```bash
 uv run python examples/demo_workflow_cli.py \
@@ -147,7 +153,7 @@ uv run python examples/demo_workflow_cli.py \
   --verbose
 ```
 
-Provider settings normally come from `configs/proxy-openrouter.toml` and the
+Provider settings normally come from `configs/development/proxy-openrouter.toml` and the
 environment. The CLI loads `docker/.env` by default so the checked-in TOML's
 `${env:...}` placeholders work in local runs. Use `--env-file PATH` to load a
 different env file; values already exported in the shell take precedence.
@@ -155,16 +161,24 @@ Provider settings can also be overridden with `--config`, `--model`,
 `--api-key`, and `--base-url`. Structured pipeline events are written to
 `logs/pipeline.log` by default; pass `--no-trace` to disable that file.
 
-Known PostgreSQL tables and pgvector document chunks use trusted, read-only
-MethodHub methods, so the demo does not require a generated-code sandbox for
-those sources. Start the checked-in corpus database before confirming a run:
+When the AXIOM sandbox is enabled, the application-owned pipeline factory
+creates one sandbox for the entire request. Configure it in `docker/.env`:
 
-```bash
-docker compose -f examples/data_corpus_package/docker-compose.yml up -d
+```env
+METHODS_HUB_ENABLED=false
+SANDBOX_ENABLED=true
+SANDBOX_URL=http://localhost:8004
+SANDBOX_WORKSPACE_ID=00000000-0000-0000-0000-000000000001
 ```
 
-Generated tools for capabilities outside the trusted method set still require
-a separately configured `SandboxExecutor`.
+The CLI example discovers the sibling client source directly for local
+development. Production applications should install `axiom-sandbox-client`.
+The general engine requires `SANDBOX_ENABLED=true` and a workspace ID.
+
+Each invocation creates a persistent artifact bundle under `artifacts/<run-id>/`
+by default. Configure a different root with `ARTIFACT_ROOT`. The bundle retains
+`code/attempt-NNN.py`, `executions/attempt-NNN.json`, and `manifest.json` after
+the sandbox has been deleted.
 
 `--config` accepts either a repository-relative path or an absolute path:
 
@@ -175,9 +189,44 @@ uv run python examples/demo_workflow_cli.py \
   --query "Summarize this data corpus package"
 ```
 
-CSV MethodHub methods live in `data_intelligence_sdk.methods` and include `scan_csv`, `filter_csv`, `count_csv`, and `sum_csv`. Example pipeline factories live in `examples.basic_workflow` as app-owned wiring outside the SDK package.
+Example pipeline factories live in `examples.basic_workflow` as app-owned wiring outside the SDK package.
 
 Tests use fake engines or fake LLMs and do not call OpenRouter.
+
+### Optional LangSmith tracing
+
+LangChain/LangGraph runs and the custom OpenAI-compatible spec-builder client
+can be traced to LangSmith. Tracing is disabled unless explicitly enabled:
+
+```text
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=...
+LANGCHAIN_PROJECT=data-intelligence-sdk
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+```
+
+These variables can be placed in `docker/.env` for local development. The SDK
+does not send traces when `LANGCHAIN_TRACING_V2` is unset or false.
+
+### Explicit Method Hub membership
+
+The default Method Hub membership is defined in
+`configs/development/method-hub.toml`. It contains concrete executable method
+names only; high-level capability labels such as `answer_question` are resolved
+by the engine and do not belong in this list. Override the profile location or
+the complete list with:
+
+```text
+METHOD_HUB_CONFIG_PATH=/absolute/path/to/method-hub.toml
+METHOD_HUB_METHODS=inspect_data_folder,search_text_files,scan_csv
+```
+
+Vector search methods are disabled by default while local-file workflows are
+being used. Re-enable all vector methods with:
+
+```text
+ENABLE_VECTOR_METHODS=true
+```
 
 ## FastAPI Responses Backend
 
@@ -191,17 +240,17 @@ OPENROUTER_API_KEY=...
 LLM_MODEL_NAME=...
 DATA_CORPUS_ROOT=/absolute/path/to/Data-Intelligence-SDK
 DATABASE_URL=postgresql://data_intelligence:data_intelligence@127.0.0.1:5432/data_intelligence
-MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/proxy-openrouter.toml
+MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/development/proxy-openrouter.toml
 API_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 PIPELINE_TIMEOUT_SECONDS=300
 SPEC_CONFIRMATION_TTL_SECONDS=86400
 MAX_SPEC_REVISION_ROUNDS=5
 ```
 
-Start the backend:
+Start the data_intelligence_api:
 
 ```bash
-uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Check health:
@@ -218,7 +267,7 @@ curl --no-buffer \
   -d '{
     "input": "What is the total revenue?",
     "data_corpus_package": {
-      "sources": ["data/data.csv"],
+      "sources": ["data/samples/data.csv"],
       "schemas": {},
       "metadata": {}
     }
@@ -226,7 +275,9 @@ curl --no-buffer \
   http://127.0.0.1:8000/api/v1/responses
 ```
 
-The workflow infers whether to answer, reason, or create a report from the query.
+The workflow classifies queries as `reason`, `report`, or `general`; all three
+are routed to an appropriate registered engine. `unknown` remains available for
+legacy or invalid classifier output.
 The initial stream ends with `response.requires_confirmation` and includes a
 `response_id`, `confirmation_token`, revision, intent, and editable spec. No
 engine runs before this event is confirmed.
@@ -255,12 +306,12 @@ Recover a paused response with `GET /api/v1/responses/RESP_ID` and the same
 ### Backend Docker Service
 
 The Compose configuration at `docker/docker-compose.yaml` runs the FastAPI
-backend and a private PostgreSQL 17 service. It exposes only the API at
+data_intelligence_api and a private PostgreSQL 17 service. It exposes only the API at
 `http://127.0.0.1:8000`, mounts `./data` read-only, and persists both uploaded
 corpus files and confirmation state in Docker volumes. Optional model-provider
 credentials and `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are read
 from `docker/.env` at container startup. The API loads its model definition from
-`/app/configs/proxy-openrouter.toml` through `MODEL_CONFIG_PATH`; values such as
+`/app/configs/development/proxy-openrouter.toml` through `MODEL_CONFIG_PATH`; values such as
 `LLM_MODEL_NAME` and `OPENROUTER_API_KEY` are resolved from `docker/.env`.
 
 Build and start the API:
@@ -290,7 +341,7 @@ curl -N http://127.0.0.1:8000/api/v1/responses \
   -d '{
     "input": "Analyze this dataset",
     "data_corpus_package": {
-      "sources": ["data/data.csv"],
+      "sources": ["data/samples/data.csv"],
       "schemas": {},
       "metadata": {}
     },
