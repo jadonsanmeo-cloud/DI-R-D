@@ -10,15 +10,15 @@
     "lib": "lib"
   },
   "scripts": {
-    "build": "NODE_OPTIONS=--max_old_space_size=2048 next build",
-    "build:prod": "APP_ENV=prod  NODE_OPTIONS=--max_old_space_size=2048 next build",
+    "build": "node scripts/run-next.mjs build",
+    "build:prod": "node scripts/run-next.mjs build:prod",
     "check:qa-upload": "node scripts/check-backend-qa-upload.mjs",
-    "compile": " NODE_OPTIONS=--max_old_space_size=2048 next build && next export",
-    "dev": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=2048 next dev",
+    "compile": "node scripts/run-next.mjs compile",
+    "dev": "node scripts/run-next.mjs dev",
     "export": "next export",
     "format": "prettier --write '**/*.{ts,tsx}'",
     "lint": "eslint '**/*.{ts,tsx}' --fix",
-    "start": "NODE_OPTIONS=--max_old_space_size=2048 next start",
+    "start": "node scripts/run-next.mjs start",
     "test:responses": "node scripts/test-responses-sse.cjs"
   },
   "lint-staged": {
@@ -117,6 +117,7 @@
     "@typescript-eslint/parser": "^8.3.0",
     "autoprefixer": "10.4.14",
     "copy-webpack-plugin": "^12.0.2",
+    "cross-env": "^7.0.3",
     "eslint": "8.57.0",
     "eslint-config-next": "13.4.7",
     "eslint-config-prettier": "^9.1.0",

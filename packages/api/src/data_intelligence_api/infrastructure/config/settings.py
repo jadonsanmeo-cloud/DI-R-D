@@ -23,6 +23,10 @@ class ApiSettings:
     max_spec_revision_rounds: int = 5
     max_upload_bytes: int = 50 * 1024 * 1024
     model_config_path: Path | None = None
+    chat_store_dir: Path = Path(".data/chat")
+    openai_compatible_base_url: str = "http://localhost:20128/v1"
+    openai_compatible_api_key: str = ""
+    openai_compatible_model: str = "cx/gpt-5.5"
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
@@ -59,5 +63,15 @@ class ApiSettings:
                 Path(model_config_path)
                 if (model_config_path := os.getenv("MODEL_CONFIG_PATH"))
                 else None
+            ),
+            chat_store_dir=Path(os.getenv("CHAT_STORE_DIR", ".data/chat")),
+            openai_compatible_base_url=os.getenv(
+                "OPENAI_COMPATIBLE_BASE_URL",
+                "http://localhost:20128/v1",
+            ),
+            openai_compatible_api_key=os.getenv("OPENAI_COMPATIBLE_API_KEY", ""),
+            openai_compatible_model=os.getenv(
+                "OPENAI_COMPATIBLE_MODEL",
+                "cx/gpt-5.5",
             ),
         )

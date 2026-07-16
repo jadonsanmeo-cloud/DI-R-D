@@ -40,11 +40,11 @@ def resolve_sources(sources: list[str], data_corpus_root: Path) -> list[str]:
     root = data_corpus_root.resolve()
     resolved_sources: list[str] = []
     for source in sources:
-        if urlparse(source).scheme:
+        source_path = Path(source)
+        if not source_path.is_absolute() and urlparse(source).scheme:
             raise SourceValidationError(
                 f"Remote data source references are not supported: {source}"
             )
-        source_path = Path(source)
         candidate = (
             source_path.resolve()
             if source_path.is_absolute()
