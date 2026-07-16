@@ -10,10 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-Intent = Literal["reason", "report", "unknown"]
+Intent = Literal["reason", "report", "general", "unknown"]
 SUPPORTED_INTENTS: tuple[Intent, ...] = (
     "reason",
     "report",
+    "general",
     "unknown",
 )
 TraceStatus = Literal["pending", "running", "completed", "failed", "skipped"]
@@ -78,6 +79,8 @@ class PreparedExecution:
     spec: "ExecutionSpec"
     session_context: SessionContext | None = None
     user_context: UserContext | None = None
+    run_artifact: Any | None = None
+    run_artifact_id: str | None = None
 
 
 @dataclass(slots=True)

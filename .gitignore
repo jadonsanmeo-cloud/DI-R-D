@@ -24,4 +24,6 @@ docs/superpowers/
 node_modules/
 .agents/
 .codex/
+logs/
+artifacts/
 #############

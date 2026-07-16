@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "parsed/documents/NAPH LAP 10AR v1.0 Sheffield for web.md",
+    "parsed/documents/NAPH LAP 10AR v1.0 Royal Brompton for web.md"
+  ],
+  "metadata": {
+    "name": "NAPH 10AR parsed corpus",
+    "source_root": "examples/naph_corpus/parsed",
+    "storage": "local-files-only"
+  }
+}

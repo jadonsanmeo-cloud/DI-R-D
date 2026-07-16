@@ -8,12 +8,17 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Protocol
 
+from data_intelligence_sdk.runtime.tracing import traceable_llm_call
+
 
 class LLMClient(Protocol):
-    """Minimal JSON completion boundary used by SDK components."""
+    """Completion boundary used by SDK components."""
 
     def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         """Return a JSON object produced from chat messages."""
+
+    def complete_text(self, messages: list[dict[str, str]]) -> str:
+        """Return raw model text produced from chat messages."""
 
 
 Transport = Callable[[str, dict[str, str], dict[str, Any], int], dict[str, Any]]
@@ -46,7 +51,24 @@ class OpenAICompatibleLLMClient:
         if not self.model:
             raise ValueError("model is required for OpenAICompatibleLLMClient.")
 
+        self._complete_json_traced = traceable_llm_call(
+            self._complete_json_impl,
+            name="openai_compatible.complete_json",
+        )
+        self._complete_text_traced = traceable_llm_call(
+            self._complete_text_impl,
+            name="openai_compatible.complete_text",
+        )
+
     def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        return self._complete_json_traced(messages)
+
+    def complete_text(self, messages: list[dict[str, str]]) -> str:
+        return self._complete_text_traced(messages)
+
+    def _complete_json_impl(
+        self, messages: list[dict[str, str]]
+    ) -> dict[str, Any]:
         payload = {
             "model": self.model,
             "messages": messages,
@@ -64,6 +86,32 @@ class OpenAICompatibleLLMClient:
             self.timeout,
         )
         return self._extract_json_object(response)
+
+    def _complete_text_impl(self, messages: list[dict[str, str]]) -> str:
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        response = self._transport(
+            f"{self.base_url}/chat/completions",
+            headers,
+            payload,
+            self.timeout,
+        )
+        try:
+            content = response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(
+                "OpenAI-compatible response did not contain message content."
+            ) from exc
+        if not isinstance(content, str):
+            raise ValueError("OpenAI-compatible message content must be text.")
+        return content
 
     def _extract_json_object(self, response: dict[str, Any]) -> dict[str, Any]:
         try:

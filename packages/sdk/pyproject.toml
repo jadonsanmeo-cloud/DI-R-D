@@ -15,6 +15,9 @@ dependencies = [
     "PyYAML>=6.0.3",
     "langgraph>=1.2.7",
     "psycopg[binary]>=3.3.4",
+    "langsmith>=0.9.5",
+    "mcp[cli]>=1.28.1",
+    "deepagents>=0.6.12",
 ]
 
 [tool.setuptools.packages.find]

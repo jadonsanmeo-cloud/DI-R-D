@@ -479,7 +479,12 @@ def register_local_data_methods(method_hub: MethodHub) -> None:
         (
             "inspect_data_folder",
             inspect_data_folder,
-            ["inspect_data", "inspect_local_data", "data_folder_report", "generate_report"],
+            [
+                "inspect_data",
+                "inspect_local_data",
+                "data_folder_report",
+                "generate_report",
+            ],
             "Inventory files in a data folder and classify tables, documents, spreadsheets, and other assets.",
             ["local-data", "inventory", "report"],
             150,
@@ -491,7 +496,12 @@ def register_local_data_methods(method_hub: MethodHub) -> None:
         (
             "profile_delimited_file",
             profile_delimited_file,
-            ["inspect_data", "profile_data", "inspect_tabular_data", "data_folder_report"],
+            [
+                "inspect_data",
+                "profile_data",
+                "inspect_tabular_data",
+                "data_folder_report",
+            ],
             "Profile any CSV or TSV file by row count, columns, missingness, numeric columns, and sample rows.",
             ["local-data", "table", "profile"],
             145,
@@ -535,7 +545,12 @@ def register_local_data_methods(method_hub: MethodHub) -> None:
         (
             "search_text_files",
             search_text_files,
-            ["search_documents", "inspect_documents", "data_folder_report", "generate_report"],
+            [
+                "search_documents",
+                "inspect_documents",
+                "data_folder_report",
+                "generate_report",
+            ],
             "Search markdown or text files and return document snippets with match scores.",
             ["local-data", "documents", "markdown", "search"],
             132,

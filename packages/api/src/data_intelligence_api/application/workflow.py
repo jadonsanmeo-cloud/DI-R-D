@@ -174,6 +174,7 @@ def prepared_to_payload(prepared: PreparedExecution) -> dict:
         "user_context": asdict(prepared.user_context)
         if prepared.user_context is not None
         else None,
+        "run_artifact_id": prepared.run_artifact_id,
     }
 
 
@@ -189,4 +190,5 @@ def prepared_from_payload(payload: dict, spec: ExecutionSpec) -> PreparedExecuti
         if session_payload is not None
         else None,
         user_context=UserContext(**user_payload) if user_payload is not None else None,
+        run_artifact_id=payload.get("run_artifact_id"),
     )
