@@ -1,4 +1,3 @@
-export { default as ConfirmDialog } from './ConfirmDialog';
 export { default as ConnectorCard } from './ConnectorCard';
 export { default as ConnectorForm } from './ConnectorForm';
 export { default as ConnectorToolsModal } from './ConnectorToolsModal';
@@ -15,4 +14,3 @@ export type {
   CreateConnectorRequest,
   PendingConfirmation,
 } from './types';
-export { useConfirmPolling } from './useConfirmPolling';

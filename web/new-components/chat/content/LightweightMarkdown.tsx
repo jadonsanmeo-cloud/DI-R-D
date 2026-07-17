@@ -1,18 +1,13 @@
+import 'katex/dist/katex.min.css';
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import 'katex/dist/katex.min.css';
 
 const components: Components = {
   a: ({ children, node: _node, ...props }) => (
-    <a
-      {...props}
-      target='_blank'
-      rel='noreferrer'
-      className='text-blue-600 hover:underline dark:text-blue-400'
-    >
+    <a {...props} target='_blank' rel='noreferrer' className='text-blue-600 hover:underline dark:text-blue-400'>
       {children}
     </a>
   ),
@@ -42,10 +37,7 @@ const components: Components = {
     </pre>
   ),
   code: ({ children, className, node: _node, ...props }) => (
-    <code
-      {...props}
-      className={className || 'rounded bg-gray-100 px-1 py-0.5 font-mono text-[0.9em] dark:bg-gray-800'}
-    >
+    <code {...props} className={className || 'rounded bg-gray-100 px-1 py-0.5 font-mono text-[0.9em] dark:bg-gray-800'}>
       {children}
     </code>
   ),
