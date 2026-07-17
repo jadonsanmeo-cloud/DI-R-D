@@ -17,8 +17,7 @@ class ChatWorkflow(Protocol):
         conversation: ChatConversation,
         user_input: str,
         model_name: str,
-    ) -> AsyncIterator[str]:
-        ...
+    ) -> AsyncIterator[str]: ...
 
 
 class ChatService:

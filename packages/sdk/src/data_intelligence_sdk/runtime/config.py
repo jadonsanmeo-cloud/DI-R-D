@@ -118,7 +118,9 @@ class ConfigManager:
         }
         return MethodHubSettings(
             endpoint=str(
-                endpoint or os.environ.get("METHODS_HUB_MCP_URL") or "http://localhost:8000/mcp"
+                endpoint
+                or os.environ.get("METHODS_HUB_MCP_URL")
+                or "http://localhost:8000/mcp"
             ),
             enabled=enabled,
         )

@@ -40,7 +40,9 @@ def _normalize_string_list(
     if values is None:
         return []
     if isinstance(values, str):
-        raise MethodManifestError(_format_error(field_name, "must be a list of strings", source))
+        raise MethodManifestError(
+            _format_error(field_name, "must be a list of strings", source)
+        )
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -64,17 +66,23 @@ def _format_error(field_name: str, message: str, source: str | None) -> str:
 def _validate_entrypoint(entrypoint: object, source: str | None) -> str:
     if not isinstance(entrypoint, str):
         raise MethodManifestError(
-            _format_error("entrypoint", "must be a string in package.module:attr form", source)
+            _format_error(
+                "entrypoint", "must be a string in package.module:attr form", source
+            )
         )
     normalized = entrypoint.strip()
     if ":" not in normalized:
         raise MethodManifestError(
-            _format_error("entrypoint", "must use package.module:attribute format", source)
+            _format_error(
+                "entrypoint", "must use package.module:attribute format", source
+            )
         )
     module_name, attribute_path = normalized.split(":", 1)
     if not module_name.strip() or not attribute_path.strip():
         raise MethodManifestError(
-            _format_error("entrypoint", "must use package.module:attribute format", source)
+            _format_error(
+                "entrypoint", "must use package.module:attribute format", source
+            )
         )
     return normalized
 
@@ -86,13 +94,13 @@ def _validate_manifest_mapping(
 
     for field_name in ("name", "entrypoint", "capability_names"):
         if field_name not in manifest:
-            raise MethodManifestError(
-                _format_error(field_name, "is required", source)
-            )
+            raise MethodManifestError(_format_error(field_name, "is required", source))
 
     name = manifest["name"]
     if not isinstance(name, str) or not name.strip():
-        raise MethodManifestError(_format_error("name", "must be a non-empty string", source))
+        raise MethodManifestError(
+            _format_error("name", "must be a non-empty string", source)
+        )
     manifest["name"] = name.strip()
 
     manifest["entrypoint"] = _validate_entrypoint(manifest["entrypoint"], source)
@@ -101,7 +109,9 @@ def _validate_manifest_mapping(
     )
     if not manifest["capability_names"]:
         raise MethodManifestError(
-            _format_error("capability_names", "must contain at least one capability", source)
+            _format_error(
+                "capability_names", "must contain at least one capability", source
+            )
         )
 
     trust_level = manifest.get("trust_level", "builtin")
@@ -112,7 +122,9 @@ def _validate_manifest_mapping(
     trust_level = trust_level.strip().lower()
     if trust_level not in _VALID_TRUST_LEVELS:
         raise MethodManifestError(
-            _format_error("trust_level", f"must be one of {sorted(_VALID_TRUST_LEVELS)}", source)
+            _format_error(
+                "trust_level", f"must be one of {sorted(_VALID_TRUST_LEVELS)}", source
+            )
         )
     manifest["trust_level"] = trust_level
 
@@ -130,11 +142,15 @@ def _validate_manifest_mapping(
 
     priority = manifest.get("priority", 0)
     if isinstance(priority, bool) or not isinstance(priority, int):
-        raise MethodManifestError(_format_error("priority", "must be an integer", source))
+        raise MethodManifestError(
+            _format_error("priority", "must be an integer", source)
+        )
     manifest["priority"] = priority
 
     version = manifest.get("version", "1.0.0")
-    manifest["version"] = "1.0.0" if version is None else (str(version).strip() or "1.0.0")
+    manifest["version"] = (
+        "1.0.0" if version is None else (str(version).strip() or "1.0.0")
+    )
     description = manifest.get("description", "")
     manifest["description"] = "" if description is None else str(description).strip()
     manifest["tags"] = _normalize_string_list(manifest.get("tags"), "tags", source)
@@ -149,7 +165,9 @@ def _validate_manifest_mapping(
     if metadata is None:
         metadata = {}
     if not isinstance(metadata, Mapping):
-        raise MethodManifestError(_format_error("metadata", "must be a mapping", source))
+        raise MethodManifestError(
+            _format_error("metadata", "must be a mapping", source)
+        )
     manifest["metadata"] = deepcopy(dict(metadata))
     return manifest
 
@@ -175,7 +193,9 @@ def import_entrypoint(entrypoint: str) -> object:
     return attribute
 
 
-def _build_registered_metadata(manifest: dict[str, Any], manifest_path: Path) -> dict[str, Any]:
+def _build_registered_metadata(
+    manifest: dict[str, Any], manifest_path: Path
+) -> dict[str, Any]:
     metadata = deepcopy(manifest["metadata"])
     metadata["entrypoint"] = manifest["entrypoint"]
     metadata["manifest_path"] = str(manifest_path.resolve())

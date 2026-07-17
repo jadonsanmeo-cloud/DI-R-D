@@ -177,7 +177,9 @@ def _parse_specification_csv() -> CatalogFile:
 def _parse_document_md(file_name: str, description: str) -> CatalogFile:
     source_path = _DOCUMENTS_DIR / file_name
     text = _read_text_with_fallback(source_path)
-    title_line = next((line.strip() for line in text.splitlines() if line.startswith("# ")), "")
+    title_line = next(
+        (line.strip() for line in text.splitlines() if line.startswith("# ")), ""
+    )
     title = title_line[2:].strip() if title_line else source_path.stem
     match = re.search(
         r"source_file:\s*(?P<source_file>.*?)\s*\|\s*total_pages:\s*(?P<page_count>\d+)",
@@ -205,7 +207,9 @@ def _document_description(title: str) -> str:
     if "Main Report" in title:
         return "Parsed markdown version of the annual report."
     if "Supplementary Survival Analysis" in title:
-        return "Parsed markdown version of the supplementary survival analysis appendix."
+        return (
+            "Parsed markdown version of the supplementary survival analysis appendix."
+        )
     return f"Parsed markdown version of the {title.lower()}."
 
 
@@ -239,7 +243,9 @@ def _build_default_files() -> list[CatalogFile]:
 class StaticDataHub:
     """A lightweight immutable-style catalog of parsed files."""
 
-    def __init__(self, files: Iterable[CatalogFile], metadata: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, files: Iterable[CatalogFile], metadata: dict[str, Any] | None = None
+    ) -> None:
         self.files = list(files)
         self.metadata = {
             "concept": "static_file_catalog",
@@ -272,10 +278,7 @@ class StaticDataHub:
 
         files = list(self.files)
         sources = [file.id for file in files]
-        schemas = {
-            file.id: file.to_context_schema()
-            for file in files
-        }
+        schemas = {file.id: file.to_context_schema() for file in files}
         metadata = {
             **self.metadata,
             "files": [file.to_context_metadata() for file in files],

@@ -1,4 +1,3 @@
-import markdownComponents, { markdownPlugins, preprocessLaTeX } from '@/components/chat/chat-content/config';
 import { STORAGE_USERINFO_KEY } from '@/utils/constants/index';
 import {
   CheckOutlined,
@@ -14,12 +13,12 @@ import {
   SearchOutlined,
   UpOutlined,
 } from '@ant-design/icons';
-import { GPTVis } from '@antv/gpt-vis';
 import { Spin, Tooltip, message } from 'antd';
 import classNames from 'classnames';
 import Image from 'next/image';
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import LightweightMarkdown from './LightweightMarkdown';
 import RobotIcon from './RobotIcon';
 
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -143,7 +142,7 @@ const UserIcon: React.FC = () => {
   );
 };
 
-const StepItem: React.FC<{ step: ExecutionStep; isLast: boolean }> = ({ step, isLast }) => {
+const StepItem: React.FC<{ step: ExecutionStep }> = ({ step }) => {
   const config = stepStatusConfig[step.status];
   const duration = step.startTime && step.endTime ? step.endTime - step.startTime : undefined;
 
@@ -237,10 +236,6 @@ const SessionTurn: React.FC<SessionTurnProps> = ({
     [onCopy, t],
   );
 
-  const formatMarkdownVal = (val: string) => {
-    return val.replace(/<table(\w*=[^>]+)>/gi, '<table $1>').replace(/<tr(\w*=[^>]+)>/gi, '<tr $1>');
-  };
-
   const getStepsButtonText = () => {
     if (isWorking) return currentStatus;
     if (stepsExpanded) return 'Hide steps';
@@ -300,8 +295,8 @@ const SessionTurn: React.FC<SessionTurnProps> = ({
 
                 {stepsExpanded && hasSteps && (
                   <div className='mt-2 flex flex-col gap-1.5 pl-2 border-l-2 border-gray-200 dark:border-gray-700'>
-                    {steps.map((step, index) => (
-                      <StepItem key={step.id} step={step} isLast={index === steps.length - 1} />
+                    {steps.map(step => (
+                      <StepItem key={step.id} step={step} />
                     ))}
                   </div>
                 )}
@@ -320,9 +315,7 @@ const SessionTurn: React.FC<SessionTurnProps> = ({
 
             {assistantMessage && (
               <div className='bg-white dark:bg-[rgba(255,255,255,0.08)] p-4 rounded-2xl rounded-tl-none'>
-                <GPTVis components={markdownComponents as any} {...(markdownPlugins as any)}>
-                  {preprocessLaTeX(formatMarkdownVal(assistantMessage))}
-                </GPTVis>
+                <LightweightMarkdown>{assistantMessage}</LightweightMarkdown>
               </div>
             )}
 

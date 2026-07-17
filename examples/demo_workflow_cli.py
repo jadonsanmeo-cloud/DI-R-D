@@ -17,7 +17,10 @@ if str(EXAMPLES_DIR) not in sys.path:
 
 from basic_workflow import create_example_pipeline  # noqa: E402
 from data_intelligence_sdk import UserQuery  # noqa: E402
-from data_intelligence_sdk.core.types import DataCorpusPackage, FinalResponse  # noqa: E402
+from data_intelligence_sdk.core.types import (
+    DataCorpusPackage,
+    FinalResponse,
+)  # noqa: E402
 from data_intelligence_sdk.runtime import (  # noqa: E402
     ArtifactSettings,
     ConfigManager,
@@ -56,9 +59,7 @@ class _ResolvedConfigManager:
         )
 
     def artifact_settings(self) -> ArtifactSettings:
-        return ArtifactSettings(
-            root=os.environ.get("ARTIFACT_ROOT", "artifacts")
-        )
+        return ArtifactSettings(root=os.environ.get("ARTIFACT_ROOT", "artifacts"))
 
 
 def _parser() -> argparse.ArgumentParser:

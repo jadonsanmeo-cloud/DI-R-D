@@ -1,11 +1,8 @@
-import { ChatContext } from '@/app/chat-context';
 import { CopyOutlined } from '@ant-design/icons';
 import { Button, message } from 'antd';
 import copy from 'copy-to-clipboard';
-import { CSSProperties, useContext } from 'react';
+import { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PrismAsyncLight as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { coldarkDark, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface Props {
   code: string;
@@ -15,8 +12,7 @@ interface Props {
   dark?: { [key: string]: CSSProperties };
 }
 
-export function CodePreview({ code, light, dark, language, customStyle }: Props) {
-  const { mode } = useContext(ChatContext);
+export function CodePreview({ code, language, customStyle }: Props) {
   const { t } = useTranslation();
 
   return (
@@ -30,13 +26,14 @@ export function CodePreview({ code, light, dark, language, customStyle }: Props)
           message[success ? 'success' : 'error'](success ? t('cmp.copySuccess') : t('cmp.copyFailed'));
         }}
       />
-      <SyntaxHighlighter
-        customStyle={{ ...customStyle, maxHeight: '400px', overflow: 'auto' }}
-        language={language}
-        style={mode === 'dark' ? (dark ?? coldarkDark) : (light ?? oneDark)}
+      <pre
+        className='rounded-lg bg-slate-950 p-4 text-slate-100'
+        style={{ ...customStyle, maxHeight: '400px', overflow: 'auto' }}
       >
-        {code}
-      </SyntaxHighlighter>
+        <code data-language={language} className='block whitespace-pre font-mono text-xs leading-5'>
+          {code}
+        </code>
+      </pre>
     </div>
   );
 }

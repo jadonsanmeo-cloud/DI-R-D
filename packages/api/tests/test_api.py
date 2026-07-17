@@ -33,7 +33,9 @@ class AsgiResponse:
         return self.content.decode("utf-8").splitlines()
 
 
-async def asgi_request(app, method, path, *, json_body=None, content=None, headers=None):
+async def asgi_request(
+    app, method, path, *, json_body=None, content=None, headers=None
+):
     body = json.dumps(json_body).encode() if json_body is not None else (content or b"")
     request_headers = {key.lower(): value for key, value in (headers or {}).items()}
     if json_body is not None:
@@ -48,7 +50,9 @@ async def asgi_request(app, method, path, *, json_body=None, content=None, heade
         "raw_path": path.encode("ascii"),
         "query_string": b"",
         "root_path": "",
-        "headers": [(key.encode(), value.encode()) for key, value in request_headers.items()],
+        "headers": [
+            (key.encode(), value.encode()) for key, value in request_headers.items()
+        ],
         "client": ("127.0.0.1", 12345),
         "server": ("testserver", 80),
     }
@@ -134,7 +138,9 @@ class FakePipeline:
             capability_requirements=[CapabilityRequirement(name="inspect_data")],
         )
         self.logger.log("pipeline.spec_built", {"objective": spec.objective})
-        return PreparedExecution(query, "reason", corpus, spec, session_context, user_context)
+        return PreparedExecution(
+            query, "reason", corpus, spec, session_context, user_context
+        )
 
     def revise_spec(self, prepared, previous_spec, feedback):
         self.factory.revise_calls += 1
@@ -221,7 +227,11 @@ class BackendApiTests(unittest.TestCase):
                     "POST",
                     f"/api/v1/responses/{response_id}/decision",
                     headers={"X-Confirmation-Token": token},
-                    json_body={"action": "revise", "revision": 1, "feedback": "Use monthly totals"},
+                    json_body={
+                        "action": "revise",
+                        "revision": 1,
+                        "feedback": "Use monthly totals",
+                    },
                 )
             )
             revision = parse_sse(revised)[-1][1]
@@ -260,7 +270,9 @@ class BackendApiTests(unittest.TestCase):
                         "edited_spec": {
                             "objective": "Compare monthly revenue",
                             "data_requirements": pending["spec"]["data_requirements"],
-                            "capability_requirements": pending["spec"]["capability_requirements"],
+                            "capability_requirements": pending["spec"][
+                                "capability_requirements"
+                            ],
                             "constraints": {"currency": "USD"},
                             "engine_hint": "analytics",
                         },
@@ -276,8 +288,22 @@ class BackendApiTests(unittest.TestCase):
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir)
             _, _, pending = self.create_pending(app)
-            wrong = asyncio.run(asgi_request(app, "GET", f"/api/v1/responses/{pending['response_id']}", headers={"X-Confirmation-Token": "wrong"}))
-            recovered = asyncio.run(asgi_request(app, "GET", f"/api/v1/responses/{pending['response_id']}", headers={"X-Confirmation-Token": pending["confirmation_token"]}))
+            wrong = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    f"/api/v1/responses/{pending['response_id']}",
+                    headers={"X-Confirmation-Token": "wrong"},
+                )
+            )
+            recovered = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    f"/api/v1/responses/{pending['response_id']}",
+                    headers={"X-Confirmation-Token": pending["confirmation_token"]},
+                )
+            )
         self.assertEqual(wrong.status_code, 404)
         self.assertEqual(recovered.status_code, 200)
         self.assertEqual(recovered.json()["status"], "awaiting_confirmation")
@@ -287,7 +313,15 @@ class BackendApiTests(unittest.TestCase):
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir)
             _, _, pending = self.create_pending(app)
-            response = asyncio.run(asgi_request(app, "POST", f"/api/v1/responses/{pending['response_id']}/decision", headers={"X-Confirmation-Token": pending["confirmation_token"]}, json_body={"action": "confirm", "revision": 2}))
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "POST",
+                    f"/api/v1/responses/{pending['response_id']}/decision",
+                    headers={"X-Confirmation-Token": pending["confirmation_token"]},
+                    json_body={"action": "confirm", "revision": 2},
+                )
+            )
         self.assertEqual(response.status_code, 409)
 
     def test_expired_confirmation_returns_gone(self):
@@ -297,7 +331,14 @@ class BackendApiTests(unittest.TestCase):
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir, store=store)
             _, _, pending = self.create_pending(app)
-            response = asyncio.run(asgi_request(app, "GET", f"/api/v1/responses/{pending['response_id']}", headers={"X-Confirmation-Token": pending["confirmation_token"]}))
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    f"/api/v1/responses/{pending['response_id']}",
+                    headers={"X-Confirmation-Token": pending["confirmation_token"]},
+                )
+            )
         self.assertEqual(response.status_code, 410)
 
     def test_upload_keeps_files_under_corpus_root(self):
@@ -307,8 +348,18 @@ class BackendApiTests(unittest.TestCase):
                 {"conv_uid": "session-1"},
                 [("files", "../../sales report.csv", b"42", "text/csv")],
             )
-            response = asyncio.run(asgi_request(app, "POST", "/api/v1/backend_qa_flow/upload", content=body, headers={"content-type": content_type}))
-            stored = Path(temp_dir, response.json()["data"]["files"][0]["relative_path"]).resolve()
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "POST",
+                    "/api/v1/backend_qa_flow/upload",
+                    content=body,
+                    headers={"content-type": content_type},
+                )
+            )
+            stored = Path(
+                temp_dir, response.json()["data"]["files"][0]["relative_path"]
+            ).resolve()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(stored.parent.name, "session-1")
         self.assertTrue(stored.name.endswith("-sales_report.csv"))
@@ -317,10 +368,23 @@ class BackendApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = self.make_app(temp_dir)
             health = asyncio.run(asgi_request(app, "GET", "/health"))
-            cors = asyncio.run(asgi_request(app, "OPTIONS", "/api/v1/responses/x/decision", headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "X-Confirmation-Token"}))
+            cors = asyncio.run(
+                asgi_request(
+                    app,
+                    "OPTIONS",
+                    "/api/v1/responses/x/decision",
+                    headers={
+                        "Origin": "http://localhost:3000",
+                        "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "X-Confirmation-Token",
+                    },
+                )
+            )
         self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(cors.status_code, 200)
-        self.assertIn("X-Confirmation-Token", cors.headers["access-control-allow-headers"])
+        self.assertIn(
+            "X-Confirmation-Token", cors.headers["access-control-allow-headers"]
+        )
 
 
 if __name__ == "__main__":

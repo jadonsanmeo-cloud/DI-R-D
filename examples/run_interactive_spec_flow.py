@@ -39,7 +39,9 @@ from data_intelligence_sdk.datahub import LLMDataHubClusterer  # noqa: E402
 from data_intelligence_sdk.registry.engine_registry import (  # noqa: E402
     InMemoryEngineRegistry,
 )
-from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext  # noqa: E402
+from data_intelligence_sdk.runtime.engine_runtime import (
+    EngineRuntimeContext,
+)  # noqa: E402
 from data_intelligence_sdk.runtime.llm_client import (  # noqa: E402
     OpenAICompatibleLLMClient,
 )
@@ -474,7 +476,9 @@ def main() -> None:
     llm_client = TracingLLMClient(raw_llm_client)
     datahub_clusterer = TracingDataHubClusterer(LLMDataHubClusterer(llm_client))
     cluster_spec_builder = TracingClusterSpecBuilder(DefaultClusterSpecBuilder())
-    cluster_spec_selector = TracingClusterSpecSelector(LLMClusterSpecSelector(llm_client))
+    cluster_spec_selector = TracingClusterSpecSelector(
+        LLMClusterSpecSelector(llm_client)
+    )
     spec_builder = TracingSpecBuilder(
         LLMSpecBuilder(
             llm_client,

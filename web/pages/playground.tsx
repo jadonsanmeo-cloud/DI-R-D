@@ -1,4 +1,7 @@
-import { ChatPage, ChatTurn, ContentPart, SlashCommand } from '@/new-components/chat';
+import type { ChatTurn } from '@/new-components/chat/ChatMessageList';
+import ChatPage from '@/new-components/chat/ChatPage';
+import type { SlashCommand } from '@/new-components/chat/input/CommandPopover';
+import type { ContentPart } from '@/new-components/chat/input/EnhancedChatInput';
 import React, { useCallback, useRef, useState } from 'react';
 
 const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

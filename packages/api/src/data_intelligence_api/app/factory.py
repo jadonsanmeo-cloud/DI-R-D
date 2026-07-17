@@ -11,8 +11,12 @@ from data_intelligence_api.application.chat_service import ChatService
 from data_intelligence_api.application.chat_workflow import LLMChatWorkflow
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
 from data_intelligence_api.infrastructure.llm.openai_chat_client import OpenAIChatClient
-from data_intelligence_api.infrastructure.persistence.file_chat_store import FileChatStore
-from data_intelligence_api.infrastructure.persistence.postgres.migrations import run_migrations
+from data_intelligence_api.infrastructure.persistence.file_chat_store import (
+    FileChatStore,
+)
+from data_intelligence_api.infrastructure.persistence.postgres.migrations import (
+    run_migrations,
+)
 from data_intelligence_api.http.routers.chat import create_chat_router
 from data_intelligence_api.http.routers.responses import create_responses_router
 from data_intelligence_api.http.routers.health import create_health_router
@@ -24,7 +28,10 @@ from data_intelligence_api.infrastructure.persistence.memory.run_repository impo
 from data_intelligence_api.infrastructure.persistence.postgres.run_repository import (
     PostgresRunRepository,
 )
-from data_intelligence_api.application.workflow import PipelineFactory, default_pipeline_factory
+from data_intelligence_api.application.workflow import (
+    PipelineFactory,
+    default_pipeline_factory,
+)
 
 
 def create_app(

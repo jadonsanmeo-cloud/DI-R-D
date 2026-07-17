@@ -9,7 +9,9 @@ from data_intelligence_api.domain.runs import (
 from data_intelligence_api.infrastructure.persistence.memory.run_repository import (
     InMemoryRunRepository,
 )
-from data_intelligence_api.infrastructure.persistence.run_store import hash_confirmation_token
+from data_intelligence_api.infrastructure.persistence.run_store import (
+    hash_confirmation_token,
+)
 
 
 class RunStoreTests(unittest.TestCase):

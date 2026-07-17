@@ -6,7 +6,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -32,19 +31,18 @@ class ApiSettings:
     def from_env(cls) -> "ApiSettings":
         root = Path(os.getenv("DATA_CORPUS_ROOT", Path.cwd())).resolve()
         origins_value = os.getenv("API_CORS_ORIGINS", "")
-        origins = tuple(
-            origin.strip()
-            for origin in origins_value.split(",")
-            if origin.strip()
-        ) or DEFAULT_CORS_ORIGINS
+        origins = (
+            tuple(
+                origin.strip() for origin in origins_value.split(",") if origin.strip()
+            )
+            or DEFAULT_CORS_ORIGINS
+        )
         timeout = float(os.getenv("PIPELINE_TIMEOUT_SECONDS", "300"))
         if timeout <= 0:
             raise ValueError("PIPELINE_TIMEOUT_SECONDS must be greater than zero.")
         ttl = int(os.getenv("SPEC_CONFIRMATION_TTL_SECONDS", "86400"))
         if ttl <= 0:
-            raise ValueError(
-                "SPEC_CONFIRMATION_TTL_SECONDS must be greater than zero."
-            )
+            raise ValueError("SPEC_CONFIRMATION_TTL_SECONDS must be greater than zero.")
         max_revisions = int(os.getenv("MAX_SPEC_REVISION_ROUNDS", "5"))
         if max_revisions <= 0:
             raise ValueError("MAX_SPEC_REVISION_ROUNDS must be greater than zero.")

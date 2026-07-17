@@ -50,7 +50,9 @@ class MCPMethodClient:
         if not endpoint:
             raise ValueError("MCP endpoint must not be empty.")
         self.endpoint = endpoint
-        self._session_factory = session_factory or _default_factory_for_endpoint(endpoint)
+        self._session_factory = session_factory or _default_factory_for_endpoint(
+            endpoint
+        )
 
     def connect(self) -> None:
         """Verify that the MCP server can initialize and list its tools."""
@@ -92,8 +94,11 @@ class MCPMethodClient:
             await _initialize_session(session)
             response = await session.call_tool(name, arguments)
             if bool(_get_value(response, "isError", False)):
-                raise MCPToolError(_extract_text(response) or f"MCP tool failed: {name}")
+                raise MCPToolError(
+                    _extract_text(response) or f"MCP tool failed: {name}"
+                )
             return _normalize_result(response)
+
 
 def _default_factory_for_endpoint(endpoint: str) -> SessionFactory:
     @asynccontextmanager
@@ -144,7 +149,9 @@ def _normalize_tool(tool: Any) -> MCPToolDefinition:
         name=name,
         description=str(_get_value(tool, "description", "") or ""),
         input_schema=input_schema,
-        capability_names=tuple(str(item).strip() for item in capabilities if str(item).strip()),
+        capability_names=tuple(
+            str(item).strip() for item in capabilities if str(item).strip()
+        ),
         metadata=metadata,
     )
 

@@ -10,7 +10,6 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
 
-
 SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -36,7 +35,9 @@ def create_uploads_router(settings: ApiSettings) -> APIRouter:
         for upload in files:
             content = await upload.read(settings.max_upload_bytes + 1)
             if len(content) > settings.max_upload_bytes:
-                raise HTTPException(status_code=413, detail="Uploaded file is too large.")
+                raise HTTPException(
+                    status_code=413, detail="Uploaded file is too large."
+                )
             filename = f"{uuid.uuid4().hex[:12]}-{_safe_filename(upload.filename)}"
             destination = target_dir / filename
             destination.write_bytes(content)

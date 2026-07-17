@@ -17,9 +17,7 @@ def create_execute_python_tool(runtime: EngineRuntimeContext) -> BaseTool:
         """Persist and execute one complete Python analysis program."""
 
         if runtime.sandbox is None or runtime.run_artifact is None:
-            raise RuntimeError(
-                "The request sandbox or run artifact is unavailable."
-            )
+            raise RuntimeError("The request sandbox or run artifact is unavailable.")
         try:
             observation = runtime.sandbox.execute_python(
                 code,

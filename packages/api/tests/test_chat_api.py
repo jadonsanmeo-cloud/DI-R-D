@@ -116,9 +116,7 @@ class ChatApiTests(unittest.TestCase):
                     headers={"user-id": "user-1"},
                 )
             )
-            listed = asyncio.run(
-                asgi_request(app, "GET", "/api/v1/chat/dialogue/list")
-            )
+            listed = asyncio.run(asgi_request(app, "GET", "/api/v1/chat/dialogue/list"))
 
         self.assertEqual(created.status_code, 200)
         created_payload = created.json()

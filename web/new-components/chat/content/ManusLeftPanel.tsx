@@ -1,4 +1,3 @@
-import MarkdownContext from '@/new-components/common/MarkdownContext';
 import { AttachedConnector } from '@/new-components/connector/types';
 import {
   ApiOutlined,
@@ -35,6 +34,7 @@ import { Button, Tooltip, message } from 'antd';
 import classNames from 'classnames';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import LightweightMarkdown from './LightweightMarkdown';
 import ObservationFormatter from './ObservationFormatter';
 import TaskPlanCard, { TaskItem } from './TaskPlanCard';
 
@@ -1081,7 +1081,7 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
         {assistantText && (
           <div className='mt-4 px-1'>
             <div className='prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed'>
-              <MarkdownContext>{assistantText}</MarkdownContext>
+              <LightweightMarkdown>{assistantText}</LightweightMarkdown>
             </div>
           </div>
         )}

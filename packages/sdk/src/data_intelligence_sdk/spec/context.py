@@ -74,7 +74,9 @@ class SpecBuildContext:
 class SpecContextBuilder:
     """Builds deterministic, task-local context for spec builder agents."""
 
-    def __init__(self, *, max_recent_turns: int = 5, max_history_items: int = 5) -> None:
+    def __init__(
+        self, *, max_recent_turns: int = 5, max_history_items: int = 5
+    ) -> None:
         self.max_recent_turns = max_recent_turns
         self.max_history_items = max_history_items
 
@@ -253,9 +255,7 @@ def _mentioned_names(query_text: str, entries: list[dict[str, Any]]) -> list[str
     return names
 
 
-def _mentioned_columns(
-    query_text: str, entries: list[dict[str, Any]]
-) -> list[str]:
+def _mentioned_columns(query_text: str, entries: list[dict[str, Any]]) -> list[str]:
     columns: list[str] = []
     for entry in entries:
         value = entry.get("columns", [])

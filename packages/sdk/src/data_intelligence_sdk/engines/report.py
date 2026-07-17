@@ -28,7 +28,6 @@ from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manag
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 
-
 PLAN_AGENT_PROMPT = """
 You are the Data Planning Agent. Build a validated, data-aware DAG for a report.
 
@@ -266,7 +265,9 @@ def _source_summary(sources: list[str]) -> str:
     return "\n".join(f"- {source}" for source in sources)
 
 
-def _dataset_summary(catalog: dict[str, Any], allowed_names: set[str] | None = None) -> str:
+def _dataset_summary(
+    catalog: dict[str, Any], allowed_names: set[str] | None = None
+) -> str:
     datasets = catalog.get("datasets", [])
     if not datasets:
         return "No catalog datasets were provided."
@@ -348,20 +349,32 @@ def _execution_spec_payload(spec: ExecutionSpec) -> dict[str, Any]:
         "intent": spec.intent,
         "objective": spec.objective,
         "data_requirements": list(spec.data_requirements),
-        "capability_requirements": [_to_jsonable(item) for item in spec.capability_requirements],
+        "capability_requirements": [
+            _to_jsonable(item) for item in spec.capability_requirements
+        ],
         "constraints": deepcopy(spec.constraints),
         "confirmed": spec.confirmed,
         "engine_hint": spec.engine_hint,
     }
 
 
-def _scope_from_spec(spec: ExecutionSpec, corpus_package: DataCorpusPackage) -> dict[str, Any]:
+def _scope_from_spec(
+    spec: ExecutionSpec, corpus_package: DataCorpusPackage
+) -> dict[str, Any]:
     constraints = spec.constraints if isinstance(spec.constraints, dict) else {}
-    scope = constraints.get("scope", {}) if isinstance(constraints.get("scope", {}), dict) else {}
+    scope = (
+        constraints.get("scope", {})
+        if isinstance(constraints.get("scope", {}), dict)
+        else {}
+    )
     selected = constraints.get("selected_data_context", {})
     if not isinstance(selected, dict):
         selected = {}
-    selected_sources = selected.get("selected_sources") or scope.get("sources") or spec.data_requirements
+    selected_sources = (
+        selected.get("selected_sources")
+        or scope.get("sources")
+        or spec.data_requirements
+    )
     if not selected_sources:
         selected_sources = corpus_package.sources
     selected_tables = selected.get("selected_tables") or scope.get("tables")
@@ -377,7 +390,9 @@ def _scope_from_spec(spec: ExecutionSpec, corpus_package: DataCorpusPackage) -> 
         selected_tables = list(corpus_package.schemas.get("tables", {}))
     if selected_vectors is None:
         selected_vectors = (
-            [] if has_explicit_scope else list(corpus_package.schemas.get("vector_collections", {}))
+            []
+            if has_explicit_scope
+            else list(corpus_package.schemas.get("vector_collections", {}))
         )
     if selected_documents is None:
         selected_documents = []
@@ -422,7 +437,9 @@ def _scoped_corpus_payload(
     }
     catalog = deepcopy(corpus_package.metadata.get("catalog", {}))
     if isinstance(catalog, dict) and isinstance(catalog.get("datasets"), list):
-        allowed = set(scope["tables"] + scope["vector_collections"] + scope["documents"])
+        allowed = set(
+            scope["tables"] + scope["vector_collections"] + scope["documents"]
+        )
         catalog["datasets"] = [
             item for item in catalog["datasets"] if str(item.get("name")) in allowed
         ]
@@ -467,7 +484,8 @@ def _infer_schema(rows: list[Any]) -> dict[str, Any]:
             fields[str(name)] = {
                 "name": str(name),
                 "type": value_type,
-                "nullable": fields.get(str(name), {}).get("nullable", False) or value is None,
+                "nullable": fields.get(str(name), {}).get("nullable", False)
+                or value is None,
             }
     return {"shape": "table", "fields": list(fields.values())}
 
@@ -497,7 +515,11 @@ def _profile_rows(rows: list[Any], raw_data: Any) -> dict[str, Any]:
         "null_counts": null_counts,
         "cardinality": {key: len(values) for key, values in cardinality.items()},
         "numeric_stats": {
-            key: {"min": min(values), "max": max(values), "mean": sum(values) / len(values)}
+            key: {
+                "min": min(values),
+                "max": max(values),
+                "mean": sum(values) / len(values),
+            }
             for key, values in numeric_values.items()
             if values
         },
@@ -565,10 +587,14 @@ class PlanAgent(_PromptAgent):
         if isinstance(payload, list):
             payload = {"steps": payload}
         if isinstance(payload, dict) and isinstance(payload.get("steps"), list):
-            normalized = self._normalize_plan(payload, spec, corpus_package, previous_plan)
+            normalized = self._normalize_plan(
+                payload, spec, corpus_package, previous_plan
+            )
             if normalized["steps"]:
                 return normalized
-        return self._fallback_plan(spec, corpus_package, previous_plan, template_feedback or [])
+        return self._fallback_plan(
+            spec, corpus_package, previous_plan, template_feedback or []
+        )
 
     def _normalize_plan(
         self,
@@ -589,7 +615,9 @@ class PlanAgent(_PromptAgent):
             if not isinstance(required_data, dict):
                 required_data = {}
             tables = [str(item) for item in required_data.get("tables", [])]
-            vectors = [str(item) for item in required_data.get("vector_collections", [])]
+            vectors = [
+                str(item) for item in required_data.get("vector_collections", [])
+            ]
             if scope["explicit"] and (
                 any(item not in allowed_tables for item in tables)
                 or any(item not in allowed_vectors for item in vectors)
@@ -601,7 +629,9 @@ class PlanAgent(_PromptAgent):
             seen.add(step_id)
             columns = [str(item) for item in required_data.get("columns", [])]
             if tables and scope["columns"].get(tables[0]):
-                columns = [item for item in columns if item in scope["columns"][tables[0]]]
+                columns = [
+                    item for item in columns if item in scope["columns"][tables[0]]
+                ]
             outputs = raw_step.get("outputs")
             if not isinstance(outputs, list) or not outputs:
                 outputs = [
@@ -618,7 +648,9 @@ class PlanAgent(_PromptAgent):
                     "step_id": step_id,
                     "required": bool(raw_step.get("required", True)),
                     "inputs": raw_step.get("inputs", []),
-                    "depends_on": [str(item) for item in raw_step.get("depends_on", [])],
+                    "depends_on": [
+                        str(item) for item in raw_step.get("depends_on", [])
+                    ],
                     "required_data": {
                         **required_data,
                         "tables": tables,
@@ -629,14 +661,23 @@ class PlanAgent(_PromptAgent):
                     "outputs": outputs,
                     "fallback": raw_step.get(
                         "fallback",
-                        {"action": "complete_no_data", "message": "No matching data was found."},
+                        {
+                            "action": "complete_no_data",
+                            "message": "No matching data was found.",
+                        },
                     ),
                 }
             )
-        revision = int(payload.get("revision", (previous_plan or {}).get("revision", 0) + 1))
+        revision = int(
+            payload.get("revision", (previous_plan or {}).get("revision", 0) + 1)
+        )
         return {
             "schema_version": "1.0",
-            "plan_id": str(payload.get("plan_id", (previous_plan or {}).get("plan_id", "report-plan"))),
+            "plan_id": str(
+                payload.get(
+                    "plan_id", (previous_plan or {}).get("plan_id", "report-plan")
+                )
+            ),
             "revision": revision,
             "objective": spec.objective,
             "scope": scope,
@@ -654,8 +695,14 @@ class PlanAgent(_PromptAgent):
         scope = _scope_from_spec(spec, corpus_package)
         constraints = spec.constraints if isinstance(spec.constraints, dict) else {}
         group_by = [str(item) for item in constraints.get("group_by", [])]
-        metrics = [item for item in constraints.get("metrics", []) if isinstance(item, dict)]
-        filters = constraints.get("filters", {}) if isinstance(constraints.get("filters", {}), dict) else {}
+        metrics = [
+            item for item in constraints.get("metrics", []) if isinstance(item, dict)
+        ]
+        filters = (
+            constraints.get("filters", {})
+            if isinstance(constraints.get("filters", {}), dict)
+            else {}
+        )
         steps: list[dict[str, Any]] = []
         for table in scope["tables"]:
             columns = scope["columns"].get(table)
@@ -669,11 +716,22 @@ class PlanAgent(_PromptAgent):
                     "description": f"Inspect the selected columns and data quality of `{table}` for the report objective.",
                     "required": True,
                     "inputs": [
-                        {"ref": f"corpus://{table}", "kind": "corpus_source", "required": True}
+                        {
+                            "ref": f"corpus://{table}",
+                            "kind": "corpus_source",
+                            "required": True,
+                        }
                     ],
                     "depends_on": [],
-                    "required_data": {"tables": [table], "vector_collections": [], "columns": columns},
-                    "operation": {"kind": "inspect", "parameters": {"columns": columns, "filters": filters}},
+                    "required_data": {
+                        "tables": [table],
+                        "vector_collections": [],
+                        "columns": columns,
+                    },
+                    "operation": {
+                        "kind": "inspect",
+                        "parameters": {"columns": columns, "filters": filters},
+                    },
                     "outputs": [
                         {
                             "name": f"{_safe_id(table)}-profile",
@@ -682,11 +740,16 @@ class PlanAgent(_PromptAgent):
                             "consumer_hints": ["analysis", "report"],
                         }
                     ],
-                    "fallback": {"action": "complete_no_data", "message": f"No `{table}` rows are available."},
+                    "fallback": {
+                        "action": "complete_no_data",
+                        "message": f"No `{table}` rows are available.",
+                    },
                 }
             )
             if metrics or group_by:
-                metric_fields = [str(item.get("field")) for item in metrics if item.get("field")]
+                metric_fields = [
+                    str(item.get("field")) for item in metrics if item.get("field")
+                ]
                 aggregate_columns = list(dict.fromkeys(group_by + metric_fields))
                 aggregate_id = f"aggregate-{_safe_id(table)}"
                 steps.append(
@@ -695,7 +758,11 @@ class PlanAgent(_PromptAgent):
                         "description": f"Aggregate `{table}` by {group_by or ['all rows']} using the confirmed metrics.",
                         "required": True,
                         "inputs": [
-                            {"ref": f"corpus://{table}", "kind": "corpus_source", "required": True}
+                            {
+                                "ref": f"corpus://{table}",
+                                "kind": "corpus_source",
+                                "required": True,
+                            }
                         ],
                         "depends_on": [],
                         "required_data": {
@@ -705,7 +772,11 @@ class PlanAgent(_PromptAgent):
                         },
                         "operation": {
                             "kind": "aggregate",
-                            "parameters": {"group_by": group_by, "metrics": metrics, "filters": filters},
+                            "parameters": {
+                                "group_by": group_by,
+                                "metrics": metrics,
+                                "filters": filters,
+                            },
                         },
                         "outputs": [
                             {
@@ -713,9 +784,14 @@ class PlanAgent(_PromptAgent):
                                 "shape": "category_series" if group_by else "record",
                                 "semantic_roles": [
                                     "primary_measure",
-                                    "comparison_dimension" if group_by else "headline_metrics",
+                                    (
+                                        "comparison_dimension"
+                                        if group_by
+                                        else "headline_metrics"
+                                    ),
                                 ],
-                                "fields": group_by + [str(item.get("name")) for item in metrics],
+                                "fields": group_by
+                                + [str(item.get("name")) for item in metrics],
                                 "consumer_hints": ["analysis", "chart", "report"],
                             }
                         ],
@@ -727,14 +803,20 @@ class PlanAgent(_PromptAgent):
                 )
         if not scope["explicit"]:
             for collection in scope["vector_collections"]:
-                metadata = corpus_package.schemas.get("vector_collections", {}).get(collection, {})
+                metadata = corpus_package.schemas.get("vector_collections", {}).get(
+                    collection, {}
+                )
                 steps.append(
                     {
                         "step_id": f"inspect-{_safe_id(collection)}",
                         "description": f"Inspect vector collection `{collection}` for the report objective.",
                         "required": False,
                         "inputs": [
-                            {"ref": f"corpus://{collection}", "kind": "corpus_source", "required": False}
+                            {
+                                "ref": f"corpus://{collection}",
+                                "kind": "corpus_source",
+                                "required": False,
+                            }
                         ],
                         "depends_on": [],
                         "required_data": {
@@ -751,7 +833,10 @@ class PlanAgent(_PromptAgent):
                                 "consumer_hints": ["analysis", "report"],
                             }
                         ],
-                        "fallback": {"action": "omit", "message": "No vector data was available."},
+                        "fallback": {
+                            "action": "omit",
+                            "message": "No vector data was available.",
+                        },
                     }
                 )
         if not steps:
@@ -762,7 +847,11 @@ class PlanAgent(_PromptAgent):
                     "required": True,
                     "inputs": [],
                     "depends_on": [],
-                    "required_data": {"tables": [], "vector_collections": [], "columns": []},
+                    "required_data": {
+                        "tables": [],
+                        "vector_collections": [],
+                        "columns": [],
+                    },
                     "operation": {"kind": "inspect_metadata"},
                     "outputs": [
                         {
@@ -772,7 +861,10 @@ class PlanAgent(_PromptAgent):
                             "consumer_hints": ["analysis", "report"],
                         }
                     ],
-                    "fallback": {"action": "message", "message": "Only scoped metadata is available."},
+                    "fallback": {
+                        "action": "message",
+                        "message": "Only scoped metadata is available.",
+                    },
                 }
             )
         existing_ids = {step["step_id"] for step in steps}
@@ -783,21 +875,39 @@ class PlanAgent(_PromptAgent):
             steps.append(
                 {
                     "step_id": request_id,
-                    "description": str(feedback.get("description", "Prepare data requested by the template.")),
+                    "description": str(
+                        feedback.get(
+                            "description", "Prepare data requested by the template."
+                        )
+                    ),
                     "required": bool(feedback.get("required", False)),
                     "inputs": [],
                     "depends_on": [],
-                    "required_data": {"tables": scope["tables"], "vector_collections": [], "columns": []},
-                    "operation": {"kind": "template_data_request", "parameters": feedback},
+                    "required_data": {
+                        "tables": scope["tables"],
+                        "vector_collections": [],
+                        "columns": [],
+                    },
+                    "operation": {
+                        "kind": "template_data_request",
+                        "parameters": feedback,
+                    },
                     "outputs": [
                         {
                             "name": request_id,
-                            "shape": feedback.get("expected_output", {}).get("shape", "table"),
-                            "semantic_roles": feedback.get("expected_output", {}).get("semantic_roles", []),
+                            "shape": feedback.get("expected_output", {}).get(
+                                "shape", "table"
+                            ),
+                            "semantic_roles": feedback.get("expected_output", {}).get(
+                                "semantic_roles", []
+                            ),
                             "consumer_hints": ["analysis", "chart", "report"],
                         }
                     ],
-                    "fallback": {"action": "omit", "message": "The template data request is unavailable."},
+                    "fallback": {
+                        "action": "omit",
+                        "message": "The template data request is unavailable.",
+                    },
                 }
             )
         return {
@@ -819,7 +929,9 @@ class TemplatePool:
         return resources.files(self.package)
 
     def manifest(self) -> dict[str, Any]:
-        return json.loads(self._root().joinpath("manifest.json").read_text(encoding="utf-8"))
+        return json.loads(
+            self._root().joinpath("manifest.json").read_text(encoding="utf-8")
+        )
 
     def list_templates(self) -> list[dict[str, Any]]:
         return [deepcopy(item) for item in self.manifest().get("templates", [])]
@@ -831,7 +943,9 @@ class TemplatePool:
             if version is not None and descriptor.get("version") != version:
                 continue
             payload = json.loads(
-                self._root().joinpath(str(descriptor["path"])).read_text(encoding="utf-8")
+                self._root()
+                .joinpath(str(descriptor["path"]))
+                .read_text(encoding="utf-8")
             )
             return payload
         raise KeyError(f"Unknown report template: {template_id!r} version={version!r}")
@@ -858,12 +972,20 @@ class TemplateAgent(_PromptAgent):
             candidate_templates=candidates,
             previous_instance=previous_instance,
         )
-        requested_id = spec.constraints.get("template_id") if isinstance(spec.constraints, dict) else None
+        requested_id = (
+            spec.constraints.get("template_id")
+            if isinstance(spec.constraints, dict)
+            else None
+        )
         selected_id = requested_id
-        selection_reason = "The template was explicitly requested by the execution spec."
+        selection_reason = (
+            "The template was explicitly requested by the execution spec."
+        )
         if selected_id is None and isinstance(payload, dict):
             selected_id = payload.get("template_id")
-            selection_reason = str(payload.get("selection_reason", "Selected by TemplateAgent."))
+            selection_reason = str(
+                payload.get("selection_reason", "Selected by TemplateAgent.")
+            )
         valid_ids = {str(item.get("template_id")) for item in candidates}
         if selected_id not in valid_ids:
             selected_id, selection_reason = self._fallback_selection(spec, plan)
@@ -887,9 +1009,15 @@ class TemplateAgent(_PromptAgent):
             for role in output.get("semantic_roles", [])
         )
         if has_time:
-            return "time-series-analysis", "The goal or plan contains an ordered time dimension."
+            return (
+                "time-series-analysis",
+                "The goal or plan contains an ordered time dimension.",
+            )
         if group_by:
-            return "segment-comparison", "The confirmed spec compares grouped categories."
+            return (
+                "segment-comparison",
+                "The confirmed spec compares grouped categories.",
+            )
         return "executive-overview", "The goal is best served by a concise overview."
 
     def _materialize_instance(
@@ -924,7 +1052,9 @@ class TemplateAgent(_PromptAgent):
                         "request_id": f"provide-{requirement_id}",
                         "requirement_ref": requirement_id,
                         "required": True,
-                        "description": requirement.get("description", "Provide required template data."),
+                        "description": requirement.get(
+                            "description", "Provide required template data."
+                        ),
                         "expected_output": requirement.get("expected_output", {}),
                         "reason": "No compatible named plan output exists.",
                     }
@@ -949,8 +1079,10 @@ class TemplateAgent(_PromptAgent):
                         ]
                     )
         revision = int((previous_instance or {}).get("revision", 0)) + 1
-        status = "needs_plan_revision" if missing else (
-            "partial" if applied_fallbacks else "accepted"
+        status = (
+            "needs_plan_revision"
+            if missing
+            else ("partial" if applied_fallbacks else "accepted")
         )
         return {
             "schema_version": "1.0",
@@ -1012,9 +1144,15 @@ class RouterAgent(_PromptAgent):
         if isinstance(payload, dict):
             if "use_existing_tool" in payload:
                 payload["route"] = (
-                    "existing_tool" if payload.get("use_existing_tool") else "generate_tool"
+                    "existing_tool"
+                    if payload.get("use_existing_tool")
+                    else "generate_tool"
                 )
-            if payload.get("route") in {"existing_tool", "generate_tool", "unsupported"}:
+            if payload.get("route") in {
+                "existing_tool",
+                "generate_tool",
+                "unsupported",
+            }:
                 payload.setdefault("arguments", {})
                 payload.setdefault("reason", "Selected by Routing Agent.")
                 return payload
@@ -1086,8 +1224,13 @@ class CodeAgent(_PromptAgent):
             validation_feedback=validation_feedback,
         )
         if isinstance(payload, dict):
-            payload.setdefault("tool_name", f"generated_{_safe_id(step_request.get('step_id'))}")
-            payload.setdefault("parameters_schema", {"type": "object", "properties": {}, "required": []})
+            payload.setdefault(
+                "tool_name", f"generated_{_safe_id(step_request.get('step_id'))}"
+            )
+            payload.setdefault(
+                "parameters_schema",
+                {"type": "object", "properties": {}, "required": []},
+            )
             payload.setdefault("output_schema", {"type": "array"})
             payload.setdefault("source_code", "")
             payload.setdefault("execution_arguments", {})
@@ -1216,7 +1359,9 @@ class ChartAgent(_PromptAgent):
 
     def run(self, chart_request: dict[str, Any]) -> dict[str, Any]:
         payload = self._invoke_json(chart_request=chart_request)
-        if isinstance(payload, dict) and payload.get("chart_id") == chart_request.get("chart_id"):
+        if isinstance(payload, dict) and payload.get("chart_id") == chart_request.get(
+            "chart_id"
+        ):
             payload.setdefault("status", "ready")
             payload.setdefault("library", "echarts")
             payload.setdefault("warnings", [])
@@ -1242,7 +1387,9 @@ class ChartAgent(_PromptAgent):
         allowed = request.get("allowed_types", [chart_type])
         if chart_type not in allowed:
             chart_type = str(allowed[0])
-        fields = [field.get("name") for field in dataset.get("schema", {}).get("fields", [])]
+        fields = [
+            field.get("name") for field in dataset.get("schema", {}).get("fields", [])
+        ]
         x_field = fields[0] if fields else "category"
         y_field = fields[1] if len(fields) > 1 else (fields[0] if fields else "value")
         echarts_type = "bar" if chart_type == "stacked_bar" else chart_type
@@ -1261,7 +1408,11 @@ class ChartAgent(_PromptAgent):
             "selection_reason": "The deterministic fallback used the template suggestion.",
             "dataset_refs": [dataset.get("artifact_ref")],
             "option": {
-                "title": {"text": request.get("presentation", {}).get("title", request.get("intent", "Chart"))},
+                "title": {
+                    "text": request.get("presentation", {}).get(
+                        "title", request.get("intent", "Chart")
+                    )
+                },
                 "tooltip": {"trigger": "axis"},
                 "dataset": {"source": data},
                 "xAxis": {"type": "category"},
@@ -1287,7 +1438,9 @@ class ReportAgent(_PromptAgent):
         text = self._invoke_text(user_goal=user_goal, all_steps_data=all_steps_data)
         if text:
             return text
-        return self._fallback_markdown(user_goal, all_steps_data, corpus_package, scoped_payload)
+        return self._fallback_markdown(
+            user_goal, all_steps_data, corpus_package, scoped_payload
+        )
 
     def run_structured(
         self,
@@ -1326,7 +1479,9 @@ class ReportAgent(_PromptAgent):
         chart_results: list[dict[str, Any]],
         scoped_payload: dict[str, Any],
     ) -> dict[str, Any]:
-        analysis_by_step = {str(item.get("step_id")): item for item in data_step_results}
+        analysis_by_step = {
+            str(item.get("step_id")): item for item in data_step_results
+        }
         chart_by_id = {str(item.get("chart_id")): item for item in chart_results}
         sections = []
         for section in template_instance.get("sections", []):
@@ -1339,9 +1494,14 @@ class ReportAgent(_PromptAgent):
                     chart_id = block.get("chart_slot", {}).get("chart_id")
                     chart = chart_by_id.get(str(chart_id))
                     content = {"chart_id": chart_id, "chart": chart}
-                    if chart is None or chart.get("status") not in {"ready", "completed"}:
+                    if chart is None or chart.get("status") not in {
+                        "ready",
+                        "completed",
+                    }:
                         status = "fallback"
-                        content["fallback"] = block.get("chart_slot", {}).get("fallback", {"action": "table"})
+                        content["fallback"] = block.get("chart_slot", {}).get(
+                            "fallback", {"action": "table"}
+                        )
                 elif block_type == "kpi_group":
                     content = {"metrics": self._collect_metrics(data_step_results)}
                     if not content["metrics"]:
@@ -1352,11 +1512,19 @@ class ReportAgent(_PromptAgent):
                         for item in data_step_results
                         if item.get("analysis_summary")
                     ]
-                    content = {"text": " ".join(map(str, summaries)) or "No data matched the confirmed scope."}
+                    content = {
+                        "text": " ".join(map(str, summaries))
+                        or "No data matched the confirmed scope."
+                    }
                     if not summaries:
                         status = "no_data"
                 else:
-                    content = {"rows": [item.get("aggregated_data", {}) for item in data_step_results]}
+                    content = {
+                        "rows": [
+                            item.get("aggregated_data", {})
+                            for item in data_step_results
+                        ]
+                    }
                 blocks.append(
                     {
                         "block_id": block.get("block_id"),
@@ -1375,13 +1543,19 @@ class ReportAgent(_PromptAgent):
                 {
                     "section_id": section.get("section_id"),
                     "title": section.get("title"),
-                    "status": "completed" if any(block["status"] == "completed" for block in blocks) else "no_data",
+                    "status": (
+                        "completed"
+                        if any(block["status"] == "completed" for block in blocks)
+                        else "no_data"
+                    ),
                     "layout": section.get("layout", {}),
                     "blocks": blocks,
                 }
             )
         statuses = {item.get("status") for item in data_step_results}
-        report_status = "partial" if "failed" in statuses or "partial" in statuses else "completed"
+        report_status = (
+            "partial" if "failed" in statuses or "partial" in statuses else "completed"
+        )
         return {
             "schema_version": "1.0",
             "report_id": "structured-report",
@@ -1391,14 +1565,19 @@ class ReportAgent(_PromptAgent):
                 str(item.get("analysis_summary"))
                 for item in data_step_results
                 if item.get("analysis_summary")
-            ) or "No data matched the confirmed scope.",
+            )
+            or "No data matched the confirmed scope.",
             "template": self._template_ref(template_instance),
             "sections": sections,
             "metrics": self._collect_metrics(data_step_results),
             "charts": chart_results,
             "sources": scoped_payload.get("sources", []),
             "data_scope": scoped_payload.get("scope", {}),
-            "warnings": [warning for item in data_step_results for warning in item.get("warnings", [])],
+            "warnings": [
+                warning
+                for item in data_step_results
+                for warning in item.get("warnings", [])
+            ],
         }
 
     def _template_ref(self, instance: dict[str, Any]) -> dict[str, Any]:
@@ -1409,8 +1588,14 @@ class ReportAgent(_PromptAgent):
             "revision": instance.get("revision"),
         }
 
-    def _collect_metrics(self, data_step_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return [metric for item in data_step_results for metric in item.get("aggregated_metrics", [])]
+    def _collect_metrics(
+        self, data_step_results: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        return [
+            metric
+            for item in data_step_results
+            for metric in item.get("aggregated_metrics", [])
+        ]
 
     def _fallback_markdown(
         self,
@@ -1432,7 +1617,9 @@ class ReportAgent(_PromptAgent):
             "## Key Metrics",
             "",
         ]
-        summary = catalog.get("summary") or corpus_package.metadata.get("catalog", {}).get("summary")
+        summary = catalog.get("summary") or corpus_package.metadata.get(
+            "catalog", {}
+        ).get("summary")
         if summary:
             lines[6:6] = [str(summary), ""]
         for step in all_steps_data:
@@ -1446,7 +1633,11 @@ class ReportAgent(_PromptAgent):
                 [
                     f"### {step.get('step_id', 'step')}",
                     "",
-                    str(step.get("analysis_summary", "No analysis summary was produced.")),
+                    str(
+                        step.get(
+                            "analysis_summary", "No analysis summary was produced."
+                        )
+                    ),
                     "",
                 ]
             )
@@ -1607,7 +1798,9 @@ class ToolExecutor:
 
 
 class DataScienceProcessor:
-    def __init__(self, agent: DataScienceAgent, max_inline_chart_rows: int = 100) -> None:
+    def __init__(
+        self, agent: DataScienceAgent, max_inline_chart_rows: int = 100
+    ) -> None:
         self.agent = agent
         self.max_inline_chart_rows = max_inline_chart_rows
 
@@ -1647,7 +1840,9 @@ class DataScienceProcessor:
         )
         if execution_result.get("status") == "failed":
             decision["status"] = "failed"
-            decision.setdefault("warnings", []).append(str(execution_result.get("error")))
+            decision.setdefault("warnings", []).append(
+                str(execution_result.get("error"))
+            )
         aggregated = decision.get("aggregated_data", {})
         metrics = [
             {
@@ -1656,7 +1851,9 @@ class DataScienceProcessor:
                 "value": value,
                 "evidence_refs": [artifact_ref],
             }
-            for name, value in (aggregated.items() if isinstance(aggregated, dict) else [])
+            for name, value in (
+                aggregated.items() if isinstance(aggregated, dict) else []
+            )
         ]
         chart_ids = sorted(
             {
@@ -1695,7 +1892,9 @@ class DataScienceProcessor:
             "warnings": decision.get("warnings", []),
             "lineage": {
                 "source_refs": [item.get("ref") for item in step.get("inputs", [])],
-                "upstream_step_refs": [item.get("step_id") for item in upstream_step_results],
+                "upstream_step_refs": [
+                    item.get("step_id") for item in upstream_step_results
+                ],
                 "tool_name": execution_result.get("tool_name"),
             },
         }
@@ -1712,7 +1911,9 @@ class DataScienceProcessor:
                 "metric_count": len(metrics),
                 "chart_dataset_count": len(chart_datasets),
             },
-            artifact_refs=[artifact_ref] if execution_result.get("status") != "failed" else [],
+            artifact_refs=(
+                [artifact_ref] if execution_result.get("status") != "failed" else []
+            ),
         )
         return result
 
@@ -1766,7 +1967,11 @@ class ChartInputAssembler:
                         }
                 request = {
                     "schema_version": "1.0",
-                    "status": "ready" if dataset and dataset.get("data") else "insufficient_data",
+                    "status": (
+                        "ready"
+                        if dataset and dataset.get("data")
+                        else "insufficient_data"
+                    ),
                     "chart_id": chart_id,
                     "intent": slot.get("intent"),
                     "suggested_type": slot.get("suggested_type"),
@@ -1775,7 +1980,9 @@ class ChartInputAssembler:
                     "presentation": slot.get("presentation", {}),
                     "constraints": slot.get("constraints", {}),
                     "dataset": dataset or {},
-                    "aggregated_metrics": result.get("aggregated_metrics", []) if result else [],
+                    "aggregated_metrics": (
+                        result.get("aggregated_metrics", []) if result else []
+                    ),
                     "fallback": slot.get("fallback", {"action": "table"}),
                 }
                 if request["status"] == "ready":
@@ -1824,9 +2031,16 @@ class ReportRenderer:
         ]
 
     def _markdown(self, report: dict[str, Any]) -> str:
-        lines = [f"# {report.get('title', 'Data Intelligence Report')}", "", str(report.get("summary", "")), ""]
+        lines = [
+            f"# {report.get('title', 'Data Intelligence Report')}",
+            "",
+            str(report.get("summary", "")),
+            "",
+        ]
         for section in report.get("sections", []):
-            lines.extend([f"## {section.get('title', section.get('section_id', 'Section'))}", ""])
+            lines.extend(
+                [f"## {section.get('title', section.get('section_id', 'Section'))}", ""]
+            )
             for block in section.get("blocks", []):
                 title = block.get("title")
                 if title:
@@ -1837,7 +2051,9 @@ class ReportRenderer:
                 elif block.get("type") == "kpi_group":
                     lines.extend(["| Metric | Value |", "| --- | ---: |"])
                     for metric in content.get("metrics", []):
-                        lines.append(f"| {metric.get('name')} | {metric.get('value')} |")
+                        lines.append(
+                            f"| {metric.get('name')} | {metric.get('value')} |"
+                        )
                     lines.append("")
                 elif block.get("type") == "chart":
                     chart = content.get("chart") or {}
@@ -1851,25 +2067,43 @@ class ReportRenderer:
 
     def _html(self, report: dict[str, Any]) -> str:
         title = self._escape(str(report.get("title", "Data Intelligence Report")))
-        body = [f"<h1>{title}</h1>", f"<p>{self._escape(str(report.get('summary', '')))}</p>"]
+        body = [
+            f"<h1>{title}</h1>",
+            f"<p>{self._escape(str(report.get('summary', '')))}</p>",
+        ]
         for section in report.get("sections", []):
-            body.append(f"<section><h2>{self._escape(str(section.get('title', 'Section')))}</h2>")
+            body.append(
+                f"<section><h2>{self._escape(str(section.get('title', 'Section')))}</h2>"
+            )
             for block in section.get("blocks", []):
                 content = block.get("content", {})
                 if block.get("type") in {"narrative", "recommendations"}:
                     body.append(f"<p>{self._escape(str(content.get('text', '')))}</p>")
                 elif block.get("type") == "chart" and content.get("chart"):
                     chart_id = _safe_id(content.get("chart_id"))
-                    option = json.dumps(content["chart"].get("option", {}), ensure_ascii=False).replace("</", "<\\/")
+                    option = json.dumps(
+                        content["chart"].get("option", {}), ensure_ascii=False
+                    ).replace("</", "<\\/")
                     body.append(f'<div id="{chart_id}" class="echarts-chart"></div>')
                     body.append(
                         f'<script type="application/json" data-chart-id="{chart_id}">{option}</script>'
                     )
             body.append("</section>")
-        return "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title + "</title></head><body>" + "".join(body) + "</body></html>"
+        return (
+            '<!doctype html><html><head><meta charset="utf-8"><title>'
+            + title
+            + "</title></head><body>"
+            + "".join(body)
+            + "</body></html>"
+        )
 
     def _escape(self, value: str) -> str:
-        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        return (
+            value.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
 
 
 class _DataStepState(TypedDict, total=False):
@@ -1982,7 +2216,9 @@ class ReportEngine:
             str(config_path) if config_path is not None else None
         )
         settings = manager.openrouter_settings()
-        resolved_api_key = api_key or settings.api_key or os.environ.get("OPENROUTER_API_KEY")
+        resolved_api_key = (
+            api_key or settings.api_key or os.environ.get("OPENROUTER_API_KEY")
+        )
         resolved_model = model or settings.model or os.environ.get("OPENROUTER_MODEL")
         if not resolved_api_key or not resolved_model:
             return None
@@ -2028,7 +2264,9 @@ class ReportEngine:
             initial,
             config={
                 "recursion_limit": 100,
-                "max_concurrency": max(self.max_data_concurrency, self.max_chart_concurrency),
+                "max_concurrency": max(
+                    self.max_data_concurrency, self.max_chart_concurrency
+                ),
             },
         )
         generation_mode = "langchain" if self.llm is not None else "fallback"
@@ -2174,13 +2412,20 @@ class ReportEngine:
         iteration = int(state.get("negotiation_iteration", 0)) + 1
         proposal_status = str(state["template_proposal"].get("status", "failed"))
         missing = state["template_proposal"].get("missing_data_requests", [])
-        if proposal_status == "needs_plan_revision" and iteration >= self.max_negotiation_iterations:
+        if (
+            proposal_status == "needs_plan_revision"
+            and iteration >= self.max_negotiation_iterations
+        ):
             status = "iteration_limit_reached"
         else:
             status = proposal_status
         state["runtime"].run_context.record_step(
             "plan_template_negotiation",
-            status="failed" if status in {"failed", "iteration_limit_reached"} else "completed",
+            status=(
+                "failed"
+                if status in {"failed", "iteration_limit_reached"}
+                else "completed"
+            ),
             inputs={"iteration": iteration},
             outputs={"status": status, "missing_data_requests": missing},
         )
@@ -2193,7 +2438,8 @@ class ReportEngine:
     def _negotiation_route(self, state: _ReportGraphState) -> str:
         if (
             state.get("negotiation_status") == "needs_plan_revision"
-            and int(state.get("negotiation_iteration", 0)) < self.max_negotiation_iterations
+            and int(state.get("negotiation_iteration", 0))
+            < self.max_negotiation_iterations
         ):
             return "plan"
         return "schedule_data"
@@ -2201,7 +2447,9 @@ class ReportEngine:
     def _graph_schedule_data(self, state: _ReportGraphState) -> dict[str, Any]:
         steps = state.get("plan", {}).get("steps", [])
         completed = set(state.get("completed_step_ids", []))
-        remaining = [step for step in steps if str(step.get("step_id")) not in completed]
+        remaining = [
+            step for step in steps if str(step.get("step_id")) not in completed
+        ]
         ready = [
             step
             for step in remaining
@@ -2226,7 +2474,9 @@ class ReportEngine:
                         "warnings": ["Unresolved or cyclic dependency."],
                     }
                 )
-            warnings.append("The scheduler skipped steps with unresolved or cyclic dependencies.")
+            warnings.append(
+                "The scheduler skipped steps with unresolved or cyclic dependencies."
+            )
         state["runtime"].run_context.record_step(
             "dag_scheduler",
             inputs={"completed_step_ids": sorted(completed)},
@@ -2253,7 +2503,9 @@ class ReportEngine:
         for step in ready:
             dependencies = set(map(str, step.get("depends_on", [])))
             upstream = [
-                item for item in existing_results if str(item.get("step_id")) in dependencies
+                item
+                for item in existing_results
+                if str(item.get("step_id")) in dependencies
             ]
             sends.append(
                 Send(
@@ -2299,7 +2551,10 @@ class ReportEngine:
         state["runtime"].run_context.record_step(
             "chart_input_assembler",
             inputs={"data_step_count": len(state.get("data_step_results", []))},
-            outputs={"ready_chart_count": len(ready), "fallback_chart_count": len(fallbacks)},
+            outputs={
+                "ready_chart_count": len(ready),
+                "fallback_chart_count": len(fallbacks),
+            },
         )
         return {"chart_requests": ready, "chart_results": fallbacks}
 
@@ -2323,15 +2578,24 @@ class ReportEngine:
             status="failed" if result.get("status") == "failed" else "completed",
             inputs={
                 "chart_id": state["chart_request"].get("chart_id"),
-                "dataset_ref": state["chart_request"].get("dataset", {}).get("artifact_ref"),
+                "dataset_ref": state["chart_request"]
+                .get("dataset", {})
+                .get("artifact_ref"),
             },
-            outputs={"status": result.get("status"), "selected_type": result.get("selected_type")},
+            outputs={
+                "status": result.get("status"),
+                "selected_type": result.get("selected_type"),
+            },
         )
         return {"chart_results": [result]}
 
     def _graph_compose_report(self, state: _ReportGraphState) -> dict[str, Any]:
         scoped = _scoped_corpus_payload(state["spec"], state["corpus_package"])
-        output_format = state["spec"].constraints.get("output_format") if isinstance(state["spec"].constraints, dict) else None
+        output_format = (
+            state["spec"].constraints.get("output_format")
+            if isinstance(state["spec"].constraints, dict)
+            else None
+        )
         legacy_markdown = None
         if output_format != "structured_report":
             legacy_markdown = self.report_agent.run_markdown(
@@ -2362,7 +2626,10 @@ class ReportEngine:
                 "data_step_count": len(state.get("data_step_results", [])),
                 "chart_count": len(state.get("chart_results", [])),
             },
-            outputs={"status": structured.get("status"), "report_format": "structured_report"},
+            outputs={
+                "status": structured.get("status"),
+                "report_format": "structured_report",
+            },
         )
         return {"structured_report": structured, "legacy_markdown": legacy_markdown}
 
@@ -2370,13 +2637,21 @@ class ReportEngine:
         rendered = self.renderer.render(
             state["structured_report"], state.get("legacy_markdown")
         )
-        output_format = state["spec"].constraints.get("output_format") if isinstance(state["spec"].constraints, dict) else None
+        output_format = (
+            state["spec"].constraints.get("output_format")
+            if isinstance(state["spec"].constraints, dict)
+            else None
+        )
         if output_format == "structured_report":
             final_result: Any = state["structured_report"]
         elif output_format == "html":
-            final_result = next(item["content"] for item in rendered if item["format"] == "html")
+            final_result = next(
+                item["content"] for item in rendered if item["format"] == "html"
+            )
         else:
-            final_result = next(item["content"] for item in rendered if item["format"] == "markdown")
+            final_result = next(
+                item["content"] for item in rendered if item["format"] == "markdown"
+            )
         state["runtime"].run_context.record_step(
             "renderer",
             inputs={"requested_format": output_format or "markdown"},
@@ -2391,7 +2666,9 @@ class ReportEngine:
         requirement_ids = {
             str(binding.get("requirement_ref"))
             for binding in template_instance.get("bindings", [])
-            if str(binding.get("plan_output_ref", "")).startswith(f"step-output://{step_id}/")
+            if str(binding.get("plan_output_ref", "")).startswith(
+                f"step-output://{step_id}/"
+            )
         }
         chart_consumers: dict[str, list[str]] = {item: [] for item in requirement_ids}
         for section in template_instance.get("sections", []):
@@ -2401,7 +2678,9 @@ class ReportEngine:
                     continue
                 for requirement_ref in slot.get("data_requirement_refs", []):
                     if str(requirement_ref) in chart_consumers:
-                        chart_consumers[str(requirement_ref)].append(str(slot.get("chart_id")))
+                        chart_consumers[str(requirement_ref)].append(
+                            str(slot.get("chart_id"))
+                        )
         return [
             {
                 "requirement_ref": requirement_id,
@@ -2422,14 +2701,21 @@ class ReportEngine:
         return {"route": route}
 
     def _data_route_choice(self, state: _DataStepState) -> str:
-        return "existing" if state.get("route", {}).get("route") == "existing_tool" else "generate"
+        return (
+            "existing"
+            if state.get("route", {}).get("route") == "existing_tool"
+            else "generate"
+        )
 
     def _data_execute_existing(self, state: _DataStepState) -> dict[str, Any]:
         result = self.tool_executor.execute_existing(state["route"], state["runtime"])
         state["runtime"].run_context.record_step(
             "tool_executor",
             status="failed" if result.get("status") == "failed" else "completed",
-            inputs={"step_id": state["step"].get("step_id"), "tool_name": result.get("tool_name")},
+            inputs={
+                "step_id": state["step"].get("step_id"),
+                "tool_name": result.get("tool_name"),
+            },
             outputs={"status": result.get("status"), "error": result.get("error")},
         )
         return {"execution_result": result}
@@ -2513,7 +2799,10 @@ class ReportEngine:
         state["runtime"].run_context.record_step(
             "tool_executor",
             status="failed" if result.get("status") == "failed" else "completed",
-            inputs={"step_id": state["step"].get("step_id"), "tool_name": result.get("tool_name")},
+            inputs={
+                "step_id": state["step"].get("step_id"),
+                "tool_name": result.get("tool_name"),
+            },
             outputs={"status": result.get("status"), "error": result.get("error")},
         )
         return {"execution_result": result}
@@ -2524,8 +2813,14 @@ class ReportEngine:
                 "schema_version": "1.0",
                 "status": "failed",
                 "tool_name": state.get("code_spec", {}).get("tool_name"),
-                "raw_result": state.get("sandbox_result").result if state.get("sandbox_result") else None,
-                "error": state.get("validation_feedback") or state.get("error_logs") or "Generated tool validation failed.",
+                "raw_result": (
+                    state.get("sandbox_result").result
+                    if state.get("sandbox_result")
+                    else None
+                ),
+                "error": state.get("validation_feedback")
+                or state.get("error_logs")
+                or "Generated tool validation failed.",
             }
         }
 
@@ -2543,7 +2838,10 @@ class ReportEngine:
         self, step: dict[str, Any], code_spec: dict[str, Any]
     ) -> InterfaceDefinition:
         return InterfaceDefinition(
-            name=str(code_spec.get("tool_name") or f"generated_{_safe_id(step.get('step_id'))}"),
+            name=str(
+                code_spec.get("tool_name")
+                or f"generated_{_safe_id(step.get('step_id'))}"
+            ),
             description=str(step.get("description", "")),
             input_schema=code_spec.get("parameters_schema", {}),
             output_schema=code_spec.get("output_schema", {"type": "array"}),
@@ -2561,7 +2859,9 @@ class ReportEngine:
         self, interface: InterfaceDefinition, runtime: EngineRuntimeContext
     ) -> SandboxRunResult:
         if runtime.sandbox_executor is None:
-            return SandboxRunResult(status="failed", error="Sandbox executor is not configured.")
+            return SandboxRunResult(
+                status="failed", error="Sandbox executor is not configured."
+            )
         try:
             return runtime.sandbox_executor.validate(interface, {}, None)
         except Exception as exc:

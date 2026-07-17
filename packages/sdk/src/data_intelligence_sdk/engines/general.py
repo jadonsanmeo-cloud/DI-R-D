@@ -79,16 +79,14 @@ class GeneralPurposeEngine:
             str(config_path) if config_path is not None else None
         )
         settings = manager.openrouter_settings()
-        resolved_key = api_key or settings.api_key or os.environ.get(
-            "OPENROUTER_API_KEY"
+        resolved_key = (
+            api_key or settings.api_key or os.environ.get("OPENROUTER_API_KEY")
         )
         if not resolved_key:
             raise ValueError(
                 "OPENROUTER_API_KEY is required when no api_key is passed."
             )
-        resolved_model = model or settings.model or os.environ.get(
-            "OPENROUTER_MODEL"
-        )
+        resolved_model = model or settings.model or os.environ.get("OPENROUTER_MODEL")
         if not resolved_model:
             raise ValueError("LLM_MODEL_NAME is required when no model is passed.")
 
@@ -183,9 +181,7 @@ class GeneralPurposeEngine:
             profile_key,
             HarnessProfile(
                 excluded_tools=_HIDDEN_DEEP_AGENT_TOOLS,
-                general_purpose_subagent=GeneralPurposeSubagentProfile(
-                    enabled=False
-                ),
+                general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
             ),
         )
 

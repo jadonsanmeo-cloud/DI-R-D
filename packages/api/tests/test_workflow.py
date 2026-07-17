@@ -3,7 +3,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from data_intelligence_api.http.schemas.responses import CreateResponseRequest, DataCorpusPackageRequest
+from data_intelligence_api.http.schemas.responses import (
+    CreateResponseRequest,
+    DataCorpusPackageRequest,
+)
 from data_intelligence_api.application.workflow import (
     DEFAULT_QUERY,
     SourceValidationError,
