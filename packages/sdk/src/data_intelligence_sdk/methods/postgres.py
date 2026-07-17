@@ -36,7 +36,9 @@ def _default_connection_factory(dsn: str) -> Any:
     try:
         import psycopg  # type: ignore[import-not-found]
     except ImportError as exc:  # pragma: no cover - project dependency in normal use.
-        raise RuntimeError("psycopg is required for PostgreSQL MethodHub methods.") from exc
+        raise RuntimeError(
+            "psycopg is required for PostgreSQL MethodHub methods."
+        ) from exc
     return psycopg.connect(dsn)
 
 
@@ -234,8 +236,14 @@ def aggregate_postgres_table_with_connection(
         if aggregation not in _AGGREGATIONS:
             raise ValueError(f"Unsupported PostgreSQL aggregation: {aggregation}")
         field = metric.get("field")
-        expression = "*" if aggregation == "count" and not field else f'"{_identifier(field, "metric field")}"'
-        name = _identifier(metric.get("name") or f"{aggregation}_{index + 1}", "metric name")
+        expression = (
+            "*"
+            if aggregation == "count" and not field
+            else f'"{_identifier(field, "metric field")}"'
+        )
+        name = _identifier(
+            metric.get("name") or f"{aggregation}_{index + 1}", "metric name"
+        )
         metric_sql.append(f'{aggregation.upper()}({expression}) AS "{name}"')
         normalized_metrics.append(
             {"name": name, "field": field, "aggregation": aggregation}

@@ -171,9 +171,7 @@ class LLMSpecBuilder:
                     and not spec.capability_requirements
                 ):
                     spec.capability_requirements = [
-                        CapabilityRequirement(
-                            name=self._default_capability_name(spec)
-                        )
+                        CapabilityRequirement(name=self._default_capability_name(spec))
                     ]
                 if self.require_actionable_spec:
                     self._validate_source_boundaries(spec, available_sources)
@@ -248,7 +246,9 @@ class LLMSpecBuilder:
                 "data_requirements must reference at least one available source."
             )
         unknown_sources = [
-            source for source in spec.data_requirements if source not in available_sources
+            source
+            for source in spec.data_requirements
+            if source not in available_sources
         ]
         if unknown_sources:
             raise ValueError(
@@ -261,7 +261,10 @@ class LLMSpecBuilder:
             )
 
     def _uses_cluster_flow(self) -> bool:
-        return self.datahub_clusterer is not None and self.cluster_spec_selector is not None
+        return (
+            self.datahub_clusterer is not None
+            and self.cluster_spec_selector is not None
+        )
 
     def _build_from_selected_cluster_spec(
         self,
@@ -397,7 +400,11 @@ class LLMSpecBuilder:
             return constraints
 
         normalized = dict(constraints)
-        scope = dict(normalized.get("scope", {})) if isinstance(normalized.get("scope"), dict) else {}
+        scope = (
+            dict(normalized.get("scope", {}))
+            if isinstance(normalized.get("scope"), dict)
+            else {}
+        )
         selected_tables = selected.get("selected_tables")
         selected_vector_collections = selected.get("selected_vector_collections")
         selected_documents = selected.get("selected_documents")

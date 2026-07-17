@@ -41,7 +41,9 @@ def _safe_name(name: str) -> str:
     normalized = _SAFE_NAME_PATTERN.sub("_", name.strip())
     normalized = normalized.strip("._-")
     if not normalized:
-        raise MethodExportError("Method name cannot be converted into a safe bundle name.")
+        raise MethodExportError(
+            "Method name cannot be converted into a safe bundle name."
+        )
     return normalized
 
 
@@ -246,14 +248,18 @@ def validate_bundle(bundle_dir: str | Path) -> dict[str, Any]:
         raise MethodExportError(f"{bundle_path}: bundle.json does not exist.")
     payload = json.loads(bundle_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise MethodExportError(f"{bundle_path}: bundle.json must contain a JSON object.")
+        raise MethodExportError(
+            f"{bundle_path}: bundle.json must contain a JSON object."
+        )
 
     checks: list[dict[str, Any]] = []
     valid = True
     for file_info in payload.get("files", []):
         if not isinstance(file_info, dict):
             valid = False
-            checks.append({"path": None, "valid": False, "reason": "invalid file entry"})
+            checks.append(
+                {"path": None, "valid": False, "reason": "invalid file entry"}
+            )
             continue
         file_name = file_info.get("path")
         if not isinstance(file_name, str):

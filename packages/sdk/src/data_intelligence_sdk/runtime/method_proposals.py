@@ -52,11 +52,15 @@ def _sanitize_proposal_id(proposal_id: str) -> str:
     return normalized
 
 
-def _ensure_json_serializable(payload: Mapping[str, Any], source: str) -> dict[str, Any]:
+def _ensure_json_serializable(
+    payload: Mapping[str, Any], source: str
+) -> dict[str, Any]:
     try:
         normalized = json.loads(json.dumps(payload, ensure_ascii=False))
     except TypeError as exc:
-        raise MethodProposalError(f"{source}: proposal payload must be JSON serializable.") from exc
+        raise MethodProposalError(
+            f"{source}: proposal payload must be JSON serializable."
+        ) from exc
     if not isinstance(normalized, dict):
         raise MethodProposalError(f"{source}: proposal payload must be a JSON object.")
     return normalized
@@ -142,9 +146,7 @@ def create_proposal(
     proposal_payload = _ensure_json_serializable(payload, "create_proposal")
     trust_level = str(proposal_payload.get("trust_level", "generated_unvalidated"))
     if trust_level != "generated_unvalidated":
-        raise MethodProposalError(
-            "Proposal trust_level must be generated_unvalidated."
-        )
+        raise MethodProposalError("Proposal trust_level must be generated_unvalidated.")
     proposal_payload["trust_level"] = "generated_unvalidated"
     proposal_id = _sanitize_proposal_id(proposal_id or uuid.uuid4().hex)
     proposal = MethodProposal(
@@ -182,7 +184,9 @@ def load_proposal(
             continue
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
-            raise MethodProposalError(f"{path}: proposal file must contain a JSON object.")
+            raise MethodProposalError(
+                f"{path}: proposal file must contain a JSON object."
+            )
         return MethodProposal.from_dict(payload)
     raise MethodProposalError(f"{sanitized_id}: proposal not found.")
 
@@ -203,7 +207,9 @@ def list_proposals(
         for path in sorted(directory.glob("*.json"), key=lambda item: item.name):
             payload = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
-                raise MethodProposalError(f"{path}: proposal file must contain a JSON object.")
+                raise MethodProposalError(
+                    f"{path}: proposal file must contain a JSON object."
+                )
             proposals.append(MethodProposal.from_dict(payload))
     return proposals
 
@@ -226,7 +232,9 @@ def move_proposal(
         source_path = candidate
         payload = json.loads(candidate.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
-            raise MethodProposalError(f"{candidate}: proposal file must contain a JSON object.")
+            raise MethodProposalError(
+                f"{candidate}: proposal file must contain a JSON object."
+            )
         source_proposal = MethodProposal.from_dict(payload)
         break
 

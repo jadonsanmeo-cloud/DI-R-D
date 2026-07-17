@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from data_intelligence_sdk.core.errors import DataIntelligenceError
-from data_intelligence_sdk.core.types import CapabilityRequirement, MethodStatus, TrustLevel
+from data_intelligence_sdk.core.types import (
+    CapabilityRequirement,
+    MethodStatus,
+    TrustLevel,
+)
 
 __all__ = [
     "DuplicateMethodError",
@@ -214,12 +218,16 @@ def _describe_signature(method: object) -> dict[str, Any]:
             entry["annotation"] = str(parameter.annotation)
         if parameter.default is not _inspect.Signature.empty:
             default = _json_safe_value(parameter.default)
-            entry["default"] = default if default is not _UNSUPPORTED else repr(parameter.default)
+            entry["default"] = (
+                default if default is not _UNSUPPORTED else repr(parameter.default)
+            )
         parameters.append(entry)
     return {"signature": str(signature), "parameters": parameters}
 
 
-def _validate_callable_arguments(method: object, arguments: Mapping[str, Any]) -> dict[str, Any]:
+def _validate_callable_arguments(
+    method: object, arguments: Mapping[str, Any]
+) -> dict[str, Any]:
     try:
         signature = _inspect.signature(method)
     except (TypeError, ValueError):
@@ -323,7 +331,9 @@ class RegisteredMethod:
     def is_executable(self) -> bool:
         """Return whether the method is allowed to execute."""
 
-        return self.trust_level in _EXECUTABLE_TRUST_LEVELS and self.status != "deprecated"
+        return (
+            self.trust_level in _EXECUTABLE_TRUST_LEVELS and self.status != "deprecated"
+        )
 
     def to_catalog_entry(self) -> dict[str, Any]:
         """Return a JSON-serializable catalog entry for discovery and export."""
@@ -442,7 +452,9 @@ class MethodHub:
         source = filters.get("source")
         if capability is not None:
             methods = [
-                method for method in methods if str(capability) in method.capability_names
+                method
+                for method in methods
+                if str(capability) in method.capability_names
             ]
         if tag is not None:
             methods = [method for method in methods if str(tag) in method.tags]
@@ -464,7 +476,9 @@ class MethodHub:
             **_describe_signature(definition.method),
         }
 
-    def validate(self, definition: Mapping[str, Any] | RegisteredMethod) -> dict[str, Any]:
+    def validate(
+        self, definition: Mapping[str, Any] | RegisteredMethod
+    ) -> dict[str, Any]:
         """Validate a method definition payload without registering it."""
 
         payload = self._coerce_registration_payload(definition)
@@ -507,7 +521,9 @@ class MethodHub:
             raise InvalidMethodError("patch must be a mapping.")
         unknown = set(patch) - (_REGISTRATION_FIELDS - {"name"})
         if unknown:
-            raise InvalidMethodError(f"Unsupported method patch fields: {sorted(unknown)!r}")
+            raise InvalidMethodError(
+                f"Unsupported method patch fields: {sorted(unknown)!r}"
+            )
         if "method" in patch and not callable(patch["method"]):
             raise InvalidMethodError("method must be callable.")
         if "capability_names" in patch:
@@ -522,9 +538,13 @@ class MethodHub:
                 raise InvalidMethodError("metadata must be a mapping.")
             definition.metadata = metadata
         if "version" in patch:
-            definition.version = _normalize_text(patch.get("version"), "version") or "1.0.0"
+            definition.version = (
+                _normalize_text(patch.get("version"), "version") or "1.0.0"
+            )
         if "description" in patch:
-            definition.description = _normalize_text(patch.get("description"), "description")
+            definition.description = _normalize_text(
+                patch.get("description"), "description"
+            )
         if "tags" in patch:
             definition.tags = _normalize_string_list(patch.get("tags"), "tags")
         if "status" in patch:
@@ -811,9 +831,10 @@ class MethodHub:
         records = list(self._proposals.values())
         if status is not None:
             records = [record for record in records if record["status"] == status]
-        return [self._public_proposal(record) for record in sorted(
-            records, key=lambda record: str(record["proposal_id"])
-        )]
+        return [
+            self._public_proposal(record)
+            for record in sorted(records, key=lambda record: str(record["proposal_id"]))
+        ]
 
     def select(
         self,
@@ -824,7 +845,11 @@ class MethodHub:
     ) -> list[dict[str, Any]]:
         """Rank methods for a task/step request using the search index."""
 
-        query = step_request if isinstance(step_request, str) else _text_from_value(step_request)
+        query = (
+            step_request
+            if isinstance(step_request, str)
+            else _text_from_value(step_request)
+        )
         return self.search(query, top_k=top_k, executable_only=executable_only)
 
     def history(
@@ -839,7 +864,9 @@ class MethodHub:
         events = self._history
         if name is not None:
             normalized_name = _normalize_name(name)
-            events = [event for event in events if event.get("method_name") == normalized_name]
+            events = [
+                event for event in events if event.get("method_name") == normalized_name
+            ]
         if action is not None:
             events = [event for event in events if event.get("action") == action]
         if limit is not None:
@@ -885,7 +912,9 @@ class MethodHub:
             normalized_statuses = {
                 _normalize_status(status) for status in statuses if str(status).strip()
             }
-            methods = [method for method in methods if method.status in normalized_statuses]
+            methods = [
+                method for method in methods if method.status in normalized_statuses
+            ]
         return sorted(methods, key=self._sort_key)
 
     def resolve(self, requirement: CapabilityRequirement) -> RegisteredMethod | None:
@@ -1056,12 +1085,15 @@ class MethodHub:
 
         return {
             "format": "child-method-hub-catalog-v1",
-            "methods": [method.to_catalog_entry() for method in self.list_methods(
-                executable_only=executable_only
-            )],
+            "methods": [
+                method.to_catalog_entry()
+                for method in self.list_methods(executable_only=executable_only)
+            ],
         }
 
-    def _lookup_version(self, name: str, version: str | None = None) -> RegisteredMethod:
+    def _lookup_version(
+        self, name: str, version: str | None = None
+    ) -> RegisteredMethod:
         definition = self._lookup(name)
         if version is not None and definition.version != version:
             raise MethodNotFoundError(
@@ -1089,11 +1121,15 @@ class MethodHub:
         elif isinstance(definition, Mapping):
             payload = dict(definition)
         else:
-            raise InvalidMethodError("method definition must be a mapping or RegisteredMethod.")
+            raise InvalidMethodError(
+                "method definition must be a mapping or RegisteredMethod."
+            )
 
         unknown = set(payload) - _REGISTRATION_FIELDS
         if unknown:
-            raise InvalidMethodError(f"Unsupported method definition fields: {sorted(unknown)!r}")
+            raise InvalidMethodError(
+                f"Unsupported method definition fields: {sorted(unknown)!r}"
+            )
         if "name" not in payload:
             raise InvalidMethodError("method definition requires a name.")
         if "method" not in payload:
@@ -1113,9 +1149,12 @@ class MethodHub:
             "capability_names": _normalize_string_list(
                 payload.get("capability_names"), "capability_names"
             ),
-            "trust_level": _normalize_trust_level(payload.get("trust_level", "builtin")),
+            "trust_level": _normalize_trust_level(
+                payload.get("trust_level", "builtin")
+            ),
             "metadata": metadata,
-            "version": _normalize_text(payload.get("version", "1.0.0"), "version") or "1.0.0",
+            "version": _normalize_text(payload.get("version", "1.0.0"), "version")
+            or "1.0.0",
             "description": _normalize_text(payload.get("description"), "description")
             or _normalize_text(metadata.get("description"), "description"),
             "tags": _normalize_string_list(payload.get("tags"), "tags"),
@@ -1127,14 +1166,20 @@ class MethodHub:
     def _definition_warnings(self, payload: Mapping[str, Any]) -> list[str]:
         warnings = []
         if not payload.get("capability_names"):
-            warnings.append("Method has no capability_names, so requirement resolution may not find it.")
+            warnings.append(
+                "Method has no capability_names, so requirement resolution may not find it."
+            )
         if not payload.get("description"):
-            warnings.append("Method has no description, so search and routing quality may be lower.")
+            warnings.append(
+                "Method has no description, so search and routing quality may be lower."
+            )
         metadata = payload.get("metadata", {})
         if isinstance(metadata, Mapping) and metadata.get("side_effects") is None:
             warnings.append("Method metadata does not declare side_effects.")
         if payload.get("trust_level") == "generated_unvalidated":
-            warnings.append("Generated unvalidated methods are visible but not executable.")
+            warnings.append(
+                "Generated unvalidated methods are visible but not executable."
+            )
         return warnings
 
     def _record_history(
@@ -1167,7 +1212,9 @@ class MethodHub:
         try:
             return self._proposals[proposal_id]
         except KeyError as exc:
-            raise MethodNotFoundError(f"Proposal {proposal_id!r} is not registered.") from exc
+            raise MethodNotFoundError(
+                f"Proposal {proposal_id!r} is not registered."
+            ) from exc
 
     def _public_proposal(self, proposal: Mapping[str, Any]) -> dict[str, Any]:
         definition = dict(proposal["definition"])
@@ -1203,7 +1250,9 @@ class MethodHub:
             for attribute in attribute_path.split("."):
                 value = getattr(value, attribute)
         except (ImportError, AttributeError) as exc:
-            raise InvalidMethodError(f"entrypoint {entrypoint!r} could not be imported.") from exc
+            raise InvalidMethodError(
+                f"entrypoint {entrypoint!r} could not be imported."
+            ) from exc
         if not callable(value):
             raise InvalidMethodError(f"entrypoint {entrypoint!r} is not callable.")
         return value

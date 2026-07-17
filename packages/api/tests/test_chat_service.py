@@ -50,7 +50,9 @@ class ChatServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks, ["Hel", "Hello"])
         self.assertIsNotNone(loaded)
         assert loaded is not None
-        self.assertEqual([message.role for message in loaded.messages], ["human", "view"])
+        self.assertEqual(
+            [message.role for message in loaded.messages], ["human", "view"]
+        )
         self.assertEqual(loaded.messages[0].context, "Hi")
         self.assertEqual(loaded.messages[1].context, "Hello")
         self.assertEqual(loaded.user_input, "Hi")

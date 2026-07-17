@@ -363,9 +363,7 @@ def run(
         _section("User Query", output)
         query_text = _prompt_non_empty("> ", input_stream, output)
         pipeline = pipeline_factory(args)
-        corpus = DataCorpusPackage(
-            sources=[str(path.resolve()) for path in selected]
-        )
+        corpus = DataCorpusPackage(sources=[str(path.resolve()) for path in selected])
         prepared = pipeline.prepare_spec(UserQuery(query_text), corpus)
         confirmed = _confirm_or_revise(
             pipeline,

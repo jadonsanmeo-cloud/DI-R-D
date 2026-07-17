@@ -20,8 +20,7 @@ class StreamingChatClient(Protocol):
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> AsyncIterator[str]:
-        ...
+    ) -> AsyncIterator[str]: ...
 
 
 class LLMChatWorkflow:
@@ -47,9 +46,7 @@ class LLMChatWorkflow:
         self,
         conversation: ChatConversation,
     ) -> list[dict[str, str]]:
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ]
+        messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         for item in conversation.messages:
             if not item.context:
                 continue

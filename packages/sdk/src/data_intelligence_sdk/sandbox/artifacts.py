@@ -264,9 +264,7 @@ class RunArtifactSession:
 
     def _ensure_running(self) -> None:
         if self._terminal_status is not None:
-            raise ArtifactPersistenceError(
-                f"Run {self.run_id} is already finalized."
-            )
+            raise ArtifactPersistenceError(f"Run {self.run_id} is already finalized.")
 
     def _write_manifest(self) -> None:
         self._write_json_atomic(self.manifest_path, self._manifest)

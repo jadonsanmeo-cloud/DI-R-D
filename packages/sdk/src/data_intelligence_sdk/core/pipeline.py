@@ -143,9 +143,7 @@ class DataIntelligencePipeline:
                     "has_schema": bool(corpus_package.schemas),
                     "has_metadata": bool(corpus_package.metadata),
                     "artifact_ref": (
-                        run_artifact.artifact_ref
-                        if run_artifact is not None
-                        else None
+                        run_artifact.artifact_ref if run_artifact is not None else None
                     ),
                 },
             )
@@ -193,9 +191,7 @@ class DataIntelligencePipeline:
             session_context=session_context,
             user_context=user_context,
             run_artifact=run_artifact,
-            run_artifact_id=(
-                run_artifact.run_id if run_artifact is not None else None
-            ),
+            run_artifact_id=(run_artifact.run_id if run_artifact is not None else None),
         )
 
     def revise_spec(
@@ -261,7 +257,9 @@ class DataIntelligencePipeline:
         """Execute a previously prepared and explicitly confirmed spec."""
 
         if not confirmed_spec.confirmed:
-            raise ValueError("Execution spec must be confirmed before engine selection.")
+            raise ValueError(
+                "Execution spec must be confirmed before engine selection."
+            )
         run_artifact = self._resolve_run_artifact(prepared)
         self._record_artifact_event(
             run_artifact,

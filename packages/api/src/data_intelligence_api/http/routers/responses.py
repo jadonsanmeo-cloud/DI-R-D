@@ -22,8 +22,13 @@ from data_intelligence_api.domain.runs import (
     RunExpiredError,
     RunNotFoundError,
 )
-from data_intelligence_api.infrastructure.persistence.run_store import hash_confirmation_token
-from data_intelligence_api.http.schemas.responses import CreateResponseRequest, ResponseDecisionRequest
+from data_intelligence_api.infrastructure.persistence.run_store import (
+    hash_confirmation_token,
+)
+from data_intelligence_api.http.schemas.responses import (
+    CreateResponseRequest,
+    ResponseDecisionRequest,
+)
 from data_intelligence_api.http.streaming import (
     PipelineLogMessage,
     QueueRuntimeLogger,
@@ -46,7 +51,6 @@ from data_intelligence_api.application.workflow import (
     spec_to_payload,
 )
 from data_intelligence_sdk.core.types import ExecutionSpec, FinalResponse
-
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +138,9 @@ def _confirmation_payload(
 
 def _raise_store_error(error: Exception) -> None:
     if isinstance(error, RunNotFoundError):
-        raise HTTPException(status_code=404, detail="Response was not found.") from error
+        raise HTTPException(
+            status_code=404, detail="Response was not found."
+        ) from error
     if isinstance(error, RunExpiredError):
         raise HTTPException(status_code=410, detail=str(error)) from error
     if isinstance(error, RunConflictError):
@@ -158,7 +164,9 @@ def create_responses_router(
     run_repository: RunRepository | None = None,
 ) -> APIRouter:
     if run_repository is None:
-        raise ValueError("run_repository is required for resumable Responses workflows.")
+        raise ValueError(
+            "run_repository is required for resumable Responses workflows."
+        )
     router = APIRouter()
 
     @router.post("/api/v1/responses")
@@ -263,7 +271,9 @@ def create_responses_router(
             decision.action == "revise"
             and decision.revision > settings.max_spec_revision_rounds
         ):
-            raise HTTPException(status_code=409, detail="Maximum spec revisions reached.")
+            raise HTTPException(
+                status_code=409, detail="Maximum spec revisions reached."
+            )
         target_status = "revising" if decision.action == "revise" else "executing"
         try:
             run = run_repository.claim(
@@ -294,8 +304,8 @@ def create_responses_router(
             feedback = (decision.feedback or "").strip()
 
             async def revision_stream() -> AsyncIterator[str]:
-                operation = (
-                    lambda: revise_workflow(
+                operation = lambda: (
+                    revise_workflow(
                         prepared,
                         base_spec,
                         feedback,
@@ -324,7 +334,9 @@ def create_responses_router(
                     if isinstance(message, str):
                         yield message
                     elif isinstance(message, WorkflowFailedMessage):
-                        run_repository.mark_failed(response_id, message.code, message.message)
+                        run_repository.mark_failed(
+                            response_id, message.code, message.message
+                        )
                         yield encode_sse(
                             "response.failed", _failed_payload(response_id, message)
                         )
@@ -334,9 +346,11 @@ def create_responses_router(
                         source = (
                             "structured_edit_and_feedback"
                             if edited_payload is not None and feedback
-                            else "structured_edit"
-                            if edited_payload is not None
-                            else "feedback_revision"
+                            else (
+                                "structured_edit"
+                                if edited_payload is not None
+                                else "feedback_revision"
+                            )
                         )
                         updated = run_repository.save_revision(
                             response_id,
@@ -377,7 +391,9 @@ def create_responses_router(
                 if isinstance(message, str):
                     yield message
                 elif isinstance(message, WorkflowFailedMessage):
-                    run_repository.mark_failed(response_id, message.code, message.message)
+                    run_repository.mark_failed(
+                        response_id, message.code, message.message
+                    )
                     yield encode_sse(
                         "response.failed", _failed_payload(response_id, message)
                     )
@@ -424,9 +440,11 @@ def create_responses_router(
                                 "status": "completed",
                                 "output_text": output_text,
                             },
-                            "evidence": asdict(final_response.evidence)
-                            if final_response.evidence is not None
-                            else None,
+                            "evidence": (
+                                asdict(final_response.evidence)
+                                if final_response.evidence is not None
+                                else None
+                            ),
                             "metadata": dict(final_response.metadata),
                         },
                     )
