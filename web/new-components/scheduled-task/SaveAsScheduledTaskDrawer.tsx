@@ -1,8 +1,7 @@
-import { useConnectors } from '@/hooks/use-connector-api';
 import { useScheduledTask } from '@/hooks/use-scheduled-task';
 import type { ChatReplayPayload } from '@/types/scheduled-task';
 import { Button, Drawer, Form, Input, Space, Tag, Typography, message } from 'antd';
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import CronInput from './CronInput';
 
@@ -40,16 +39,6 @@ const SaveAsScheduledTaskDrawer: React.FC<SaveAsScheduledTaskDrawerProps> = ({
   const [cron, setCron] = useState('0 9 * * *');
   const [submitting, setSubmitting] = useState(false);
   const { createTask } = useScheduledTask();
-  const { connectors } = useConnectors();
-
-  /** connector id → display_name 映射 */
-  const connectorNameMap = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const c of connectors) {
-      m.set(c.id, c.display_name);
-    }
-    return m;
-  }, [connectors]);
 
   const onSubmit = async () => {
     try {
@@ -149,7 +138,7 @@ const SaveAsScheduledTaskDrawer: React.FC<SaveAsScheduledTaskDrawerProps> = ({
               {t('scheduled.save.envMcp')}
               {ids.map((id: string) => (
                 <Tag key={id} color='green'>
-                  {connectorNameMap.get(id) || id}
+                  {id}
                 </Tag>
               ))}
             </div>
