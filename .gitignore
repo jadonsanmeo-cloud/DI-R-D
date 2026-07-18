@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.uv-cache/
+.cph/
+.edge-report-*/
+.edge-report-*.png
 .coverage
 htmlcov/
 
@@ -20,10 +24,14 @@ logs/*.log
 docs/superpowers/
 .claude/
 .env
+.env.*
+!.env.example
 .next/
 node_modules/
 .agents/
 .codex/
 logs/
 artifacts/
+.uploads/
+.api.*.log
 #############

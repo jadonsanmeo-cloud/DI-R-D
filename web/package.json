@@ -10,14 +10,14 @@
     "lib": "lib"
   },
   "scripts": {
-    "build": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build",
-    "build:prod": "APP_ENV=prod NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build",
-    "compile": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build && NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next export",
-    "dev": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next dev",
+    "build": "cross-env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build",
+    "build:prod": "cross-env APP_ENV=prod NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build",
+    "compile": "cross-env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build && cross-env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next export",
+    "dev": "cross-env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next dev",
     "export": "next export",
     "format": "prettier --write '**/*.{ts,tsx}'",
     "lint": "eslint '**/*.{ts,tsx}' --fix",
-    "start": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next start"
+    "start": "cross-env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next start"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

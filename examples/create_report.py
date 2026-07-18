@@ -15,7 +15,10 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
 EXAMPLES_DIR = Path(__file__).resolve().parent
+load_dotenv(EXAMPLES_DIR.parent / ".env", override=False)
 if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
@@ -78,6 +81,9 @@ def _render_report_markdown(report: dict[str, object]) -> str:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(
         description="Create a basic report from a DataCorpusPackage."
     )
@@ -115,10 +121,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.package_path:
+    if args.sources:
+        corpus_package = DataCorpusPackage(sources=list(args.sources or []))
+    elif args.package_path:
         corpus_package = _load_package_json(args.package_path)
     else:
-        corpus_package = DataCorpusPackage(sources=list(args.sources or []))
+        corpus_package = DataCorpusPackage()
 
     pipeline = create_report_pipeline(
         logger=None if args.no_trace else FileRuntimeLogger(args.trace_log_path)
@@ -126,6 +134,9 @@ def main() -> None:
     response = pipeline.run(UserQuery(args.query), corpus_package)
     report = response.answer
     if isinstance(report, str):
+        if report.lstrip().lower().startswith(("<!doctype html", "<html")):
+            print(report)
+            return
         try:
             report_payload = ast.literal_eval(report)
         except (SyntaxError, ValueError):

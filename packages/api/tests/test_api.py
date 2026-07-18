@@ -325,7 +325,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
     def test_expired_confirmation_returns_gone(self):
-        now = datetime(2026, 7, 14, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         store = InMemoryRunRepository(clock=lambda: now + timedelta(days=2))
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")

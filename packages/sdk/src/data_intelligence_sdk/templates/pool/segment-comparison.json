@@ -68,6 +68,7 @@
           "type": "kpi_group",
           "title": "Comparison Metrics",
           "required": true,
+          "layout": {"span": 12, "emphasis": "featured"},
           "data_requirement_refs": ["segment-ranking", "segment-share"],
           "instructions": ["Show the leader, laggard, absolute gap, and relative gap when valid."]
         },
@@ -75,6 +76,7 @@
           "block_id": "comparison-narrative",
           "type": "narrative",
           "required": true,
+          "layout": {"span": 12, "emphasis": "standard"},
           "data_requirement_refs": ["segment-ranking", "segment-share"],
           "instructions": ["Describe comparisons without inferring causality from ranking alone."]
         }
@@ -92,6 +94,7 @@
           "type": "chart",
           "title": "Ranked Segments",
           "required": true,
+          "layout": {"span": 8, "emphasis": "featured"},
           "data_requirement_refs": ["segment-ranking"],
           "chart_slot": {
             "chart_slot_id": "segment-ranking-chart",
@@ -111,6 +114,7 @@
           "type": "table",
           "title": "Segment Contribution",
           "required": false,
+          "layout": {"span": 4, "emphasis": "supporting"},
           "data_requirement_refs": ["segment-share"],
           "instructions": ["Include measure, share, rank, and data-quality warnings."]
         }
@@ -128,6 +132,7 @@
           "type": "chart",
           "title": "Segment Composition",
           "required": false,
+          "layout": {"span": 8, "emphasis": "featured"},
           "data_requirement_refs": ["segment-breakdown"],
           "chart_slot": {
             "chart_slot_id": "segment-composition-chart",
@@ -146,6 +151,7 @@
           "block_id": "comparison-actions",
           "type": "recommendations",
           "required": false,
+          "layout": {"span": 4, "emphasis": "supporting"},
           "data_requirement_refs": ["segment-ranking", "segment-breakdown"],
           "instructions": ["State which observed gaps deserve investigation rather than claiming an unobserved cause."]
         }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from dataclasses import asdict
 from typing import Any
 
@@ -20,6 +20,9 @@ from data_intelligence_sdk.runtime.deep_agent_sandbox import SandboxSessionProvi
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
+from data_intelligence_sdk.runtime.report_sandbox_executor import (
+    RequestSandboxExecutor,
+)
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 from data_intelligence_sdk.spec.default_confirmation import SpecConfirmationDecision
@@ -302,6 +305,9 @@ class DataIntelligencePipeline:
             )
             with sandbox_context as sandbox:
                 phase = "engine_execution"
+                sandbox_executor = self.sandbox_executor
+                if sandbox_executor is None and sandbox is not None:
+                    sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
                 runtime = EngineRuntimeContext(
                     run_context=EngineRunContext(
                         event_recorder=(
@@ -314,19 +320,22 @@ class DataIntelligencePipeline:
                     method_hub=self.method_hub or MethodHub(),
                     interface_registry=self.interface_registry,
                     interface_builder=self.interface_builder,
-                    sandbox_executor=self.sandbox_executor,
+                    sandbox_executor=sandbox_executor,
                     artifact_store=self.artifact_store,
                     log_store=self.log_store,
                     resource_manager=self.resource_manager,
                     sandbox=sandbox,
                     run_artifact=run_artifact,
                 )
-                output = engine.run(
-                    confirmed_spec,
-                    prepared.corpus_package,
-                    runtime,
-                    prepared.user_context,
-                )
+                try:
+                    output = engine.run(
+                        confirmed_spec,
+                        prepared.corpus_package,
+                        runtime,
+                        prepared.user_context,
+                    )
+                finally:
+                    self._cleanup_request_methods(runtime)
         except Exception as exc:
             if run_artifact is not None:
                 run_artifact.finalize(
@@ -353,7 +362,10 @@ class DataIntelligencePipeline:
                 response = FinalResponse(
                     answer=str(output.result),
                     evidence=None,
-                    metadata={"engine_name": output.engine_name},
+                    metadata={
+                        **dict(output.metadata),
+                        "engine_name": output.engine_name,
+                    },
                 )
             else:
                 evidence = self.evidence_collector.collect(confirmed_spec, output)
@@ -403,6 +415,13 @@ class DataIntelligencePipeline:
             },
         )
         return response
+
+    @staticmethod
+    def _cleanup_request_methods(runtime: EngineRuntimeContext) -> None:
+        for method_name in reversed(runtime.request_method_names):
+            with suppress(Exception):
+                runtime.method_hub.remove(method_name)
+        runtime.request_method_names.clear()
 
     def _resolve_run_artifact(
         self,

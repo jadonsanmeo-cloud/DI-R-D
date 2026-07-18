@@ -65,6 +65,7 @@
           "block_id": "summary-narrative",
           "type": "narrative",
           "required": true,
+          "layout": {"span": 12, "emphasis": "standard"},
           "data_requirement_refs": ["headline-metrics"],
           "instructions": ["Lead with the conclusion.", "Separate observed facts from interpretation."]
         },
@@ -73,6 +74,7 @@
           "type": "kpi_group",
           "title": "Headline Metrics",
           "required": true,
+          "layout": {"span": 12, "emphasis": "featured"},
           "data_requirement_refs": ["headline-metrics"],
           "instructions": ["Show at most four KPIs and preserve their units."]
         }
@@ -90,6 +92,7 @@
           "type": "chart",
           "title": "Primary Trend",
           "required": false,
+          "layout": {"span": 12, "emphasis": "featured"},
           "data_requirement_refs": ["primary-trend"],
           "chart_slot": {
             "chart_slot_id": "primary-trend-chart",
@@ -118,6 +121,7 @@
           "type": "chart",
           "title": "Key Drivers",
           "required": false,
+          "layout": {"span": 7, "emphasis": "featured"},
           "data_requirement_refs": ["key-drivers"],
           "chart_slot": {
             "chart_slot_id": "key-drivers-chart",
@@ -136,6 +140,7 @@
           "block_id": "recommended-actions",
           "type": "recommendations",
           "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
           "data_requirement_refs": ["headline-metrics", "key-drivers"],
           "instructions": ["Tie every recommendation to an observed result.", "Do not invent targets or causes."]
         }

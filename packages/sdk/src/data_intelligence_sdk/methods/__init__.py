@@ -9,6 +9,7 @@ from data_intelligence_sdk.methods.csv import (
 )
 from data_intelligence_sdk.methods.local_data import (
     aggregate_delimited_file,
+    extract_pdf_text,
     filter_delimited_rows,
     inspect_data_folder,
     profile_delimited_file,
@@ -42,6 +43,7 @@ __all__ = [
     "inspect_vector_chunks",
     "register_postgres_methods",
     "aggregate_delimited_file",
+    "extract_pdf_text",
     "filter_delimited_rows",
     "inspect_data_folder",
     "profile_delimited_file",

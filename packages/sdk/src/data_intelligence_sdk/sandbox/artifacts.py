@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +38,26 @@ class CodeAttemptArtifact:
     artifact_ref: str
 
 
+@dataclass(frozen=True, slots=True)
+class DataOutputArtifact:
+    """Materialized data output produced by one report plan step."""
+
+    step_id: str
+    output_name: str
+    path: Path
+    artifact_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedReportArtifact:
+    """One persisted presentation asset emitted by the report renderer."""
+
+    format: str
+    media_type: str
+    path: Path
+    artifact_ref: str
+
+
 @dataclass(slots=True)
 class RunArtifactSession:
     """Filesystem artifact bundle associated with one pipeline invocation."""
@@ -46,6 +69,10 @@ class RunArtifactSession:
     _attempt_count: int = 0
     _event_count: int = 0
     _terminal_status: str | None = None
+    _lock: threading.RLock = field(
+        default_factory=threading.RLock,
+        repr=False,
+    )
 
     @classmethod
     def create(
@@ -59,7 +86,9 @@ class RunArtifactSession:
         try:
             root.mkdir(parents=True, exist_ok=False)
             (root / "code").mkdir()
+            (root / "data").mkdir()
             (root / "executions").mkdir()
+            (root / "rendered").mkdir()
         except Exception as exc:
             raise ArtifactPersistenceError(
                 f"Could not create artifact bundle {run_id}: {exc}"
@@ -75,6 +104,7 @@ class RunArtifactSession:
             },
             "sources": list(corpus_package.sources),
             "attempts": [],
+            "rendered_reports": [],
             "event_count": 0,
             "events_artifact_ref": session.events_artifact_ref,
             "engine": None,
@@ -137,47 +167,49 @@ class RunArtifactSession:
     ) -> dict[str, Any]:
         """Append one ordered, redacted event to this run."""
 
-        self._ensure_running()
-        sequence = self._event_count + 1
-        event = {
-            "schema_version": "1.0",
-            "event_id": str(uuid4()),
-            "run_id": self.run_id,
-            "sequence": sequence,
-            "timestamp": _utc_now(),
-            "phase": phase,
-            "event_type": event_type,
-            "status": status,
-            "payload": _redact(payload or {}),
-        }
-        self._append_jsonl(self.events_path, event)
-        self._event_count = sequence
-        self._manifest["event_count"] = sequence
-        self._write_manifest()
-        return event
+        with self._lock:
+            self._ensure_running()
+            sequence = self._event_count + 1
+            event = {
+                "schema_version": "1.0",
+                "event_id": str(uuid4()),
+                "run_id": self.run_id,
+                "sequence": sequence,
+                "timestamp": _utc_now(),
+                "phase": phase,
+                "event_type": event_type,
+                "status": status,
+                "payload": _redact(payload or {}),
+            }
+            self._append_jsonl(self.events_path, event)
+            self._event_count = sequence
+            self._manifest["event_count"] = sequence
+            self._write_manifest()
+            return event
 
     def record_code_attempt(self, code: str) -> CodeAttemptArtifact:
-        self._ensure_running()
-        self._attempt_count += 1
-        attempt = self._attempt_count
-        path = self.root / "code" / f"attempt-{attempt:03d}.py"
-        self._write_text_atomic(path, code)
-        artifact = CodeAttemptArtifact(
-            attempt=attempt,
-            path=path,
-            artifact_ref=f"artifact://{self.run_id}/code/{path.name}",
-        )
-        self._attempts[attempt] = artifact
-        self._manifest["attempts"].append(
-            {
-                "attempt": attempt,
-                "code_artifact_ref": artifact.artifact_ref,
-                "execution_artifact_ref": None,
-                "success": None,
-            }
-        )
-        self._write_manifest()
-        return artifact
+        with self._lock:
+            self._ensure_running()
+            self._attempt_count += 1
+            attempt = self._attempt_count
+            path = self.root / "code" / f"attempt-{attempt:03d}.py"
+            self._write_text_atomic(path, code)
+            artifact = CodeAttemptArtifact(
+                attempt=attempt,
+                path=path,
+                artifact_ref=f"artifact://{self.run_id}/code/{path.name}",
+            )
+            self._attempts[attempt] = artifact
+            self._manifest["attempts"].append(
+                {
+                    "attempt": attempt,
+                    "code_artifact_ref": artifact.artifact_ref,
+                    "execution_artifact_ref": None,
+                    "success": None,
+                }
+            )
+            self._write_manifest()
+            return artifact
 
     def execution_ref(self, attempt: CodeAttemptArtifact) -> str:
         self._owned_attempt(attempt)
@@ -186,33 +218,102 @@ class RunArtifactSession:
             f"attempt-{attempt.attempt:03d}.json"
         )
 
+    def record_data_output(
+        self,
+        step_id: str,
+        output_name: str,
+        value: Any,
+    ) -> DataOutputArtifact:
+        """Persist one JSON-safe step output for downstream data binding."""
+
+        with self._lock:
+            self._ensure_running()
+            safe_step_id = _safe_artifact_name(step_id)
+            safe_output_name = _safe_artifact_name(output_name)
+            path = self.root / "data" / safe_step_id / f"{safe_output_name}.json"
+            self._write_json_atomic(path, value)
+            return DataOutputArtifact(
+                step_id=step_id,
+                output_name=output_name,
+                path=path,
+                artifact_ref=(
+                    f"artifact://{self.run_id}/data/"
+                    f"{safe_step_id}/{safe_output_name}.json"
+                ),
+            )
+
     def record_execution(
         self,
         attempt: CodeAttemptArtifact,
         observation: dict[str, Any],
     ) -> str:
-        self._ensure_running()
-        self._owned_attempt(attempt)
-        path = self.root / "executions" / f"attempt-{attempt.attempt:03d}.json"
-        execution_ref = self.execution_ref(attempt)
-        persisted_observation = {
-            **_redact(observation),
-            "execution_artifact_ref": execution_ref,
-        }
-        self._write_json_atomic(path, persisted_observation)
-        manifest_attempt = next(
-            item
-            for item in self._manifest["attempts"]
-            if item["attempt"] == attempt.attempt
-        )
-        manifest_attempt.update(
-            {
+        with self._lock:
+            self._ensure_running()
+            self._owned_attempt(attempt)
+            path = self.root / "executions" / f"attempt-{attempt.attempt:03d}.json"
+            execution_ref = self.execution_ref(attempt)
+            persisted_observation = {
+                **_redact(observation),
                 "execution_artifact_ref": execution_ref,
-                "success": bool(observation.get("success")),
             }
-        )
-        self._write_manifest()
-        return execution_ref
+            self._write_json_atomic(path, persisted_observation)
+            manifest_attempt = next(
+                item
+                for item in self._manifest["attempts"]
+                if item["attempt"] == attempt.attempt
+            )
+            manifest_attempt.update(
+                {
+                    "execution_artifact_ref": execution_ref,
+                    "success": bool(observation.get("success")),
+                }
+            )
+            self._write_manifest()
+            return execution_ref
+
+    def record_rendered_report(
+        self,
+        report_format: str,
+        media_type: str,
+        content: str,
+    ) -> RenderedReportArtifact:
+        """Persist one renderer output and expose it through the run manifest."""
+
+        extensions = {
+            "markdown": "md",
+            "css": "css",
+            "javascript": "js",
+            "html": "html",
+        }
+        normalized_format = _safe_artifact_name(report_format).lower()
+        extension = extensions.get(normalized_format, "txt")
+        with self._lock:
+            self._ensure_running()
+            path = self.root / "rendered" / f"report.{extension}"
+            self._write_text_atomic(path, str(content))
+            artifact = RenderedReportArtifact(
+                format=normalized_format,
+                media_type=str(media_type),
+                path=path,
+                artifact_ref=(
+                    f"artifact://{self.run_id}/rendered/{path.name}"
+                ),
+            )
+            manifest_items = self._manifest.setdefault("rendered_reports", [])
+            manifest_items[:] = [
+                item
+                for item in manifest_items
+                if item.get("format") != normalized_format
+            ]
+            manifest_items.append(
+                {
+                    "format": artifact.format,
+                    "media_type": artifact.media_type,
+                    "artifact_ref": artifact.artifact_ref,
+                }
+            )
+            self._write_manifest()
+            return artifact
 
     def finalize(
         self,
@@ -223,38 +324,39 @@ class RunArtifactSession:
         failure_phase: str | None = None,
         error: str | None = None,
     ) -> str:
-        if self._terminal_status is not None and self._terminal_status != status:
-            raise ArtifactPersistenceError(
-                f"Run {self.run_id} is already finalized as "
-                f"{self._terminal_status}."
-            )
-        if self._terminal_status == status:
-            return self.artifact_ref
+        with self._lock:
+            if self._terminal_status is not None and self._terminal_status != status:
+                raise ArtifactPersistenceError(
+                    f"Run {self.run_id} is already finalized as "
+                    f"{self._terminal_status}."
+                )
+            if self._terminal_status == status:
+                return self.artifact_ref
 
-        terminal_event = "run.completed" if status == "completed" else "run.failed"
-        self.record_event(
-            phase="run",
-            event_type=terminal_event,
-            status=status,
-            payload={
-                "engine_name": engine_name,
-                "failure_phase": failure_phase,
-                "error": error,
-            },
-        )
-        self._manifest.update(
-            {
-                "status": status,
-                "engine": engine_name,
-                "final_answer": final_answer,
-                "failure_phase": failure_phase,
-                "error": error,
-                "completed_at": _utc_now(),
-            }
-        )
-        self._write_manifest()
-        self._terminal_status = status
-        return self.artifact_ref
+            terminal_event = "run.completed" if status == "completed" else "run.failed"
+            self.record_event(
+                phase="run",
+                event_type=terminal_event,
+                status=status,
+                payload={
+                    "engine_name": engine_name,
+                    "failure_phase": failure_phase,
+                    "error": error,
+                },
+            )
+            self._manifest.update(
+                {
+                    "status": status,
+                    "engine": engine_name,
+                    "final_answer": final_answer,
+                    "failure_phase": failure_phase,
+                    "error": error,
+                    "completed_at": _utc_now(),
+                }
+            )
+            self._write_manifest()
+            self._terminal_status = status
+            return self.artifact_ref
 
     def _owned_attempt(self, attempt: CodeAttemptArtifact) -> None:
         if self._attempts.get(attempt.attempt) != attempt:
@@ -272,7 +374,7 @@ class RunArtifactSession:
     def _write_json_atomic(
         self,
         destination: Path,
-        payload: dict[str, Any],
+        payload: Any,
     ) -> None:
         self._write_text_atomic(
             destination,
@@ -323,13 +425,33 @@ class RunArtifactSession:
                 handle.flush()
                 os.fsync(handle.fileno())
                 temp_path = Path(handle.name)
-            os.replace(temp_path, destination)
+            self._replace_with_retry(temp_path, destination)
         except Exception as exc:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
             raise ArtifactPersistenceError(
                 f"Could not persist artifact {destination.name}: {exc}"
             ) from exc
+
+    @staticmethod
+    def _replace_with_retry(
+        temp_path: Path,
+        destination: Path,
+        attempts: int = 8,
+    ) -> None:
+        for attempt in range(attempts):
+            try:
+                os.replace(temp_path, destination)
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(min(0.02 * (2**attempt), 0.25))
+
+
+def _safe_artifact_name(value: object) -> str:
+    rendered = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value)).strip("-.")
+    return rendered or "output"
 
 
 class ArtifactStore:

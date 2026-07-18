@@ -1,34 +1,370 @@
+# Data Intelligence SDK
+
+Repository gồm SDK điều phối multi-agent, FastAPI backend và Next.js frontend để
+phân tích dữ liệu, tạo report có cấu trúc, KPI, chart và xuất HTML.
+
+- Tài liệu luồng Report Engine hiện tại:
+  [`docs/report-engine-v2-current-flow-vi.md`](docs/report-engine-v2-current-flow-vi.md)
+- Kế hoạch thiết kế V2:
+  [`docs/report-engine-v2-implementation-plan.md`](docs/report-engine-v2-implementation-plan.md)
+- Kiến trúc API:
+  [`docs/api-architecture.md`](docs/api-architecture.md)
+
 ## Repository Layout
 
 ```text
 packages/
-  sdk/       # reusable Python library
-  api/       # FastAPI application built on the SDK
-web/         # separate Next.js frontend
-examples/    # runnable examples and sample corpus packages
-data/samples/ # small checked-in fixtures
-configs/     # development and example configuration
-docs/
+  sdk/                 # Report Engine, agent, Method Hub, sandbox contracts
+  api/                 # FastAPI application
+web/                   # Next.js frontend
+examples/              # CLI examples and sample corpus packages
+data/samples/          # small checked-in fixtures
+configs/               # model configuration
+docs/                  # architecture and flow documents
 docker/
+  sandbox.Dockerfile   # isolated runtime for generated Python code
+  Dockerfile           # API image
+  docker-compose.yaml  # API + PostgreSQL stack (see note below)
 ```
 
-The SDK and API are separate Python workspace packages. The API owns application
-composition; the SDK does not import the API, web client, examples, or repository
-datasets at runtime.
+SDK và API là hai Python workspace package riêng. API chịu trách nhiệm ghép model,
+artifact store và sandbox provider; SDK không import API hoặc frontend.
 
-The API layering and planned worker/RabbitMQ boundary are documented in
-[`docs/api-architecture.md`](docs/api-architecture.md).
+## Quickstart End-to-End
 
-## Setup
+Đây là cách setup local được khuyến nghị:
 
+```text
+Browser :3000
+    |
+    v
+Next.js frontend
+    |
+    v
+FastAPI :8000 (chạy trên host)
+    |
+    +--> OpenRouter
+    |
+    +--> Docker container sandbox theo từng request
+    |
+    +--> artifacts/<run-id>/
 ```
+
+API nên chạy trên host để có thể gọi Docker Desktop/Engine và tạo sandbox
+container. PostgreSQL không bắt buộc cho luồng upload file và tạo report cơ bản.
+
+### 1. Yêu cầu hệ thống
+
+Cài các công cụ sau:
+
+- Git.
+- Python 3.11.
+- [uv](https://docs.astral.sh/uv/).
+- Docker Desktop trên Windows/macOS hoặc Docker Engine trên Linux.
+- Node.js 18 trở lên và npm 8 trở lên.
+- Một OpenRouter API key và model ID mà tài khoản được phép sử dụng.
+
+Kiểm tra:
+
+```powershell
+git --version
+python --version
+uv --version
+docker version
+node --version
+npm --version
+```
+
+Trên Windows, cần mở Docker Desktop và chờ Docker Engine ở trạng thái Running.
+
+### 2. Clone repository
+
+```powershell
+git clone <private-repository-url>
+cd Data-Intelligence-SDK
+```
+
+Vì repository là private, tài khoản GitHub của người cài phải được cấp quyền.
+Có thể clone bằng HTTPS với credential manager hoặc bằng SSH.
+
+### 3. Tạo cấu hình môi trường
+
+PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Bash:
+
+```bash
+cp .env.example .env
+```
+
+Mở `.env` và điền ít nhất:
+
+```env
+OPENROUTER_API_KEY=<your-openrouter-api-key>
+LLM_MODEL_NAME=<openrouter-llm-model-id>
+EMBEDDING_MODEL_NAME=<openrouter-embedding-model-id>
+MODEL_CONFIG_PATH=configs/proxy-openrouter.toml
+```
+
+Các cấu hình local quan trọng đã có sẵn trong `.env.example`:
+
+```env
+SANDBOX_ENABLED=true
+SANDBOX_BACKEND=docker
+SANDBOX_DOCKER_IMAGE=data-intelligence-sandbox:local
+REPORT_FORCE_CODE_AGENT=true
+```
+
+Ý nghĩa:
+
+- `SANDBOX_BACKEND=docker`: generated Python code chạy trong container cô lập.
+- `REPORT_FORCE_CODE_AGENT=true`: tạm buộc data step đi qua Code Agent để kiểm thử
+  đầy đủ nhánh sinh code. Đổi thành `false` để Router ưu tiên method có sẵn trong
+  Method Hub.
+- `DATA_CORPUS_ROOT=.`: file upload được lưu dưới `.uploads/` trong repository.
+- `PIPELINE_TIMEOUT_SECONDS=300`: timeout tối đa của một pipeline request.
+
+Không commit `.env`. File `.env.example` chỉ chứa tên biến và được phép commit.
+
+### 4. Cài Python workspace
+
+Tại thư mục gốc repository:
+
+```powershell
 uv venv --python 3.11
 uv pip install -e packages/sdk -e packages/api
-
-docker compose -f examples/data_corpus_package/docker-compose.yml up -d
 ```
 
-# Data Intelligence
+Lệnh trên cài SDK và API ở editable mode vào `.venv`. Không cần activate virtual
+environment khi dùng tiền tố `uv run`.
+
+Kiểm tra import:
+
+```powershell
+uv run python -c "import data_intelligence_sdk, data_intelligence_api; print('Python packages: OK')"
+```
+
+### 5. Build Docker sandbox
+
+```powershell
+docker build -f docker/sandbox.Dockerfile -t data-intelligence-sandbox:local .
+docker image inspect data-intelligence-sandbox:local
+```
+
+Mỗi report request dùng nhánh Code Agent sẽ:
+
+1. Tạo container từ image trên.
+2. Mount workspace tạm và stage file input.
+3. Tắt network trong sandbox.
+4. Áp giới hạn CPU, RAM và process.
+5. Chạy generated function.
+6. Thu kết quả và xóa container.
+
+Image này chỉ tồn tại trên máy đã build. Người khác pull source từ GitHub vẫn phải
+chạy lại lệnh `docker build`.
+
+### 6. Chạy backend API
+
+Mở terminal thứ nhất tại thư mục gốc:
+
+```powershell
+uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8000 --env-file .env
+```
+
+Kiểm tra:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+```
+
+Kết quả mong đợi:
+
+```text
+status
+------
+ok
+```
+
+OpenAPI UI có tại `http://127.0.0.1:8000/docs`.
+
+### 7. Cài và chạy frontend
+
+Mở terminal thứ hai:
+
+```powershell
+cd web
+Copy-Item .env.example .env.local
+npm ci
+npm run dev
+```
+
+`web/.env.local` cần chứa:
+
+```env
+API_BASE_URL=http://127.0.0.1:8000
+```
+
+Mở `http://localhost:3000`, upload một file và gửi yêu cầu, ví dụ:
+
+```text
+Create a report about this data file.
+```
+
+Luồng report chạy bất đồng bộ. Frontend sẽ poll response, sau đó hiển thị HTML
+report khi pipeline hoàn tất.
+
+### 8. Chạy CLI không cần frontend
+
+Với một file local:
+
+```powershell
+uv run python examples/create_report.py --source "C:\path\to\data.pdf" --query "Create a report about this data file"
+```
+
+Với package mẫu:
+
+```powershell
+uv run python examples/create_report.py --package examples/data_corpus_package/data_corpus_package.json --query "Create a report about this data corpus"
+```
+
+CLI và API đều đọc biến từ `.env`.
+
+## Kiểm Tra Sau Setup
+
+Chạy unit test chính:
+
+```powershell
+uv run python -m unittest discover -s packages/sdk/tests
+uv run python -m unittest discover -s packages/api/tests
+```
+
+Kiểm tra frontend:
+
+```powershell
+cd web
+npm run build
+```
+
+Một lần test end-to-end tối thiểu nên xác nhận:
+
+- API `/health` trả `ok`.
+- Docker image `data-intelligence-sandbox:local` tồn tại.
+- Upload trả về source reference.
+- Response chuyển từ trạng thái đang chạy sang hoàn tất.
+- Report có narrative, evidence, KPI phù hợp và chart chỉ xuất hiện khi đủ dữ liệu.
+- File HTML mở được và chart tải được từ ECharts CDN.
+
+## Artifact Và Debug
+
+Mỗi run tạo bundle:
+
+```text
+artifacts/<run-id>/
+  manifest.json
+  events.jsonl
+  code/
+  executions/
+  data/
+  rendered/
+    report.md
+    report.css
+    report.js
+    report.html
+```
+
+Khi UI báo `The data intelligence workflow could not complete`, kiểm tra theo thứ
+tự:
+
+1. Terminal API để lấy exception và response ID.
+2. `artifacts/<run-id>/events.jsonl` để xem node nào lỗi.
+3. `code/` để xem code do Code Agent sinh.
+4. `executions/` để xem stdout, stderr, validation và sandbox result.
+5. Docker Desktop để chắc Docker Engine đang chạy.
+6. `.env` để chắc API key, model ID và sandbox backend đúng.
+
+`artifacts/`, `.uploads/`, logs, `.env`, `.venv`, `.next` và `node_modules` là dữ
+liệu local, đã được ignore và không nên push lên GitHub.
+
+## PostgreSQL Tùy Chọn
+
+Nếu không đặt `DATABASE_URL`, API dùng in-memory run repository. Cách này đủ để
+upload file và test report local, nhưng trạng thái run mất khi restart API.
+
+PostgreSQL phù hợp khi cần giữ trạng thái response lâu hơn. Có thể khởi động riêng
+database từ Compose:
+
+```powershell
+docker compose -f docker/docker-compose.yaml up -d db
+```
+
+Sau đó thêm vào `.env`:
+
+```env
+DATABASE_URL=postgresql://data_intelligence:data_intelligence@localhost:5432/data_intelligence
+```
+
+## Lưu Ý Về Docker Compose
+
+`docker/docker-compose.yaml` cung cấp API container và PostgreSQL cho môi trường
+container hóa. Tuy nhiên API container hiện chưa được mount Docker socket và chưa
+có Docker CLI để tạo request-scoped Docker sandbox trên host.
+
+Vì vậy, với `SANDBOX_BACKEND=docker`, hãy dùng quickstart ở trên: chạy API trên
+host và chỉ chạy sandbox trong Docker. Không dùng toàn bộ Compose stack cho nhánh
+Code Agent cho tới khi deployment có một sandbox service riêng hoặc cấu hình Docker
+socket với policy bảo mật phù hợp.
+
+## Troubleshooting
+
+### `fatal: not a git repository`
+
+Terminal đang đứng sai thư mục. Chạy:
+
+```powershell
+cd G:\DI_RandD\Data-Int-SDK\Data-Intelligence-SDK
+git status
+```
+
+### API không import được package
+
+Chạy lại từ repository root:
+
+```powershell
+uv pip install -e packages/sdk -e packages/api
+```
+
+### Docker daemon không kết nối được
+
+Mở Docker Desktop, chờ Engine chạy rồi kiểm tra:
+
+```powershell
+docker version
+docker ps
+```
+
+### Không tìm thấy sandbox image
+
+```powershell
+docker build -f docker/sandbox.Dockerfile -t data-intelligence-sandbox:local .
+```
+
+### LLM trả 401, 403 hoặc model not found
+
+Kiểm tra `OPENROUTER_API_KEY`, `LLM_MODEL_NAME` và
+`EMBEDDING_MODEL_NAME` trong `.env`. Model ID phải đúng với model mà tài khoản
+OpenRouter được phép gọi.
+
+### HTML có chart container nhưng chart trống
+
+Renderer dùng ECharts CDN. Trình duyệt phải truy cập được CDN. Đồng thời kiểm tra
+`report.js` và `chart_requests` trong artifact để phân biệt lỗi tải thư viện với
+trường hợp ChartInputAssembler đánh dấu `insufficient_data`.
+
+## Architecture Reference
 
 Base Python package for a data intelligence orchestration system.
 
@@ -139,7 +475,7 @@ Use the demo to run the complete non-interactive query-to-answer flow:
 uv run python examples/demo_workflow_cli.py \
   --package examples/data_corpus_package/data_corpus_package.json \
   --config configs/proxy-openrouter.toml \
-  --env-file docker/.env \
+  --env-file .env \
   --query "Summarize this data corpus package"
 ```
 
@@ -153,8 +489,8 @@ uv run python examples/demo_workflow_cli.py \
   --verbose
 ```
 
-Provider settings normally come from `configs/development/proxy-openrouter.toml` and the
-environment. The CLI loads `docker/.env` by default so the checked-in TOML's
+Provider settings normally come from `configs/proxy-openrouter.toml` and the
+environment. The CLI loads `.env` by default so the checked-in TOML's
 `${env:...}` placeholders work in local runs. Use `--env-file PATH` to load a
 different env file; values already exported in the shell take precedence.
 Provider settings can also be overridden with `--config`, `--model`,
@@ -162,7 +498,8 @@ Provider settings can also be overridden with `--config`, `--model`,
 `logs/pipeline.log` by default; pass `--no-trace` to disable that file.
 
 When the AXIOM sandbox is enabled, the application-owned pipeline factory
-creates one sandbox for the entire request. Configure it in `docker/.env`:
+creates one sandbox for the entire request. Configure the private AXIOM backend
+in `.env`:
 
 ```env
 METHODS_HUB_ENABLED=false
@@ -173,7 +510,33 @@ SANDBOX_WORKSPACE_ID=00000000-0000-0000-0000-000000000001
 
 The CLI example discovers the sibling client source directly for local
 development. Production applications should install `axiom-sandbox-client`.
-The general engine requires `SANDBOX_ENABLED=true` and a workspace ID.
+The general engine requires `SANDBOX_ENABLED=true`. The AXIOM backend also
+requires a workspace ID.
+
+For local development without the private AXIOM service, build the bundled
+Docker sandbox image:
+
+```bash
+docker build -f docker/sandbox.Dockerfile -t data-intelligence-sandbox:local .
+```
+
+Then configure the API process:
+
+```env
+SANDBOX_ENABLED=true
+SANDBOX_BACKEND=docker
+SANDBOX_DOCKER_IMAGE=data-intelligence-sandbox:local
+REPORT_FORCE_CODE_AGENT=true
+```
+
+The Docker backend creates one network-disabled container per request, stages
+the uploaded sources under `/workspace/input`, applies CPU, memory, and process
+limits, and removes the container after the workflow completes. Optional local
+limits are `SANDBOX_DOCKER_MEMORY`, `SANDBOX_DOCKER_CPUS`,
+`SANDBOX_DOCKER_PIDS_LIMIT`, and `SANDBOX_DOCKER_WORKSPACE_SIZE`.
+The API currently defaults `REPORT_FORCE_CODE_AGENT` to `true` so report data
+steps exercise generated code even when Method Hub contains a matching tool.
+Set it to `false` to restore normal Router selection.
 
 Each invocation creates a persistent artifact bundle under `artifacts/<run-id>/`
 by default. Configure a different root with `ARTIFACT_ROOT`. The bundle retains
@@ -205,16 +568,16 @@ LANGCHAIN_PROJECT=data-intelligence-sdk
 LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 ```
 
-These variables can be placed in `docker/.env` for local development. The SDK
+These variables can be placed in `.env` for local development. The SDK
 does not send traces when `LANGCHAIN_TRACING_V2` is unset or false.
 
 ### Explicit Method Hub membership
 
-The default Method Hub membership is defined in
-`configs/development/method-hub.toml`. It contains concrete executable method
-names only; high-level capability labels such as `answer_question` are resolved
-by the engine and do not belong in this list. Override the profile location or
-the complete list with:
+The default Method Hub membership is defined by `DEFAULT_METHODS` in
+`packages/sdk/src/data_intelligence_sdk/runtime/method_profile.py`. It contains
+concrete executable method names only; high-level capability labels such as
+`answer_question` are resolved by the engine and do not belong in this list.
+Optionally provide a TOML profile or override the complete list with:
 
 ```text
 METHOD_HUB_CONFIG_PATH=/absolute/path/to/method-hub.toml
@@ -240,7 +603,7 @@ OPENROUTER_API_KEY=...
 LLM_MODEL_NAME=...
 DATA_CORPUS_ROOT=/absolute/path/to/Data-Intelligence-SDK
 DATABASE_URL=postgresql://data_intelligence:data_intelligence@127.0.0.1:5432/data_intelligence
-MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/development/proxy-openrouter.toml
+MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/proxy-openrouter.toml
 API_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 PIPELINE_TIMEOUT_SECONDS=300
 SPEC_CONFIRMATION_TTL_SECONDS=86400
@@ -309,15 +672,16 @@ The Compose configuration at `docker/docker-compose.yaml` runs the FastAPI
 data_intelligence_api and a private PostgreSQL 17 service. It exposes only the API at
 `http://127.0.0.1:8000`, mounts `./data` read-only, and persists both uploaded
 corpus files and confirmation state in Docker volumes. Optional model-provider
-credentials and `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are read
-from `docker/.env` at container startup. The API loads its model definition from
-`/app/configs/development/proxy-openrouter.toml` through `MODEL_CONFIG_PATH`; values such as
-`LLM_MODEL_NAME` and `OPENROUTER_API_KEY` are resolved from `docker/.env`.
+credentials and `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` can be
+loaded from the root `.env` by passing `--env-file .env`. The API loads its model
+definition from `/app/configs/proxy-openrouter.toml` through
+`MODEL_CONFIG_PATH`; values such as `LLM_MODEL_NAME` and
+`OPENROUTER_API_KEY` are resolved from the environment.
 
 Build and start the API:
 
 ```bash
-docker compose -f docker/docker-compose.yaml up --build -d
+docker compose --env-file .env -f docker/docker-compose.yaml up --build -d
 ```
 
 Check container status and logs:

@@ -27,6 +27,10 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.engines.report import ReportEngine
+from data_intelligence_sdk.methods import (
+    register_csv_methods,
+    register_local_data_methods,
+)
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.deep_agent_sandbox import (
@@ -44,6 +48,17 @@ from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
 
+from data_intelligence_api.infrastructure.workflow.docker_sandbox import (
+    docker_provider_from_env,
+)
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _as_result_dict(value: Any) -> dict[str, Any]:
     if is_dataclass(value):
@@ -51,6 +66,68 @@ def _as_result_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {"result": value}
+
+
+class _ReportDefaultsSpecBuilder:
+    """Apply API report-delivery defaults without overriding explicit choices."""
+
+    def __init__(self, delegate: object) -> None:
+        self.delegate = delegate
+
+    def build(
+        self,
+        query: UserQuery,
+        intent: Intent,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        spec = self.delegate.build(
+            query,
+            intent,
+            corpus_package,
+            session_context,
+            user_context,
+        )
+        return self._apply(spec)
+
+    def revise(
+        self,
+        *,
+        previous_spec: ExecutionSpec,
+        user_feedback: str,
+        query: UserQuery,
+        intent: Intent,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        spec = self.delegate.revise(
+            previous_spec=previous_spec,
+            user_feedback=user_feedback,
+            query=query,
+            intent=intent,
+            corpus_package=corpus_package,
+            session_context=session_context,
+            user_context=user_context,
+        )
+        return self._apply(spec)
+
+    @staticmethod
+    def _apply(spec: ExecutionSpec) -> ExecutionSpec:
+        if spec.intent != "report":
+            return spec
+        spec.engine_hint = spec.engine_hint or "report"
+        spec.constraints = dict(spec.constraints)
+        spec.constraints.setdefault("output_format", "html")
+        return spec
+
+
+def _default_method_hub() -> MethodHub:
+    method_hub = MethodHub()
+    register_csv_methods(method_hub)
+    register_local_data_methods(method_hub)
+    return method_hub
 
 
 class _AxiomSandboxProvider:
@@ -138,6 +215,23 @@ def _configure_axiom_sandbox_provider(
         sandbox_client,
         workspace_id=UUID(settings.workspace_id),
         cleanup=not keep_sandbox,
+    )
+
+
+def _configure_request_sandbox_provider(
+    *,
+    config_manager: object,
+) -> SandboxSessionProvider:
+    """Select the configured request-scoped sandbox implementation."""
+
+    backend = os.environ.get("SANDBOX_BACKEND", "axiom").strip().lower()
+    if backend == "axiom":
+        return _configure_axiom_sandbox_provider(config_manager=config_manager)
+    if backend == "docker":
+        return docker_provider_from_env()
+    raise ValueError(
+        "SANDBOX_BACKEND must be either 'axiom' or 'docker', "
+        f"not {backend!r}."
     )
 
 
@@ -300,6 +394,7 @@ def create_example_pipeline(
     spec_llm_client: LLMClient | None = None,
     use_llm_spec_builder: bool = False,
     allow_method_generation: bool = True,
+    force_report_code_agent: bool | None = None,
     method_hub: MethodHub | None = None,
     mcp_client: MCPMethodClient | None = None,
     interface_registry: object | None = None,
@@ -310,6 +405,11 @@ def create_example_pipeline(
     logger: RuntimeLogger | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
+    if force_report_code_agent is None:
+        force_report_code_agent = _env_flag(
+            "REPORT_FORCE_CODE_AGENT",
+            default=True,
+        )
     if artifact_store is None:
         artifact_settings = resolved_config_manager.artifact_settings()
         artifact_store = FilesystemArtifactStore(artifact_settings.root)
@@ -328,13 +428,15 @@ def create_example_pipeline(
             )
         else:
             spec_builder = ExampleSpecBuilder()
+    spec_builder = _ReportDefaultsSpecBuilder(spec_builder)
     if sandbox_provider is None:
         sandbox_settings = resolved_config_manager.sandbox_settings()
         if sandbox_settings.enabled:
-            sandbox_provider = _configure_axiom_sandbox_provider(
+            sandbox_provider = _configure_request_sandbox_provider(
                 config_manager=resolved_config_manager,
             )
-    if engine is None:
+    uses_default_engine = engine is None
+    if uses_default_engine:
         if llm is not None:
             engine = GeneralPurposeEngine(llm=llm)
         else:
@@ -345,8 +447,25 @@ def create_example_pipeline(
                 config_manager=resolved_config_manager,
                 allow_method_generation=allow_method_generation,
             )
+    if method_hub is None:
+        method_hub = _default_method_hub()
     interface_registry = interface_registry or InMemoryInterfaceRegistry()
     registry = InMemoryEngineRegistry(fallback_engine=engine)
+    if uses_default_engine:
+        if llm is not None:
+            report_engine = ReportEngine(
+                llm=llm,
+                force_code_agent=force_report_code_agent,
+            )
+        else:
+            report_engine = ReportEngine(
+                model=model,
+                api_key=api_key,
+                config_path=config_path,
+                config_manager=resolved_config_manager,
+                force_code_agent=force_report_code_agent,
+            )
+        registry.register(report_engine)
     registry.register(engine)
     return DataIntelligencePipeline(
         intent_analyzer=ExampleIntentAnalyzer(),
@@ -377,7 +496,12 @@ def create_report_pipeline(
     """Create an offline report-generation pipeline for examples."""
 
     return create_example_pipeline(
-        engine=ReportEngine(),
+        engine=ReportEngine(
+            force_code_agent=_env_flag(
+                "REPORT_FORCE_CODE_AGENT",
+                default=True,
+            )
+        ),
         method_hub=method_hub,
         mcp_client=mcp_client,
         interface_registry=interface_registry,

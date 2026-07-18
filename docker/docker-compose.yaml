@@ -18,7 +18,7 @@ services:
       PIPELINE_TIMEOUT_SECONDS: "300"
       SPEC_CONFIRMATION_TTL_SECONDS: "86400"
       MAX_SPEC_REVISION_ROUNDS: "5"
-      MODEL_CONFIG_PATH: /app/configs/development/proxy-openrouter.toml
+      MODEL_CONFIG_PATH: /app/configs/proxy-openrouter.toml
       PYTHONUNBUFFERED: "1"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
