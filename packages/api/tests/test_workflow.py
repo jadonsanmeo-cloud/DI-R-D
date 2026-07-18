@@ -6,6 +6,10 @@ from unittest.mock import patch
 from data_intelligence_sdk.core.types import DataCorpusPackage, UserQuery
 
 from data_intelligence_api.http.schemas.responses import CreateResponseRequest, DataCorpusPackageRequest
+from data_intelligence_api.http.schemas.responses import (
+    CreateResponseRequest,
+    DataCorpusPackageRequest,
+)
 from data_intelligence_api.application.workflow import (
     DEFAULT_QUERY,
     SourceValidationError,

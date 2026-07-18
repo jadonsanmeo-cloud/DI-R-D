@@ -20,11 +20,12 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
-from data_intelligence_api.infrastructure.workflow.pipeline_factory import create_example_pipeline
+from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
+    create_example_pipeline,
+)
 
 from data_intelligence_api.domain.workflow import WorkflowInvocation
 from data_intelligence_api.http.schemas.responses import CreateResponseRequest
-
 
 DEFAULT_QUERY = "Analyze this data corpus."
 PipelineFactory = Callable[..., DataIntelligencePipeline]
@@ -169,12 +170,14 @@ def prepared_to_payload(prepared: PreparedExecution) -> dict:
         "query": asdict(prepared.query),
         "intent": prepared.intent,
         "corpus_package": asdict(prepared.corpus_package),
-        "session_context": asdict(prepared.session_context)
-        if prepared.session_context is not None
-        else None,
-        "user_context": asdict(prepared.user_context)
-        if prepared.user_context is not None
-        else None,
+        "session_context": (
+            asdict(prepared.session_context)
+            if prepared.session_context is not None
+            else None
+        ),
+        "user_context": (
+            asdict(prepared.user_context) if prepared.user_context is not None else None
+        ),
         "run_artifact_id": prepared.run_artifact_id,
     }
 
@@ -187,9 +190,9 @@ def prepared_from_payload(payload: dict, spec: ExecutionSpec) -> PreparedExecuti
         intent=payload["intent"],
         corpus_package=DataCorpusPackage(**payload["corpus_package"]),
         spec=spec,
-        session_context=SessionContext(**session_payload)
-        if session_payload is not None
-        else None,
+        session_context=(
+            SessionContext(**session_payload) if session_payload is not None else None
+        ),
         user_context=UserContext(**user_payload) if user_payload is not None else None,
         run_artifact_id=payload.get("run_artifact_id"),
     )

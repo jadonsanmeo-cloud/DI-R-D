@@ -45,9 +45,7 @@ class ApiSettingsTests(unittest.TestCase):
             ("http://localhost:4000", "http://127.0.0.1:4000"),
         )
         self.assertEqual(settings.pipeline_timeout_seconds, 12.5)
-        self.assertEqual(
-            settings.database_url, "postgresql://user:pass@db:5432/app"
-        )
+        self.assertEqual(settings.database_url, "postgresql://user:pass@db:5432/app")
         self.assertEqual(settings.spec_confirmation_ttl_seconds, 600)
         self.assertEqual(settings.max_spec_revision_rounds, 7)
 

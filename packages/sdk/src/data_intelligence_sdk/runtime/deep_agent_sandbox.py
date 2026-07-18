@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Protocol
 
-from deepagents.backends.protocol import BackendProtocol, FileData, ReadResult, WriteResult
+from deepagents.backends.protocol import (
+    BackendProtocol,
+    FileData,
+    ReadResult,
+    WriteResult,
+)
 
 from data_intelligence_sdk.core.types import DataCorpusPackage
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
@@ -54,7 +59,9 @@ class DeepAgentSandboxBackend(BackendProtocol):
         try:
             path.relative_to(AGENT_ROOT)
         except ValueError as exc:
-            raise ValueError("Generated files must be located under /workspace/agent.") from exc
+            raise ValueError(
+                "Generated files must be located under /workspace/agent."
+            ) from exc
         return self.workspace_path(file_path)
 
     def write(self, file_path: str, content: str) -> WriteResult:
@@ -84,15 +91,15 @@ class DeepAgentSandboxBackend(BackendProtocol):
             window = "".join(lines[offset : offset + limit])
         except Exception as exc:
             return ReadResult(error=f"Error reading file '{file_path}': {exc}")
-        return ReadResult(
-            file_data=FileData(content=window, encoding="utf-8")
-        )
+        return ReadResult(file_data=FileData(content=window, encoding="utf-8"))
 
     @staticmethod
     def _absolute_path(file_path: str) -> PurePosixPath:
         path = PurePosixPath(file_path)
         if not path.is_absolute() or ".." in path.parts:
-            raise ValueError("Sandbox paths must be absolute and cannot traverse parents.")
+            raise ValueError(
+                "Sandbox paths must be absolute and cannot traverse parents."
+            )
         return path
 
 

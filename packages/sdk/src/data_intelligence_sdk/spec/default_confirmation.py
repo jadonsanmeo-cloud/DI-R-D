@@ -94,7 +94,9 @@ class StaticSpecConfirmationProvider:
     ) -> SpecConfirmationDecision:
         del request
         if not self._decisions:
-            raise SpecConfirmationRequired("No static spec confirmation decisions remain.")
+            raise SpecConfirmationRequired(
+                "No static spec confirmation decisions remain."
+            )
         return self._decisions.pop(0)
 
 

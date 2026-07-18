@@ -57,7 +57,9 @@ def _resolve_file(
         if file_path.suffix.lower() in suffixes
     ]
     if not candidates:
-        raise FileNotFoundError(f"No files with suffixes {sorted(suffixes)} under {root}.")
+        raise FileNotFoundError(
+            f"No files with suffixes {sorted(suffixes)} under {root}."
+        )
     return max(candidates, key=lambda item: item.stat().st_size)
 
 
@@ -107,18 +109,24 @@ def _looks_numeric(rows: list[dict[str, str]], column: str) -> bool:
     return numeric_count / len(non_missing) >= 0.8
 
 
-def _column_profiles(rows: list[dict[str, str]], columns: list[str]) -> list[dict[str, Any]]:
+def _column_profiles(
+    rows: list[dict[str, str]], columns: list[str]
+) -> list[dict[str, Any]]:
     profiles = []
     row_count = len(rows)
     for column in columns:
         values = [row.get(column, "") for row in rows]
-        missing_count = sum(str(value).strip().casefold() in _MISSING_VALUES for value in values)
+        missing_count = sum(
+            str(value).strip().casefold() in _MISSING_VALUES for value in values
+        )
         numeric = _numeric_values(rows, column)
         profile: dict[str, Any] = {
             "column": column,
             "row_count": row_count,
             "missing_count": missing_count,
-            "distinct_count": len({str(value) for value in values if str(value).strip()}),
+            "distinct_count": len(
+                {str(value) for value in values if str(value).strip()}
+            ),
             "is_numeric": bool(numeric) and _looks_numeric(rows, column),
         }
         if numeric:
@@ -141,7 +149,13 @@ def _default_group_column(rows: list[dict[str, str]], columns: list[str]) -> str
     for column in columns:
         if _looks_numeric(rows, column):
             continue
-        distinct = len({str(row.get(column, "")) for row in rows if str(row.get(column, "")).strip()})
+        distinct = len(
+            {
+                str(row.get(column, ""))
+                for row in rows
+                if str(row.get(column, "")).strip()
+            }
+        )
         if 1 < distinct <= min(50, row_count):
             score = row_count - distinct
             if score > best_score:
@@ -171,9 +185,11 @@ def inspect_data_folder(data_root: str = "data", limit: int = 200) -> dict[str, 
                 "relative_path": relative,
                 "kind": kind,
                 "file_type": suffix.lstrip(".") or "unknown",
-                "directory": path.parent.relative_to(root).as_posix()
-                if path.parent != root
-                else ".",
+                "directory": (
+                    path.parent.relative_to(root).as_posix()
+                    if path.parent != root
+                    else "."
+                ),
                 "size_bytes": path.stat().st_size,
             }
         )
@@ -205,7 +221,9 @@ def profile_delimited_file(
         "row_count": len(rows),
         "column_count": len(columns),
         "columns": columns,
-        "numeric_columns": [profile["column"] for profile in profiles if profile["is_numeric"]],
+        "numeric_columns": [
+            profile["column"] for profile in profiles if profile["is_numeric"]
+        ],
         "categorical_columns": [
             profile["column"] for profile in profiles if not profile["is_numeric"]
         ],
@@ -276,10 +294,14 @@ def aggregate_delimited_file(
     root = _resolve_data_root(data_root)
     table_path = _resolve_file(path, root, _TABLE_SUFFIXES)
     _, columns, rows = _read_delimited(table_path)
-    group_column = group_by if group_by in columns else _default_group_column(rows, columns)
+    group_column = (
+        group_by if group_by in columns else _default_group_column(rows, columns)
+    )
     if group_column is None:
         return {"schema_version": "1.0", "source": str(table_path), "rows": []}
-    if aggregation != "count" and (metric_column is None or metric_column not in columns):
+    if aggregation != "count" and (
+        metric_column is None or metric_column not in columns
+    ):
         numeric_columns = [column for column in columns if _looks_numeric(rows, column)]
         metric_column = numeric_columns[0] if numeric_columns else None
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -310,7 +332,11 @@ def aggregate_delimited_file(
 
     result_rows.sort(
         key=lambda row: (
-            -(row["value"] if isinstance(row["value"], (int, float)) else row["row_count"]),
+            -(
+                row["value"]
+                if isinstance(row["value"], (int, float))
+                else row["row_count"]
+            ),
             str(row["group_value"]),
         )
     )
@@ -414,7 +440,11 @@ def summarize_wide_numeric_table(
     if not rows:
         return {"schema_version": "1.0", "source": str(table_path), "rows": []}
     identity = id_column if id_column in columns else columns[0]
-    measure_columns = [column for column in columns if column != identity and _looks_numeric(rows, column)]
+    measure_columns = [
+        column
+        for column in columns
+        if column != identity and _looks_numeric(rows, column)
+    ]
     result_rows = []
     for row in rows:
         values = {
@@ -512,7 +542,12 @@ def register_local_data_methods(method_hub: MethodHub) -> None:
         (
             "summarize_delimited_columns",
             summarize_delimited_columns,
-            ["aggregate_data", "summarize_columns", "inspect_tabular_data", "data_folder_report"],
+            [
+                "aggregate_data",
+                "summarize_columns",
+                "inspect_tabular_data",
+                "data_folder_report",
+            ],
             "Summarize selected CSV/TSV columns with top values and numeric statistics.",
             ["local-data", "table", "summary"],
             140,
@@ -561,7 +596,12 @@ def register_local_data_methods(method_hub: MethodHub) -> None:
         (
             "summarize_wide_numeric_table",
             summarize_wide_numeric_table,
-            ["aggregate_data", "summarize_wide_table", "summarize_metrics", "data_folder_report"],
+            [
+                "aggregate_data",
+                "summarize_wide_table",
+                "summarize_metrics",
+                "data_folder_report",
+            ],
             "Summarize a wide numeric table by row identifier, totals, and top numeric measure.",
             ["local-data", "table", "wide-table", "summary"],
             130,
@@ -570,13 +610,25 @@ def register_local_data_methods(method_hub: MethodHub) -> None:
             ],
         ),
     ]
-    for name, method, capabilities, description, tags, priority, use_when in definitions:
+    for (
+        name,
+        method,
+        capabilities,
+        description,
+        tags,
+        priority,
+        use_when,
+    ) in definitions:
         method_hub.register(
             name,
             method,
             capability_names=capabilities,
             trust_level="builtin",
-            metadata={**common_metadata, "description": description, "use_when": use_when},
+            metadata={
+                **common_metadata,
+                "description": description,
+                "use_when": use_when,
+            },
             version="1.0.0",
             description=description,
             tags=tags,

@@ -215,7 +215,10 @@ class PostgresRunRepository:
                 row["confirmation_token_hash"], token_hash
             ):
                 raise RunNotFoundError("Response was not found.")
-            if row["expires_at"] <= datetime.now(timezone.utc) and row["status"] == "awaiting_confirmation":
+            if (
+                row["expires_at"] <= datetime.now(timezone.utc)
+                and row["status"] == "awaiting_confirmation"
+            ):
                 cursor.execute(
                     "UPDATE response_runs SET status = 'expired', updated_at = now() WHERE response_id = %s",
                     (response_id,),
@@ -244,7 +247,9 @@ class PostgresRunRepository:
                 (target_status, target_status, response_id, revision),
             )
             if cursor.rowcount != 1:
-                raise RunConflictError("Response revision is stale or already processing.")
+                raise RunConflictError(
+                    "Response revision is stale or already processing."
+                )
         return self.get_authorized(response_id, token)
 
     def save_revision(self, response_id: str, **kwargs) -> StoredRun:
@@ -260,9 +265,11 @@ class PostgresRunRepository:
                     response_id,
                     kwargs["previous_revision"],
                     kwargs["feedback"],
-                    psycopg.types.json.Jsonb(kwargs["edited_spec"])
-                    if kwargs["edited_spec"] is not None
-                    else None,
+                    (
+                        psycopg.types.json.Jsonb(kwargs["edited_spec"])
+                        if kwargs["edited_spec"] is not None
+                        else None
+                    ),
                 ),
             )
             cursor.execute(

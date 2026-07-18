@@ -12,7 +12,9 @@ class RuntimeLogger:
     """Collects structured runtime events."""
 
     def log(self, event: str, payload: dict[str, Any] | None = None) -> None:
-        raise NotImplementedError("Logging data_intelligence_api is not part of the base scaffold.")
+        raise NotImplementedError(
+            "Logging data_intelligence_api is not part of the base scaffold."
+        )
 
 
 class InMemoryRuntimeLogger(RuntimeLogger):

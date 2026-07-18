@@ -34,7 +34,10 @@ from data_intelligence_sdk.runtime.deep_agent_sandbox import (
     SandboxSessionProvider,
 )
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
-from data_intelligence_sdk.runtime.llm_client import LLMClient, OpenAICompatibleLLMClient
+from data_intelligence_sdk.runtime.llm_client import (
+    LLMClient,
+    OpenAICompatibleLLMClient,
+)
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
@@ -115,9 +118,7 @@ def _configure_axiom_sandbox_provider(
     if not settings.enabled:
         raise RuntimeError("AXIOM sandbox configuration is disabled.")
     if not settings.workspace_id:
-        raise ValueError(
-            "SANDBOX_WORKSPACE_ID is required when SANDBOX_ENABLED=true."
-        )
+        raise ValueError("SANDBOX_WORKSPACE_ID is required when SANDBOX_ENABLED=true.")
 
     try:
         from axiom_sandbox_client import SandboxClient

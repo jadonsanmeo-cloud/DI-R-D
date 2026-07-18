@@ -42,7 +42,9 @@ class MethodProfileError(ValueError):
 
 def _normalize_names(values: object) -> tuple[str, ...]:
     if isinstance(values, str) or not isinstance(values, Iterable):
-        raise MethodProfileError("method_hub.enabled_methods must be a list of strings.")
+        raise MethodProfileError(
+            "method_hub.enabled_methods must be a list of strings."
+        )
     names: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -67,11 +69,15 @@ def load_method_names(path: str | Path | None = None) -> tuple[str, ...]:
     if configured_path:
         profile_path = Path(configured_path)
         if not profile_path.exists():
-            raise MethodProfileError(f"Method Hub profile does not exist: {profile_path}")
+            raise MethodProfileError(
+                f"Method Hub profile does not exist: {profile_path}"
+            )
         try:
             payload = tomllib.loads(profile_path.read_text(encoding="utf-8"))
         except (OSError, tomllib.TOMLDecodeError) as exc:
-            raise MethodProfileError(f"Could not read Method Hub profile {profile_path}: {exc}") from exc
+            raise MethodProfileError(
+                f"Could not read Method Hub profile {profile_path}: {exc}"
+            ) from exc
         section = payload.get("method_hub")
         if not isinstance(section, dict):
             raise MethodProfileError(f"{profile_path}: missing [method_hub] section.")
@@ -82,8 +88,22 @@ def load_method_names(path: str | Path | None = None) -> tuple[str, ...]:
     override = os.getenv("METHOD_HUB_METHODS")
     if override:
         names = _normalize_names(override.split(","))
-    if os.getenv("ENABLE_VECTOR_METHODS", "false").strip().lower() in {"1", "true", "yes", "on"}:
-        names = tuple(dict.fromkeys((*names, "search_vector_chunks", "inspect_vector_chunks", "get_vector_stats")))
+    if os.getenv("ENABLE_VECTOR_METHODS", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        names = tuple(
+            dict.fromkeys(
+                (
+                    *names,
+                    "search_vector_chunks",
+                    "inspect_vector_chunks",
+                    "get_vector_stats",
+                )
+            )
+        )
     return names
 
 

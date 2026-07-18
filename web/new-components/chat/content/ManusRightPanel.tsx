@@ -1,8 +1,5 @@
 import i18n from '@/app/i18n';
-import { CodePreview } from '@/components/chat/chat-content/code-preview';
-import markdownComponents, { markdownPlugins, preprocessLaTeX } from '@/components/chat/chat-content/config';
-import AdvancedChart, { createChartConfig } from '@/new-components/charts';
-import MarkDownContext from '@/new-components/common/MarkdownContext';
+import type { ChartConfig } from '@/new-components/charts/types';
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -17,7 +14,6 @@ import {
   DownOutlined,
   DownloadOutlined,
   EditOutlined,
-  ExportOutlined,
   EyeOutlined,
   FileExcelOutlined,
   FileImageOutlined,
@@ -27,23 +23,55 @@ import {
   FileTextOutlined,
   FolderOpenOutlined,
   LeftOutlined,
-  LinkOutlined,
   LoadingOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RightOutlined,
   SearchOutlined,
-  ClockCircleOutlined,
-  SyncOutlined,
   TableOutlined,
   UpOutlined,
 } from '@ant-design/icons';
-import { GPTVis } from '@antv/gpt-vis';
 import { Button, Table, Tooltip, message } from 'antd';
 import classNames from 'classnames';
+import dynamic from 'next/dynamic';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArtifactItem, StepStatus, StepType } from './ManusLeftPanel';
+import LightweightMarkdown from './LightweightMarkdown';
+import type { ArtifactItem, StepStatus, StepType } from './ManusLeftPanel';
+
+const CodePreview = dynamic(
+  () => import('@/components/chat/chat-content/code-preview').then(module => module.CodePreview),
+  {
+    ssr: false,
+    loading: () => <div className='h-24 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800' />,
+  },
+);
+
+const AdvancedChart = dynamic(() => import('@/new-components/charts/AdvancedCharts'), {
+  ssr: false,
+  loading: () => <div className='h-72 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800' />,
+});
+
+const createManusChartConfig = (content: any): ChartConfig => ({
+  chartType: content?.chartType || 'line',
+  data: content?.data || [],
+  xField: content?.xField || 'x',
+  yField: content?.yField || 'y',
+  seriesField: content?.seriesField,
+  colorField: content?.colorField,
+  angleField: content?.angleField,
+  title: content?.title,
+  smooth: true,
+  autoFit: true,
+  height: 280,
+  showLegend: true,
+  showGrid: true,
+  animate: true,
+  enableZoom: true,
+  enableTooltipCrosshairs: true,
+  showToolbar: true,
+  enableFullscreen: true,
+});
 
 /** Resolve image paths like `/images/xxx.png` to full backend URLs in dev mode */
 const resolveImageUrl = (src: string): string => {
@@ -392,9 +420,7 @@ const OutputRenderer: React.FC<{ output: ExecutionOutput; index: number }> = mem
 
       {output.output_type === 'markdown' && (
         <div className='prose prose-sm dark:prose-invert max-w-none'>
-          <GPTVis components={markdownComponents} {...markdownPlugins}>
-            {preprocessLaTeX(String(content))}
-          </GPTVis>
+          <LightweightMarkdown>{String(content)}</LightweightMarkdown>
         </div>
       )}
 
@@ -414,17 +440,7 @@ const OutputRenderer: React.FC<{ output: ExecutionOutput; index: number }> = mem
 
       {output.output_type === 'chart' && (
         <div className='h-72'>
-          <AdvancedChart
-            config={createChartConfig(content?.data || [], {
-              chartType: content?.chartType || 'line',
-              xField: content?.xField || 'x',
-              yField: content?.yField || 'y',
-              seriesField: content?.seriesField,
-              title: content?.title,
-              smooth: true,
-              height: 280,
-            })}
-          />
+          <AdvancedChart config={createManusChartConfig(content)} />
         </div>
       )}
 
@@ -1398,11 +1414,11 @@ const SkillCardRenderer: React.FC<{
                           <pre className='text-xs bg-gray-50 dark:bg-[#161719] rounded-lg px-4 py-3 text-gray-600 dark:text-gray-300 font-mono leading-relaxed mb-4 border border-gray-200 dark:border-gray-700'>
                             {parts[1].trim()}
                           </pre>
-                          <MarkDownContext>{preprocessLaTeX(parts.slice(2).join('---').trim())}</MarkDownContext>
+                          <LightweightMarkdown>{parts.slice(2).join('---').trim()}</LightweightMarkdown>
                         </>
                       );
                     }
-                    return <MarkDownContext>{preprocessLaTeX(fileContent)}</MarkDownContext>;
+                    return <LightweightMarkdown>{fileContent}</LightweightMarkdown>;
                   })()
                 : (() => {
                     const ext = selectedFile?.split('.').pop()?.toLowerCase();
@@ -1437,7 +1453,7 @@ const SkillCardRenderer: React.FC<{
                     if (lang) {
                       return <CodePreview code={fileContent} language={lang} />;
                     }
-                    return <MarkDownContext>{preprocessLaTeX(fileContent)}</MarkDownContext>;
+                    return <LightweightMarkdown>{fileContent}</LightweightMarkdown>;
                   })()}
             </div>
           ) : (
@@ -1616,82 +1632,6 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
 
   return (
     <div className='relative flex flex-col h-full bg-[#f8f9fc] dark:bg-[#0d0e11]'>
-      {/* Collapse button is rendered by the parent layout to avoid overflow clipping */}
-
-      {/* Terminal Header */}
-      <div className='flex items-center justify-between px-5 py-3 bg-white dark:bg-[#111217] border-b border-gray-200 dark:border-gray-800'>
-        <div className='flex items-center gap-3'>
-          <div className='flex items-center gap-2'>
-            <div className='w-3 h-3 rounded-full bg-red-500' />
-            <div className='w-3 h-3 rounded-full bg-yellow-500' />
-            <div className='w-3 h-3 rounded-full bg-green-500' />
-          </div>
-          <div className='flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 font-medium'>
-            <DesktopOutlined className='text-gray-500' />
-            <span>{terminalTitle || t('db_gpt_computer')}</span>
-            {isRunning && <LoadingOutlined spin className='text-blue-500 ml-1' />}
-          </div>
-        </div>
-
-        <div className='flex items-center gap-1'>
-          {panelView === 'html-preview' && previewArtifact && (
-            <Tooltip title={t('export_pdf')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<ExportOutlined />}
-                onClick={handleExportPdf}
-                className='text-gray-500 hover:text-blue-500'
-              >
-                {t('export_pdf')}
-              </Button>
-            </Tooltip>
-          )}
-
-          {onSchedule && (
-            <Tooltip title={t('scheduled.save.title')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<ClockCircleOutlined />}
-                onClick={onSchedule}
-                className='text-gray-500 hover:text-blue-500'
-              >
-                {t('scheduled.save.title')}
-              </Button>
-            </Tooltip>
-          )}
-
-          {activeStep && onRerun && activeStep.status === 'completed' && (
-            <Tooltip title={t('rerun')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<SyncOutlined />}
-                onClick={onRerun}
-                className='text-gray-500 hover:text-blue-500'
-              >
-                {t('rerun')}
-              </Button>
-            </Tooltip>
-          )}
-
-          {onShare && (
-            <Tooltip title={t('share_conversation_tooltip')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<LinkOutlined />}
-                onClick={onShare}
-                className='text-blue-500 hover:text-blue-600'
-              >
-                {t('share_conversation')}
-              </Button>
-            </Tooltip>
-          )}
-        </div>
-      </div>
-
       {/* View Toggle Tabs */}
       {((artifacts && artifacts.length > 0) || previewArtifact || skillName || !!summaryContent) && (
         <div className='flex items-center gap-0 px-5 bg-white dark:bg-[#111217] border-b border-gray-200 dark:border-gray-800'>
@@ -1788,7 +1728,9 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
       <div
         className={classNames(
           'flex-1 overflow-y-auto flex flex-col min-h-0',
-          panelView === 'html-preview' || panelView === 'image-preview' || panelView === 'skill-preview' ? 'p-0' : 'p-5 space-y-4',
+          panelView === 'html-preview' || panelView === 'image-preview' || panelView === 'skill-preview'
+            ? 'p-0'
+            : 'p-5 space-y-4',
         )}
       >
         {panelView === 'skill-preview' && skillName ? (
@@ -1847,7 +1789,7 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
           </div>
         ) : panelView === 'summary' && summaryContent ? (
           <div className='prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed'>
-            <MarkDownContext>{summaryContent}</MarkDownContext>
+            <LightweightMarkdown>{summaryContent}</LightweightMarkdown>
             {isSummaryStreaming && (
               <span className='inline-block w-1.5 h-4 bg-blue-500 animate-pulse ml-0.5 align-text-bottom' />
             )}

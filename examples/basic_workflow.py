@@ -3,7 +3,6 @@
 from pathlib import Path
 import sys
 
-
 AXIOM_CLIENT_SRC = (
     Path(__file__).resolve().parent.parent.parent
     / "AXIOM"

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import psycopg
 
-
 MIGRATION_LOCK_ID = 731_420_117
 
 
@@ -17,14 +16,12 @@ def run_migrations(database_url: str, migrations_dir: Path | None = None) -> Non
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK_ID,))
             try:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS schema_migrations (
                         version TEXT PRIMARY KEY,
                         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
-                    """
-                )
+                    """)
                 for migration in migrations:
                     cursor.execute(
                         "SELECT 1 FROM schema_migrations WHERE version = %s",

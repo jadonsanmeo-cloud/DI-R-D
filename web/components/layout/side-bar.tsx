@@ -18,12 +18,10 @@ import Icon, {
   MenuUnfoldOutlined,
   MessageOutlined,
   PlusOutlined,
-  RightOutlined,
 } from '@ant-design/icons';
 import { Popover, Skeleton, Tooltip, message } from 'antd';
 import cls from 'classnames';
 import moment from 'moment';
-import 'moment/locale/zh-cn';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -140,30 +138,6 @@ function SideBar() {
         iconSrc: '/pictures/explore.png',
         activeIconSrc: '/pictures/explore_active.png',
         path: '/',
-      },
-      {
-        key: 'skills',
-        name: t('skills'),
-        isActive: pathname.startsWith('/construct/skills'),
-        iconSrc: '/pictures/skills.svg',
-        activeIconSrc: '/pictures/skills_active.svg',
-        path: '/construct/skills',
-      },
-      {
-        key: 'datasources',
-        name: t('datasources'),
-        isActive: pathname.startsWith('/construct/database'),
-        iconSrc: '/pictures/datasource.svg',
-        activeIconSrc: '/pictures/datasource_active.svg',
-        path: '/construct/database',
-      },
-      {
-        key: 'knowledge',
-        name: t('knowledge'),
-        isActive: pathname.startsWith('/construct/knowledge'),
-        iconSrc: '/pictures/knowledge_sidebar.svg',
-        activeIconSrc: '/pictures/knowledge_sidebar_active.svg',
-        path: '/construct/knowledge',
       },
     ];
     return items;
@@ -357,13 +331,6 @@ function SideBar() {
   // ============ EXPANDED SIDEBAR ============
   return (
     <div className='flex flex-col h-screen w-[240px] min-w-[240px] px-4 pt-4 bg-bar dark:bg-[#232734] animate-fade animate-duration-300'>
-      {/* LOGO + Collapse Toggle */}
-      <div className='flex items-center justify-between p-2 pb-4'>
-        <Link href='/' className='flex items-center'>
-          <Image src={logo} alt='DB-GPT' width={140} height={32} />
-        </Link>
-      </div>
-
       {/* New Task Button */}
       <Link href='/'>
         <div className='flex items-center justify-center gap-2 px-4 py-2.5 mb-4 bg-black dark:bg-white dark:text-black text-white rounded-xl text-sm font-medium hover:opacity-90 transition-opacity cursor-pointer'>
@@ -396,44 +363,12 @@ function SideBar() {
             <span className='text-sm'>{item.name}</span>
           </Link>
         ))}
-        {/* Settings */}
-        <Popover
-          content={settingsContent}
-          trigger='click'
-          placement='rightTop'
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          arrow={false}
-          overlayInnerStyle={{ padding: 0, borderRadius: 12, overflow: 'hidden' }}
-        >
-          <div
-            className={cls(
-              'flex items-center w-full h-12 px-4 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/10 hover:rounded-xl',
-              { 'bg-blue-50 rounded-xl text-blue-600 dark:bg-blue-900/20 dark:text-blue-400': isSettingsActive },
-            )}
-          >
-            <div className='mr-3'>
-              <SidebarPictureIcon
-                src='/pictures/app.png'
-                activeSrc='/pictures/app_active.png'
-                active={isSettingsActive}
-                alt='construct_icon'
-              />
-            </div>
-            <span className='text-sm'>{t('construct')}</span>
-          </div>
-        </Popover>
       </div>
 
       {/* All Tasks Section */}
       <div className='mt-4 mb-2 px-1'>
         <div className='flex items-center justify-between'>
           <span className='text-xs font-semibold text-gray-400 uppercase tracking-wider'>{t('all_tasks')}</span>
-          <Link href='/conversations' className='inline-flex items-center'>
-            <Tooltip title={t('view_all')}>
-              <RightOutlined className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer transition-colors text-xs leading-none' />
-            </Tooltip>
-          </Link>
         </div>
       </div>
       <div className='flex-1 overflow-y-auto min-h-0'>
@@ -481,11 +416,6 @@ function SideBar() {
 
       {/* Bottom: UserBar + toggles */}
       <div className='pt-4 pb-2'>
-        <span className={cls('flex items-center w-full h-12 px-4 bg-[#F1F5F9] dark:bg-theme-dark rounded-xl')}>
-          <div className='mr-3 w-full'>
-            <UserBar />
-          </div>
-        </span>
         <div className='flex items-center justify-around py-4 mt-2 border-t border-dashed border-gray-200 dark:border-gray-700'>
           <Popover content={mode === 'dark' ? 'Light' : 'Dark'}>
             <div className='flex-1 flex items-center justify-center cursor-pointer text-xl' onClick={handleToggleTheme}>

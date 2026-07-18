@@ -5,7 +5,7 @@ import { Alert, Button, Input } from 'antd';
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from 'react';
 
-const MarkdownContext = dynamic(() => import('@/new-components/common/MarkdownContext'), {
+const LightweightMarkdown = dynamic(() => import('./LightweightMarkdown'), {
   ssr: false,
 });
 
@@ -94,7 +94,7 @@ export default function SpecConfirmationCard({ confirmation, onDecision }: Props
           </div>
         ) : (
           <div className='spec-markdown text-sm leading-7 text-slate-700 dark:text-slate-200'>
-            <MarkdownContext>{markdown}</MarkdownContext>
+            <LightweightMarkdown>{markdown}</LightweightMarkdown>
           </div>
         )}
 

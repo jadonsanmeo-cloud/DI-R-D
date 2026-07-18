@@ -37,7 +37,9 @@ class OpenAICompatibleLLMClient:
         timeout: int = 60,
         transport: Transport | None = None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get("OPENAI_COMPATIBLE_BASE_URL") or "").rstrip("/")
+        self.base_url = (
+            base_url or os.environ.get("OPENAI_COMPATIBLE_BASE_URL") or ""
+        ).rstrip("/")
         self.api_key = api_key or os.environ.get("OPENAI_COMPATIBLE_API_KEY") or ""
         self.model = model or os.environ.get("OPENAI_COMPATIBLE_MODEL") or ""
         self.temperature = temperature
@@ -66,9 +68,7 @@ class OpenAICompatibleLLMClient:
     def complete_text(self, messages: list[dict[str, str]]) -> str:
         return self._complete_text_traced(messages)
 
-    def _complete_json_impl(
-        self, messages: list[dict[str, str]]
-    ) -> dict[str, Any]:
+    def _complete_json_impl(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         payload = {
             "model": self.model,
             "messages": messages,
@@ -117,12 +117,16 @@ class OpenAICompatibleLLMClient:
         try:
             content = response["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("OpenAI-compatible response did not contain message content.") from exc
+            raise ValueError(
+                "OpenAI-compatible response did not contain message content."
+            ) from exc
 
         if isinstance(content, dict):
             return content
         if not isinstance(content, str):
-            raise ValueError("OpenAI-compatible message content must be a JSON object string.")
+            raise ValueError(
+                "OpenAI-compatible message content must be a JSON object string."
+            )
 
         parsed = json.loads(content)
         if not isinstance(parsed, dict):

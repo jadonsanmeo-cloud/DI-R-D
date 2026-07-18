@@ -44,6 +44,7 @@ class RunArtifactSession:
     _manifest: dict[str, Any] = field(default_factory=dict)
     _attempts: dict[int, CodeAttemptArtifact] = field(default_factory=dict)
     _attempt_count: int = 0
+    _event_count: int = 0
     _terminal_status: str | None = None
 
     @classmethod
@@ -74,6 +75,8 @@ class RunArtifactSession:
             },
             "sources": list(corpus_package.sources),
             "attempts": [],
+            "event_count": 0,
+            "events_artifact_ref": session.events_artifact_ref,
             "engine": None,
             "final_answer": None,
             "failure_phase": None,
@@ -82,6 +85,30 @@ class RunArtifactSession:
             "completed_at": None,
         }
         session._write_manifest()
+        session.record_event(
+            phase="run",
+            event_type="run.created",
+            payload={"created_at": session._manifest["created_at"]},
+        )
+        session.record_event(
+            phase="corpus",
+            event_type="corpus.registered",
+            payload={
+                "sources": list(corpus_package.sources),
+                "schemas": corpus_package.schemas,
+                "metadata": corpus_package.metadata,
+            },
+        )
+        session.record_event(
+            phase="query",
+            event_type="query.received",
+            payload={
+                "text": query.text,
+                "user_id": query.user_id,
+                "session_id": query.session_id,
+                "metadata": query.metadata,
+            },
+        )
         return session
 
     @property
@@ -91,6 +118,43 @@ class RunArtifactSession:
     @property
     def manifest_path(self) -> Path:
         return self.root / "manifest.json"
+
+    @property
+    def events_path(self) -> Path:
+        return self.root / "events.jsonl"
+
+    @property
+    def events_artifact_ref(self) -> str:
+        return f"artifact://{self.run_id}/events.jsonl"
+
+    def record_event(
+        self,
+        *,
+        phase: str,
+        event_type: str,
+        status: str = "completed",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Append one ordered, redacted event to this run."""
+
+        self._ensure_running()
+        sequence = self._event_count + 1
+        event = {
+            "schema_version": "1.0",
+            "event_id": str(uuid4()),
+            "run_id": self.run_id,
+            "sequence": sequence,
+            "timestamp": _utc_now(),
+            "phase": phase,
+            "event_type": event_type,
+            "status": status,
+            "payload": _redact(payload or {}),
+        }
+        self._append_jsonl(self.events_path, event)
+        self._event_count = sequence
+        self._manifest["event_count"] = sequence
+        self._write_manifest()
+        return event
 
     def record_code_attempt(self, code: str) -> CodeAttemptArtifact:
         self._ensure_running()
@@ -167,6 +231,17 @@ class RunArtifactSession:
         if self._terminal_status == status:
             return self.artifact_ref
 
+        terminal_event = "run.completed" if status == "completed" else "run.failed"
+        self.record_event(
+            phase="run",
+            event_type=terminal_event,
+            status=status,
+            payload={
+                "engine_name": engine_name,
+                "failure_phase": failure_phase,
+                "error": error,
+            },
+        )
         self._manifest.update(
             {
                 "status": status,
@@ -189,9 +264,7 @@ class RunArtifactSession:
 
     def _ensure_running(self) -> None:
         if self._terminal_status is not None:
-            raise ArtifactPersistenceError(
-                f"Run {self.run_id} is already finalized."
-            )
+            raise ArtifactPersistenceError(f"Run {self.run_id} is already finalized.")
 
     def _write_manifest(self) -> None:
         self._write_json_atomic(self.manifest_path, self._manifest)
@@ -211,6 +284,30 @@ class RunArtifactSession:
             )
             + "\n",
         )
+
+    def _append_jsonl(
+        self,
+        destination: Path,
+        payload: dict[str, Any],
+    ) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with destination.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        payload,
+                        ensure_ascii=False,
+                        default=str,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception as exc:
+            raise ArtifactPersistenceError(
+                f"Could not append artifact event: {exc}"
+            ) from exc
 
     def _write_text_atomic(self, destination: Path, content: str) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -279,11 +376,23 @@ class FilesystemArtifactStore(ArtifactStore):
             raise ArtifactPersistenceError(
                 f"Could not reopen artifact bundle {normalized_run_id}: {exc}"
             ) from exc
+        event_count = _recover_event_sequence(
+            root / "events.jsonl",
+            normalized_run_id,
+        )
         session = RunArtifactSession(
             run_id=normalized_run_id,
             root=root,
             _manifest=manifest,
+            _event_count=event_count,
         )
+        session._manifest.update(
+            {
+                "event_count": event_count,
+                "events_artifact_ref": session.events_artifact_ref,
+            }
+        )
+        session._write_manifest()
         for item in manifest.get("attempts", []):
             attempt_number = int(item["attempt"])
             path = root / "code" / f"attempt-{attempt_number:03d}.py"
@@ -312,6 +421,31 @@ class FilesystemArtifactStore(ArtifactStore):
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _recover_event_sequence(path: Path, run_id: str) -> int:
+    if not path.exists():
+        return 0
+    try:
+        content = path.read_bytes()
+        if content and not content.endswith(b"\n"):
+            final_newline = content.rfind(b"\n")
+            valid_size = final_newline + 1 if final_newline >= 0 else 0
+            with path.open("r+b") as handle:
+                handle.truncate(valid_size)
+            content = content[:valid_size]
+        expected = 0
+        for line in content.splitlines():
+            event = json.loads(line.decode("utf-8"))
+            sequence = int(event["sequence"])
+            if event.get("run_id") != run_id or sequence != expected + 1:
+                raise ValueError("Artifact event sequence is invalid.")
+            expected = sequence
+        return expected
+    except Exception as exc:
+        raise ArtifactPersistenceError(
+            f"Could not recover artifact event sequence: {exc}"
+        ) from exc
 
 
 def _redact(value: Any) -> Any:

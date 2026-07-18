@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import asdict
+from typing import Any, Callable
 
 from data_intelligence_sdk.core.types import (
     EngineOutput,
@@ -12,6 +13,8 @@ from data_intelligence_sdk.core.types import (
     TraceStatus,
 )
 
+EventRecorder = Callable[..., dict[str, Any]]
+
 
 class EngineRunContext:
     """Collects structured execution trace while an engine runs.
@@ -20,8 +23,28 @@ class EngineRunContext:
     references, and log references instead of inventing a trace format.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        event_recorder: EventRecorder | None = None,
+    ) -> None:
         self.trace = EngineTrace()
+        self._event_recorder = event_recorder
+
+    def _record_event(
+        self,
+        *,
+        phase: str,
+        event_type: str,
+        status: TraceStatus,
+        payload: dict[str, Any],
+    ) -> None:
+        if self._event_recorder is not None:
+            self._event_recorder(
+                phase=phase,
+                event_type=event_type,
+                status=status,
+                payload=payload,
+            )
 
     def record_step(
         self,
@@ -44,6 +67,20 @@ class EngineRunContext:
             log_refs=log_refs or [],
         )
         self.trace.steps.append(step)
+        plan = step.outputs.get("plan")
+        if plan is not None:
+            self._record_event(
+                phase="planning",
+                event_type="plan.created",
+                status=status,
+                payload={"step_name": name, "plan": plan},
+            )
+        self._record_event(
+            phase="engine",
+            event_type="engine.step",
+            status=status,
+            payload=asdict(step),
+        )
         return step
 
     def record_method_call(
@@ -65,6 +102,12 @@ class EngineRunContext:
             log_refs=log_refs or [],
         )
         self.trace.method_calls.append(method_call)
+        self._record_event(
+            phase="tool",
+            event_type="tool.called",
+            status=status,
+            payload=asdict(method_call),
+        )
         return method_call
 
     def add_artifact_ref(self, artifact_ref: str) -> None:

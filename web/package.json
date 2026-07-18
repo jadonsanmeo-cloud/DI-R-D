@@ -10,16 +10,14 @@
     "lib": "lib"
   },
   "scripts": {
-    "build": "node scripts/run-next.mjs build",
-    "build:prod": "node scripts/run-next.mjs build:prod",
-    "check:qa-upload": "node scripts/check-backend-qa-upload.mjs",
-    "compile": "node scripts/run-next.mjs compile",
-    "dev": "node scripts/run-next.mjs dev",
+    "build": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build",
+    "build:prod": "APP_ENV=prod NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build",
+    "compile": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next build && NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next export",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next dev",
     "export": "next export",
     "format": "prettier --write '**/*.{ts,tsx}'",
     "lint": "eslint '**/*.{ts,tsx}' --fix",
-    "start": "node scripts/run-next.mjs start",
-    "test:responses": "node scripts/test-responses-sse.cjs"
+    "start": "NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max_old_space_size=8192 next start"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

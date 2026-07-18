@@ -59,9 +59,7 @@ class LLMDataSelector:
             ),
             selected_documents=_string_list(payload.get("selected_documents", [])),
             reasons=_string_list(payload.get("reasons", [])),
-            missing_information=_string_list(
-                payload.get("missing_information", [])
-            ),
+            missing_information=_string_list(payload.get("missing_information", [])),
             confidence=_optional_float(payload.get("confidence")),
         )
 

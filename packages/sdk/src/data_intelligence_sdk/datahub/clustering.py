@@ -93,9 +93,13 @@ def _payload_to_cluster(payload: Any) -> DataHubCluster:
         cluster_id=cluster_id,
         name=name,
         description=description,
-        members=[_payload_to_member(item) for item in _list(payload.get("members", []))],
+        members=[
+            _payload_to_member(item) for item in _list(payload.get("members", []))
+        ],
         relationships=[str(item) for item in _list(payload.get("relationships", []))],
-        suggested_tasks=[str(item) for item in _list(payload.get("suggested_tasks", []))],
+        suggested_tasks=[
+            str(item) for item in _list(payload.get("suggested_tasks", []))
+        ],
         confidence=_optional_float(payload.get("confidence")),
     )
 
