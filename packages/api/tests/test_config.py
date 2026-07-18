@@ -8,9 +8,15 @@ from data_intelligence_api.infrastructure.config.settings import ApiSettings
 
 
 class ApiSettingsTests(unittest.TestCase):
-    def test_defaults_use_repository_root_and_local_frontend_origins(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            settings = ApiSettings.from_env()
+    def test_missing_config_uses_local_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing_config = Path(temp_dir) / "missing.toml"
+            with patch.dict(
+                os.environ,
+                {"MODEL_CONFIG_PATH": str(missing_config)},
+                clear=True,
+            ):
+                settings = ApiSettings.from_env()
 
         self.assertEqual(settings.data_corpus_root, Path.cwd().resolve())
         self.assertEqual(
@@ -21,19 +27,36 @@ class ApiSettingsTests(unittest.TestCase):
         self.assertIsNone(settings.database_url)
         self.assertEqual(settings.spec_confirmation_ttl_seconds, 86400)
         self.assertEqual(settings.max_spec_revision_rounds, 5)
-        self.assertIsNone(settings.model_config_path)
+        self.assertEqual(settings.model_config_path, missing_config)
 
-    def test_environment_overrides_are_normalized(self) -> None:
+    def test_toml_loads_non_secret_api_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "runtime.toml"
+            config_path.write_text(
+                """
+[api]
+cors_origins = ["https://frontend.example", "http://localhost:3000"]
+pipeline_timeout_seconds = 12.5
+spec_confirmation_ttl_seconds = 600
+max_spec_revision_rounds = 7
+max_upload_bytes = 123456
+
+[api.chat]
+base_url = "https://chat.example/v1"
+model = "example/chat-model"
+api_key_env = "CHAT_API_KEY"
+""".strip(),
+                encoding="utf-8",
+            )
             with patch.dict(
                 os.environ,
                 {
                     "DATA_CORPUS_ROOT": temp_dir,
-                    "API_CORS_ORIGINS": "http://localhost:4000, http://127.0.0.1:4000 ",
-                    "PIPELINE_TIMEOUT_SECONDS": "12.5",
                     "DATABASE_URL": "postgresql://user:pass@db:5432/app",
-                    "SPEC_CONFIRMATION_TTL_SECONDS": "600",
-                    "MAX_SPEC_REVISION_ROUNDS": "7",
+                    "MODEL_CONFIG_PATH": str(config_path),
+                    "CHAT_STORE_DIR": str(root / "chat"),
+                    "CHAT_API_KEY": "secret-key",
                 },
                 clear=True,
             ):
@@ -42,12 +65,17 @@ class ApiSettingsTests(unittest.TestCase):
         self.assertEqual(settings.data_corpus_root, Path(temp_dir).resolve())
         self.assertEqual(
             settings.cors_origins,
-            ("http://localhost:4000", "http://127.0.0.1:4000"),
+            ("https://frontend.example", "http://localhost:3000"),
         )
         self.assertEqual(settings.pipeline_timeout_seconds, 12.5)
         self.assertEqual(settings.database_url, "postgresql://user:pass@db:5432/app")
         self.assertEqual(settings.spec_confirmation_ttl_seconds, 600)
         self.assertEqual(settings.max_spec_revision_rounds, 7)
+        self.assertEqual(settings.max_upload_bytes, 123456)
+        self.assertEqual(settings.chat_store_dir, root / "chat")
+        self.assertEqual(settings.openai_compatible_base_url, "https://chat.example/v1")
+        self.assertEqual(settings.openai_compatible_api_key, "secret-key")
+        self.assertEqual(settings.openai_compatible_model, "example/chat-model")
 
     def test_model_config_path_loads_from_environment(self) -> None:
         with patch.dict(
@@ -63,20 +91,36 @@ class ApiSettingsTests(unittest.TestCase):
         )
 
     def test_timeout_must_be_positive(self) -> None:
-        with patch.dict(
-            os.environ,
-            {"PIPELINE_TIMEOUT_SECONDS": "0"},
-            clear=True,
-        ):
-            with self.assertRaisesRegex(ValueError, "PIPELINE_TIMEOUT_SECONDS"):
-                ApiSettings.from_env()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "runtime.toml"
+            config_path.write_text(
+                "[api]\npipeline_timeout_seconds = 0\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"MODEL_CONFIG_PATH": str(config_path)},
+                clear=True,
+            ):
+                with self.assertRaisesRegex(ValueError, "pipeline_timeout_seconds"):
+                    ApiSettings.from_env()
 
     def test_confirmation_limits_must_be_positive(self) -> None:
-        for name in ("SPEC_CONFIRMATION_TTL_SECONDS", "MAX_SPEC_REVISION_ROUNDS"):
+        for name in ("spec_confirmation_ttl_seconds", "max_spec_revision_rounds"):
             with self.subTest(name=name):
-                with patch.dict(os.environ, {name: "0"}, clear=True):
-                    with self.assertRaisesRegex(ValueError, name):
-                        ApiSettings.from_env()
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    config_path = Path(temp_dir) / "runtime.toml"
+                    config_path.write_text(
+                        f"[api]\n{name} = 0\n",
+                        encoding="utf-8",
+                    )
+                    with patch.dict(
+                        os.environ,
+                        {"MODEL_CONFIG_PATH": str(config_path)},
+                        clear=True,
+                    ):
+                        with self.assertRaisesRegex(ValueError, name):
+                            ApiSettings.from_env()
 
 
 if __name__ == "__main__":

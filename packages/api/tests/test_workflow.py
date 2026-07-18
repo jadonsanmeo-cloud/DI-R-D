@@ -1,7 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+from data_intelligence_sdk.runtime.config import MethodHubSettings
 
 from data_intelligence_api.http.schemas.responses import (
     CreateResponseRequest,
@@ -18,12 +20,18 @@ from data_intelligence_api.application.workflow import (
 class BackendWorkflowTests(unittest.TestCase):
     def test_default_pipeline_factory_uses_given_model_config(self) -> None:
         sentinel = object()
+        manager = Mock()
+        manager.method_hub_settings.return_value = MethodHubSettings(enabled=False)
         with (
             patch.dict(
                 "os.environ",
-                {"MODEL_CONFIG_PATH": "/app/configs/development/proxy-openrouter.toml"},
+                {"MODEL_CONFIG_PATH": "/app/configs/proxy-openrouter.toml"},
                 clear=True,
             ),
+            patch(
+                "data_intelligence_api.application.workflow.ConfigManager",
+                return_value=manager,
+            ) as config_manager,
             patch(
                 "data_intelligence_api.application.workflow.create_example_pipeline",
                 return_value=sentinel,
@@ -32,10 +40,12 @@ class BackendWorkflowTests(unittest.TestCase):
             result = default_pipeline_factory(logger="logger")
 
         self.assertIs(result, sentinel)
+        config_manager.assert_called_once_with("/app/configs/proxy-openrouter.toml")
         create_pipeline.assert_called_once_with(
             logger="logger",
-            config_path="/app/configs/development/proxy-openrouter.toml",
+            config_manager=manager,
             use_llm_spec_builder=True,
+            mcp_client=None,
         )
 
     def test_request_maps_to_sdk_contracts(self) -> None:
@@ -81,6 +91,17 @@ class BackendWorkflowTests(unittest.TestCase):
             invocation = build_workflow_invocation(request, root)
 
         self.assertEqual(invocation.query.text, DEFAULT_QUERY)
+
+    def test_query_without_data_sources_is_allowed(self) -> None:
+        request = CreateResponseRequest(
+            input="hello",
+            data_corpus_package=DataCorpusPackageRequest(sources=[]),
+        )
+
+        invocation = build_workflow_invocation(request, Path.cwd())
+
+        self.assertEqual(invocation.query.text, "hello")
+        self.assertEqual(invocation.corpus_package.sources, [])
 
     def test_missing_source_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

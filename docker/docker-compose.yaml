@@ -3,40 +3,38 @@ name: data-intelligence
 services:
   api:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: Data-Intelligence-SDK/docker/Dockerfile
     image: data-intelligence-api:local
+    init: true
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     env_file:
       - path: .env
         required: false
     environment:
       DATA_CORPUS_ROOT: /app/data
-      DATABASE_URL: postgresql://${POSTGRES_USER:-data_intelligence}:${POSTGRES_PASSWORD:-data_intelligence}@db:5432/${POSTGRES_DB:-data_intelligence}
-      API_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
-      PIPELINE_TIMEOUT_SECONDS: "300"
-      SPEC_CONFIRMATION_TTL_SECONDS: "86400"
-      MAX_SPEC_REVISION_ROUNDS: "5"
-      MODEL_CONFIG_PATH: /app/configs/development/proxy-openrouter.toml
+      CHAT_STORE_DIR: /app/.data/chat
+      DATABASE_URL: postgresql://${POSTGRES_USER:-data_intelligence}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-data_intelligence}
+      MODEL_CONFIG_PATH: /app/configs/proxy-openrouter.toml
       PYTHONUNBUFFERED: "1"
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
-      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-}
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - ../data:/app/data:ro
-      - api_uploads:/app/.uploads
+      - ../configs/proxy-openrouter.toml:/app/configs/proxy-openrouter.toml:ro
+      - api_data:/app/data
+      - api_state:/app/.data
+      - api_artifacts:/app/artifacts
     restart: unless-stopped
+    stop_grace_period: 30s
 
   db:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-data_intelligence}
       POSTGRES_USER: ${POSTGRES_USER:-data_intelligence}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-data_intelligence}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     healthcheck:
       test:
         [
@@ -51,5 +49,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  api_uploads:
+  api_data:
+  api_state:
+  api_artifacts:
   postgres_data:

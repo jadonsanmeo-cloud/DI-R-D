@@ -20,6 +20,10 @@ class Engine(Protocol):
     def name(self) -> str:
         """Stable engine identifier."""
 
+    @property
+    def description(self) -> str:
+        """Human-readable routing description."""
+
     def can_handle(self, spec: ExecutionSpec) -> bool:
         """Return whether this engine is suitable for a spec."""
 

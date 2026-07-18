@@ -6,7 +6,7 @@ import copy
 import hashlib
 import hmac
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Literal
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,7 +16,6 @@ from data_intelligence_api.domain.runs import (
     RunConflictError,
     RunExpiredError,
     RunNotFoundError,
-    RunStoreError,
     StoredRun,
 )
 
@@ -42,6 +41,7 @@ class InMemoryRunRepository:
 
     def create_pending(self, **kwargs) -> StoredRun:
         response_id = kwargs["response_id"]
+        now = self.clock()
         run = StoredRun(
             response_id=response_id,
             status="awaiting_confirmation",
@@ -54,6 +54,8 @@ class InMemoryRunRepository:
             user_id=kwargs.get("user_id"),
             session_id=kwargs.get("session_id"),
             expires_at=kwargs["expires_at"],
+            created_at=now,
+            updated_at=now,
         )
         self.runs[response_id] = run
         self.revisions[response_id] = {1: copy.deepcopy(run.spec_payload)}
@@ -73,6 +75,30 @@ class InMemoryRunRepository:
 
     def get_authorized(self, response_id: str, token: str) -> StoredRun:
         return _copy_run(self._authorized(response_id, token))
+
+    def list_for_session(self, session_id: str, *, limit: int) -> list[StoredRun]:
+        runs = [run for run in self.runs.values() if run.session_id == session_id]
+        runs.sort(
+            key=lambda run: run.updated_at or run.created_at or run.expires_at,
+            reverse=True,
+        )
+        return [_copy_run(run) for run in runs[:limit]]
+
+    def get_for_session(self, response_id: str, session_id: str) -> StoredRun:
+        run = self.runs.get(response_id)
+        if run is None or run.session_id != session_id:
+            raise RunNotFoundError("Response was not found.")
+        return _copy_run(run)
+
+    def delete_for_session(self, response_id: str, session_id: str) -> None:
+        self.get_for_session(response_id, session_id)
+        del self.runs[response_id]
+        self.revisions.pop(response_id, None)
+        self.decisions = [
+            decision
+            for decision in self.decisions
+            if decision["response_id"] != response_id
+        ]
 
     def claim(
         self,
@@ -116,6 +142,7 @@ class InMemoryRunRepository:
         run.current_revision = revision
         run.spec_payload = copy.deepcopy(spec_payload)
         run.status = "awaiting_confirmation"
+        run.updated_at = self.clock()
         return _copy_run(run)
 
     def record_confirmation(self, response_id: str, revision: int) -> None:
@@ -123,14 +150,29 @@ class InMemoryRunRepository:
             {"response_id": response_id, "revision": revision, "action": "confirm"}
         )
 
-    def mark_completed(self, response_id: str) -> None:
-        self.runs[response_id].status = "completed"
+    def mark_completed(
+        self,
+        response_id: str,
+        *,
+        output_text: str,
+        evidence: dict | None,
+        response_metadata: dict,
+    ) -> None:
+        run = self.runs[response_id]
+        now = self.clock()
+        run.status = "completed"
+        run.output_text = output_text
+        run.evidence = copy.deepcopy(evidence)
+        run.response_metadata = copy.deepcopy(response_metadata)
+        run.completed_at = now
+        run.updated_at = now
 
     def mark_failed(self, response_id: str, code: str, message: str) -> None:
         run = self.runs[response_id]
         run.status = "failed"
         run.error_code = code
         run.error_message = message
+        run.updated_at = self.clock()
 
     def check_ready(self) -> bool:
         return True
@@ -195,6 +237,12 @@ class PostgresRunRepository:
             expires_at=row["expires_at"],
             error_code=row["error_code"],
             error_message=row["error_message"],
+            output_text=row.get("output_text"),
+            evidence=row.get("evidence"),
+            response_metadata=row.get("response_metadata"),
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+            completed_at=row.get("completed_at"),
         )
 
     def get_authorized_by_hash(self, response_id: str, token_hash: str) -> StoredRun:
@@ -230,6 +278,50 @@ class PostgresRunRepository:
 
     def get_authorized(self, response_id: str, token: str) -> StoredRun:
         return self.get_authorized_by_hash(response_id, hash_confirmation_token(token))
+
+    def list_for_session(self, session_id: str, *, limit: int) -> list[StoredRun]:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT r.*, s.spec_payload
+                FROM response_runs r
+                JOIN response_spec_revisions s
+                  ON s.response_id = r.response_id
+                 AND s.revision = r.current_revision
+                WHERE r.session_id = %s
+                ORDER BY r.updated_at DESC
+                LIMIT %s
+                """,
+                (session_id, limit),
+            )
+            return [self._row_to_run(row) for row in cursor.fetchall()]
+
+    def get_for_session(self, response_id: str, session_id: str) -> StoredRun:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT r.*, s.spec_payload
+                FROM response_runs r
+                JOIN response_spec_revisions s
+                  ON s.response_id = r.response_id
+                 AND s.revision = r.current_revision
+                WHERE r.response_id = %s AND r.session_id = %s
+                """,
+                (response_id, session_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise RunNotFoundError("Response was not found.")
+            return self._row_to_run(row)
+
+    def delete_for_session(self, response_id: str, session_id: str) -> None:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM response_runs WHERE response_id = %s AND session_id = %s",
+                (response_id, session_id),
+            )
+            if cursor.rowcount != 1:
+                raise RunNotFoundError("Response was not found.")
 
     def claim(self, response_id, token, *, revision, target_status):
         self.get_authorized(response_id, token)
@@ -310,11 +402,30 @@ class PostgresRunRepository:
                 (response_id, revision),
             )
 
-    def mark_completed(self, response_id: str) -> None:
+    def mark_completed(
+        self,
+        response_id: str,
+        *,
+        output_text: str,
+        evidence: dict | None,
+        response_metadata: dict,
+    ) -> None:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "UPDATE response_runs SET status = 'completed', completed_at = now(), updated_at = now() WHERE response_id = %s",
-                (response_id,),
+                """
+                UPDATE response_runs
+                SET status = 'completed', output_text = %s, evidence = %s,
+                    response_metadata = %s, completed_at = now(), updated_at = now()
+                WHERE response_id = %s
+                """,
+                (
+                    output_text,
+                    psycopg.types.json.Jsonb(evidence)
+                    if evidence is not None
+                    else None,
+                    psycopg.types.json.Jsonb(response_metadata),
+                    response_id,
+                ),
             )
 
     def mark_failed(self, response_id: str, code: str, message: str) -> None:

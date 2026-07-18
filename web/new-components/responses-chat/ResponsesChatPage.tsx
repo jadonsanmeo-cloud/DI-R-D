@@ -6,7 +6,7 @@ import MessageList from './MessageList';
 import SourceEditor from './SourceEditor';
 
 export default function ResponsesChatPage() {
-  const [sources, setSources] = useState(['data/data.csv']);
+  const [sources, setSources] = useState(['']);
   const [draft, setDraft] = useState('');
   const composerRef = useRef<HTMLDivElement>(null);
   const { messages, isStreaming, validationError, submit, stop, clear } = useResponsesChat();

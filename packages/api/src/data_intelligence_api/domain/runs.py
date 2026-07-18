@@ -48,3 +48,9 @@ class StoredRun:
     expires_at: datetime
     error_code: str | None = None
     error_message: str | None = None
+    output_text: str | None = None
+    evidence: dict | None = None
+    response_metadata: dict | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None

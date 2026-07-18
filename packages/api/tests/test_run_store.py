@@ -75,6 +75,71 @@ class RunStoreTests(unittest.TestCase):
 
         self.assertEqual(self.store.runs["resp_1"].status, "expired")
 
+    def test_mark_completed_persists_history_output(self) -> None:
+        self.store.mark_completed(
+            "resp_1",
+            output_text="Finished answer",
+            evidence={"sources": ["sales.csv"]},
+            response_metadata={"engine_name": "general"},
+        )
+
+        run = self.store.get_for_session("resp_1", "session-1")
+
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.output_text, "Finished answer")
+        self.assertEqual(run.evidence, {"sources": ["sales.csv"]})
+        self.assertEqual(run.response_metadata, {"engine_name": "general"})
+        self.assertEqual(run.completed_at, self.now)
+
+    def test_list_for_session_is_scoped_and_newest_first(self) -> None:
+        self.now += timedelta(minutes=1)
+        self.store.create_pending(
+            response_id="resp_2",
+            token_hash=hash_confirmation_token("secret-2"),
+            request_payload={"input": "newer"},
+            prepared_execution={"query": {"text": "newer"}},
+            intent_payload={"value": "reason"},
+            spec_payload={"intent": "reason", "objective": "newer"},
+            user_id="user-1",
+            session_id="session-1",
+            expires_at=self.now + timedelta(hours=1),
+        )
+        self.now += timedelta(minutes=1)
+        self.store.create_pending(
+            response_id="resp_other",
+            token_hash=hash_confirmation_token("other"),
+            request_payload={"input": "private"},
+            prepared_execution={"query": {"text": "private"}},
+            intent_payload={"value": "reason"},
+            spec_payload={"intent": "reason", "objective": "private"},
+            user_id="user-2",
+            session_id="session-2",
+            expires_at=self.now + timedelta(hours=1),
+        )
+
+        runs = self.store.list_for_session("session-1", limit=10)
+
+        self.assertEqual([run.response_id for run in runs], ["resp_2", "resp_1"])
+
+    def test_get_for_session_hides_another_session(self) -> None:
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_for_session("resp_1", "session-2")
+
+    def test_delete_for_session_removes_matching_run(self) -> None:
+        self.store.delete_for_session("resp_1", "session-1")
+
+        with self.assertRaises(RunNotFoundError):
+            self.store.get_for_session("resp_1", "session-1")
+
+    def test_delete_for_session_hides_another_session(self) -> None:
+        with self.assertRaises(RunNotFoundError):
+            self.store.delete_for_session("resp_1", "session-2")
+
+        self.assertEqual(
+            self.store.get_for_session("resp_1", "session-1").response_id,
+            "resp_1",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
