@@ -362,6 +362,7 @@ source = { editable = "packages/api" }
 dependencies = [
     { name = "data-intelligence-sdk" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "python-multipart" },
     { name = "uvicorn" },
 ]
@@ -370,6 +371,7 @@ dependencies = [
 requires-dist = [
     { name = "data-intelligence-sdk", editable = "packages/sdk" },
     { name = "fastapi", specifier = ">=0.139.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "uvicorn", specifier = ">=0.51.0" },
 ]

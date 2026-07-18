@@ -26,4 +26,5 @@ node_modules/
 .codex/
 logs/
 artifacts/
+AXIOM-main/
 #############

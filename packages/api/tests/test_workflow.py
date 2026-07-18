@@ -3,6 +3,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from data_intelligence_sdk.core.types import DataCorpusPackage, UserQuery
+
+from data_intelligence_api.http.schemas.responses import CreateResponseRequest, DataCorpusPackageRequest
 from data_intelligence_api.http.schemas.responses import (
     CreateResponseRequest,
     DataCorpusPackageRequest,
@@ -12,6 +15,10 @@ from data_intelligence_api.application.workflow import (
     SourceValidationError,
     build_workflow_invocation,
     default_pipeline_factory,
+)
+from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
+    ExampleIntentAnalyzer,
+    create_example_pipeline,
 )
 
 
@@ -36,7 +43,57 @@ class BackendWorkflowTests(unittest.TestCase):
             logger="logger",
             config_path="/app/configs/development/proxy-openrouter.toml",
             use_llm_spec_builder=True,
+            intent_service_base_url=None,
         )
+
+    def test_default_pipeline_factory_passes_intent_service_base_url(self) -> None:
+        sentinel = object()
+        with (
+            patch.dict(
+                "os.environ",
+                {"INTENT_SERVICE_BASE_URL": "http://localhost:8005"},
+                clear=True,
+            ),
+            patch(
+                "data_intelligence_api.application.workflow.create_example_pipeline",
+                return_value=sentinel,
+            ) as create_pipeline,
+        ):
+            result = default_pipeline_factory(logger="logger")
+
+        self.assertIs(result, sentinel)
+        create_pipeline.assert_called_once_with(
+            logger="logger",
+            config_path=None,
+            use_llm_spec_builder=True,
+            intent_service_base_url="http://localhost:8005",
+        )
+
+    def test_example_pipeline_uses_intent_service_analyzer_when_configured(self) -> None:
+        class FakeEngine:
+            name = "fake"
+
+            def can_handle(self, spec):
+                return True
+
+        with patch(
+            "data_intelligence_api.infrastructure.workflow.pipeline_factory.AxiomIntentServiceAnalyzer"
+        ) as analyzer_class:
+            pipeline = create_example_pipeline(
+                engine=FakeEngine(),
+                intent_service_base_url="http://localhost:8005",
+            )
+
+        analyzer_class.assert_called_once_with(base_url="http://localhost:8005")
+        self.assertIs(pipeline.intent_analyzer, analyzer_class.return_value)
+
+    def test_example_intent_analyzer_does_not_infer_intent_from_datahub(self) -> None:
+        intent = ExampleIntentAnalyzer().analyze(
+            UserQuery(text="Hello"),
+            DataCorpusPackage(sources=["orders.csv"]),
+        )
+
+        self.assertEqual(intent, "general")
 
     def test_request_maps_to_sdk_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
