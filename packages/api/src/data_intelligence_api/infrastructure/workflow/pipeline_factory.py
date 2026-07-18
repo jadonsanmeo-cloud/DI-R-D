@@ -40,6 +40,7 @@ from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
+from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
 
 
 def _as_result_dict(value: Any) -> dict[str, Any]:
@@ -148,7 +149,7 @@ class ExampleIntentAnalyzer:
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> Intent:
-        del session_context, user_context
+        del corpus_package, session_context, user_context
         text = query.text.lower()
         if any(
             term in text
@@ -165,8 +166,6 @@ class ExampleIntentAnalyzer:
         ):
             return "report"
         if any(
-            str(source).lower().endswith(".csv") for source in corpus_package.sources
-        ) or any(
             term in text
             for term in (
                 "data",
@@ -307,6 +306,7 @@ def create_example_pipeline(
     sandbox_provider: SandboxSessionProvider | None = None,
     artifact_store: object | None = None,
     logger: RuntimeLogger | None = None,
+    intent_service_base_url: str | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
     if artifact_store is None:
@@ -347,8 +347,13 @@ def create_example_pipeline(
     interface_registry = interface_registry or InMemoryInterfaceRegistry()
     registry = InMemoryEngineRegistry(fallback_engine=engine)
     registry.register(engine)
+    intent_analyzer = (
+        AxiomIntentServiceAnalyzer(base_url=intent_service_base_url)
+        if intent_service_base_url
+        else ExampleIntentAnalyzer()
+    )
     return DataIntelligencePipeline(
-        intent_analyzer=ExampleIntentAnalyzer(),
+        intent_analyzer=intent_analyzer,
         spec_builder=spec_builder,
         spec_confirmation=ExampleSpecConfirmation(),
         engine_registry=registry,

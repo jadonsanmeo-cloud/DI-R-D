@@ -91,6 +91,7 @@ def default_pipeline_factory(*, logger: RuntimeLogger) -> DataIntelligencePipeli
         logger=logger,
         config_path=os.getenv("MODEL_CONFIG_PATH") or None,
         use_llm_spec_builder=True,
+        intent_service_base_url=os.getenv("INTENT_SERVICE_BASE_URL") or None,
     )
 
 
