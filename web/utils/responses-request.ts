@@ -13,9 +13,9 @@ export function prepareResponseSubmission(
   sessionId: string,
 ): PreparedResponseSubmission | null {
   const normalizedSources = sources.map(source => source.trim()).filter(Boolean);
-  if (normalizedSources.length === 0) return null;
-
   const normalizedInput = input.trim();
+  if (!normalizedInput && normalizedSources.length === 0) return null;
+
   return {
     visibleInput: normalizedInput || DEFAULT_RESPONSE_QUERY,
     request: {

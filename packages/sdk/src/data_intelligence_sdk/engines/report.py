@@ -2157,6 +2157,10 @@ class ReportEngine:
     """LangGraph multi-agent report workflow with scoped planning and rendering."""
 
     name = "report"
+    description = (
+        "Structured multi-step report generation with planning, templates, "
+        "data analysis, charts, validation, and rendered report artifacts."
+    )
 
     def __init__(
         self,
@@ -2231,7 +2235,7 @@ class ReportEngine:
         )
 
     def can_handle(self, spec: ExecutionSpec) -> bool:
-        return spec.engine_hint == self.name or spec.intent == "report"
+        return spec.intent == "report"
 
     def run(
         self,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from deepagents import (
     GeneralPurposeSubagentProfile,
@@ -14,6 +14,7 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents._models import get_model_identifier, get_model_provider
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
@@ -46,6 +47,10 @@ class GeneralPurposeEngine:
     """Analyze staged data with one Deep Agent and one execution tool."""
 
     name = "general_purpose"
+    description = (
+        "General-purpose agent for exploratory data analysis, code execution, "
+        "question answering, and tasks that do not require a structured report."
+    )
 
     def __init__(
         self,
@@ -99,9 +104,8 @@ class GeneralPurposeEngine:
         )
 
     def can_handle(self, spec: ExecutionSpec) -> bool:
-        return spec.engine_hint == self.name or spec.intent in {
+        return spec.intent in {
             "reason",
-            "report",
             "general",
             "unknown",
         }
@@ -146,7 +150,45 @@ class GeneralPurposeEngine:
                 ]
             }
         )
-        answer = _last_message_text(result)
+        answer = _last_message_text(result).strip()
+        execution = _latest_successful_execution(runtime)
+        if not answer or execution is None:
+            runtime.run_context.record_step(
+                "deep_agent_retry_started",
+                inputs={
+                    "blank_answer": not bool(answer),
+                    "missing_successful_execution": execution is None,
+                },
+            )
+            result = agent.invoke(
+                {
+                    "messages": _retry_messages(result, spec.objective),
+                }
+            )
+            answer = _last_message_text(result).strip()
+            execution = _latest_successful_execution(runtime)
+            runtime.run_context.record_step(
+                "deep_agent_retry_completed",
+                outputs={
+                    "has_answer": bool(answer),
+                    "has_successful_execution": execution is not None,
+                },
+            )
+        if execution is None:
+            raise RuntimeError(
+                "GeneralPurposeEngine did not produce a successful "
+                "execute_python result."
+            )
+        if not answer:
+            runtime.run_context.record_step(
+                "deep_agent_fallback_synthesis",
+                inputs={"objective": spec.objective},
+            )
+            answer = self._synthesize_execution_answer(spec, execution).strip()
+        if not answer:
+            answer = _render_execution_result(execution).strip()
+        if not answer:
+            raise RuntimeError("GeneralPurposeEngine produced no usable answer.")
         runtime.run_context.record_step(
             "deep_agent_completed",
             outputs={"answer": answer},
@@ -159,6 +201,33 @@ class GeneralPurposeEngine:
                 "sandbox_sources": dict(runtime.sandbox.source_paths),
             },
         )
+
+    def _synthesize_execution_answer(
+        self,
+        spec: ExecutionSpec,
+        execution: dict[str, Any],
+    ) -> str:
+        payload = json.dumps(
+            {
+                "objective": spec.objective,
+                "execution_result": _execution_value(execution),
+            },
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+        response = self.llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "Write a concise final answer using only the supplied "
+                        "successful execution result. Do not invent facts."
+                    )
+                ),
+                HumanMessage(content=payload[:16_000]),
+            ]
+        )
+        return _message_text(response)
 
     def _register_minimal_profile(self) -> None:
         identifier = get_model_identifier(self.llm)
@@ -218,16 +287,10 @@ class GeneralPurposeEngine:
         )
 
 
-def _last_message_text(result: object) -> str:
-    if not isinstance(result, dict):
-        return str(result)
-    messages = result.get("messages") or []
-    if not messages:
-        raise RuntimeError("Deep Agent returned no messages.")
-    last_message = messages[-1]
-    content = getattr(last_message, "content", None)
-    if content is None and isinstance(last_message, dict):
-        content = last_message.get("content")
+def _message_text(message: object) -> str:
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -237,6 +300,63 @@ def _last_message_text(result: object) -> str:
                 text_parts.append(str(block.get("text", "")))
             elif isinstance(block, str):
                 text_parts.append(block)
-        if text_parts:
-            return "\n".join(text_parts)
-    return str(content)
+        return "\n".join(text_parts)
+    return "" if content is None else str(content)
+
+
+def _last_message_text(result: object) -> str:
+    if not isinstance(result, dict):
+        return _message_text(result)
+    messages = result.get("messages") or []
+    if not messages:
+        raise RuntimeError("Deep Agent returned no messages.")
+    return _message_text(messages[-1])
+
+
+def _retry_messages(result: object, objective: str) -> list[object]:
+    previous = result.get("messages") if isinstance(result, dict) else None
+    messages = list(previous) if isinstance(previous, list) else []
+    if not messages:
+        messages.append({"role": "user", "content": objective})
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "The previous attempt did not produce a usable grounded answer. "
+                "Call execute_python with a complete analysis of the staged data, "
+                "then return a non-empty final answer based only on the successful "
+                "execution result."
+            ),
+        }
+    )
+    return messages
+
+
+def _latest_successful_execution(
+    runtime: EngineRuntimeContext,
+) -> dict[str, Any] | None:
+    for call in reversed(runtime.run_context.trace.method_calls):
+        if (
+            call.method_name == "execute_python"
+            and call.status == "completed"
+            and call.outputs.get("success") is True
+        ):
+            return call.outputs
+    return None
+
+
+def _execution_value(execution: dict[str, Any]) -> object | None:
+    result = execution.get("result")
+    if result is not None and result != "":
+        return result
+    stdout = str(execution.get("stdout") or "").strip()
+    return stdout or None
+
+
+def _render_execution_result(execution: dict[str, Any]) -> str:
+    value = _execution_value(execution)
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    return str(value)

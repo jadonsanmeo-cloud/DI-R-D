@@ -54,7 +54,7 @@ export default function SourceEditor({ sources, disabled, onChange }: Props) {
                   value={source}
                   disabled={disabled}
                   onChange={event => update(index, event.target.value)}
-                  placeholder='data/data.csv'
+                  placeholder='data.csv'
                   aria-label={`Corpus source ${index + 1}`}
                   className='min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 font-mono text-sm text-stone-800 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/15 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-black/20 dark:text-stone-100'
                 />
@@ -79,7 +79,7 @@ export default function SourceEditor({ sources, disabled, onChange }: Props) {
             <PlusOutlined /> Add source
           </button>
           <p className='mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400'>
-            Paths are resolved by the backend under DATA_CORPUS_ROOT.
+            Optional paths are resolved under DATA_CORPUS_ROOT; for Docker use paths relative to /app/data.
           </p>
         </div>
       )}

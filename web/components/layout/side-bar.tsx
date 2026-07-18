@@ -1,10 +1,14 @@
 import { ChatContext } from '@/app/chat-context';
-import { delDialogue } from '@/client/api/request';
-import { apiInterceptors } from '@/client/api/tools/interceptors';
 import { DarkSvg, ModelSvg, SunnySvg } from '@/components/icons';
 import UserBar from '@/new-components/layout/UserBar';
-import type { IChatDialogueSchema } from '@/types/chat';
+import type { ResponseHistorySummary } from '@/types/responses';
 import { STORAGE_LANG_KEY, STORAGE_THEME_KEY } from '@/utils/constants/index';
+import {
+  RESPONSES_HISTORY_CHANGED_EVENT,
+  deleteResponseHistory,
+  getResponseHistorySessionId,
+  listResponseHistory,
+} from '@/utils/responses-history';
 import Icon, {
   ApartmentOutlined,
   ApiOutlined,
@@ -73,21 +77,36 @@ function SideBar() {
   const { t, i18n } = useTranslation();
   const [logo, setLogo] = useState<string>('/logo_zh_latest.png');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [dialogueList, setDialogueList] = useState<IChatDialogueSchema[]>([]);
-  const loadingDialogues = false;
+  const [historyItems, setHistoryItems] = useState<ResponseHistorySummary[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const handleDeleteDialogue = useCallback(
-    async (e: React.MouseEvent, convUid: string) => {
+  const loadHistory = useCallback(async () => {
+    const sessionId = getResponseHistorySessionId();
+    if (!sessionId) return;
+    setLoadingHistory(true);
+    setHistoryError(null);
+    try {
+      setHistoryItems(await listResponseHistory(sessionId));
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Failed to load history.');
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
+  const handleDeleteHistory = useCallback(
+    async (e: React.MouseEvent, responseId: string) => {
       e.stopPropagation();
       e.preventDefault();
+      const sessionId = getResponseHistorySessionId();
+      if (!sessionId) return;
       try {
-        const [err] = await apiInterceptors(delDialogue(convUid));
-        if (!err) {
-          setDialogueList(prev => prev.filter(d => d.conv_uid !== convUid));
-          message.success(t('cmp.deleted'));
-        }
+        await deleteResponseHistory(responseId, sessionId);
+        setHistoryItems(previous => previous.filter(item => item.response_id !== responseId));
+        message.success(t('cmp.deleted'));
       } catch (error) {
-        console.error('Failed to delete dialogue', error);
+        message.error(error instanceof Error ? error.message : 'Failed to delete task.');
       }
     },
     [t],
@@ -266,16 +285,18 @@ function SideBar() {
     setLogo(mode === 'dark' ? '/logo_s_latest.png' : '/logo_zh_latest.png');
   }, [mode]);
 
+  useEffect(() => {
+    if (!router.isReady) return;
+    void loadHistory();
+    window.addEventListener(RESPONSES_HISTORY_CHANGED_EVENT, loadHistory);
+    return () => window.removeEventListener(RESPONSES_HISTORY_CHANGED_EVENT, loadHistory);
+  }, [loadHistory, router.isReady]);
+
   // ============ COLLAPSED SIDEBAR ============
   if (!isMenuExpand) {
     return (
       <div className='flex flex-col justify-between pt-4 h-screen bg-bar dark:bg-[#232734] animate-fade animate-duration-300'>
         <div>
-          <div className='flex flex-col items-center pb-2'>
-            <Link href='/' className='flex justify-center items-center pb-2'>
-              <Image src='/LOGO_SMALL.png' alt='DB-GPT' width={40} height={40} />
-            </Link>
-          </div>
           <div className='flex flex-col gap-4 items-center'>
             {functions.map(item => (
               <Link key={item.key} className='h-12 flex items-center' href={item.path}>
@@ -291,29 +312,6 @@ function SideBar() {
                 </Tooltip>
               </Link>
             ))}
-          </div>
-          {/* Settings icon */}
-          <div className='flex flex-col gap-4 items-center mt-4'>
-            <Popover
-              content={settingsContent}
-              trigger='click'
-              placement='rightTop'
-              open={settingsOpen}
-              onOpenChange={setSettingsOpen}
-              arrow={false}
-              overlayInnerStyle={{ padding: 0, borderRadius: 12, overflow: 'hidden' }}
-            >
-              <Tooltip title={t('construct')} placement='right'>
-                <div className={smallMenuItemStyle(isSettingsActive)}>
-                  <SidebarPictureIcon
-                    src='/pictures/app.png'
-                    activeSrc='/pictures/app_active.png'
-                    active={isSettingsActive}
-                    alt='construct_icon_collapsed'
-                  />
-                </div>
-              </Tooltip>
-            </Popover>
           </div>
         </div>
         <div className='py-4'>
@@ -372,32 +370,37 @@ function SideBar() {
         </div>
       </div>
       <div className='flex-1 overflow-y-auto min-h-0'>
-        {loadingDialogues ? (
+        {loadingHistory ? (
           <div className='px-2 pt-2'>
             <Skeleton active title={false} paragraph={{ rows: 4, width: '100%' }} />
           </div>
-        ) : dialogueList.length > 0 ? (
+        ) : historyError ? (
+          <div className='px-3 py-8 text-center'>
+            <p className='text-xs text-red-400'>{historyError}</p>
+            <button className='mt-2 text-xs font-medium text-blue-500 hover:text-blue-600' onClick={loadHistory}>
+              Retry
+            </button>
+          </div>
+        ) : historyItems.length > 0 ? (
           <div className='space-y-0.5'>
-            {dialogueList.map(conv => (
+            {historyItems.map(item => (
               <Link
-                key={conv.conv_uid}
-                href={`/?id=${conv.conv_uid}`}
+                key={item.response_id}
+                href={`/?response_id=${item.response_id}`}
                 className='flex items-start gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors group hover:bg-[#F1F5F9] dark:hover:bg-theme-dark'
               >
                 <MessageOutlined className='text-gray-400 flex-shrink-0 text-xs mt-1' />
                 <div className='flex-1 min-w-0'>
                   <div className='font-medium truncate leading-5 text-gray-700 dark:text-gray-300'>
-                    {typeof conv.user_input === 'string'
-                      ? conv.user_input.slice(0, 40) || 'New Conversation'
-                      : 'New Conversation'}
+                    {item.title.slice(0, 40) || 'New Task'}
                   </div>
-                  {conv.gmt_created && (
-                    <div className='text-[11px] text-gray-400 mt-0.5'>{formatRelativeTime(conv.gmt_created)}</div>
+                  {item.updated_at && (
+                    <div className='text-[11px] text-gray-400 mt-0.5'>{formatRelativeTime(item.updated_at)}</div>
                   )}
                 </div>
                 <Tooltip title={t('cmp.delete')}>
                   <DeleteOutlined
-                    onClick={e => handleDeleteDialogue(e, conv.conv_uid)}
+                    onClick={e => handleDeleteHistory(e, item.response_id)}
                     className='text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-1'
                   />
                 </Tooltip>

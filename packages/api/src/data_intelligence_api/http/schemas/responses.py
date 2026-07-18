@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class DataCorpusPackageRequest(BaseModel):
-    sources: list[str]
+    sources: list[str] = Field(default_factory=list)
     schemas: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -56,3 +56,27 @@ class ResponseDecisionRequest(BaseModel):
         ):
             raise ValueError("Revise decisions require feedback or edited_spec.")
         return self
+
+
+class ResponseHistorySummary(BaseModel):
+    response_id: str
+    title: str
+    status: str
+    output_preview: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    completed_at: str | None = None
+
+
+class ResponseHistoryDetail(BaseModel):
+    response_id: str
+    status: str
+    input: str
+    spec: dict[str, Any]
+    output_text: str | None = None
+    evidence: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, str] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    completed_at: str | None = None

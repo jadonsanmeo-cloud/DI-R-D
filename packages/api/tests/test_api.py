@@ -5,6 +5,7 @@ import unittest
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
 from data_intelligence_api.main import create_app
@@ -36,6 +37,7 @@ class AsgiResponse:
 async def asgi_request(
     app, method, path, *, json_body=None, content=None, headers=None
 ):
+    target = urlsplit(path)
     body = json.dumps(json_body).encode() if json_body is not None else (content or b"")
     request_headers = {key.lower(): value for key, value in (headers or {}).items()}
     if json_body is not None:
@@ -46,9 +48,9 @@ async def asgi_request(
         "http_version": "1.1",
         "method": method,
         "scheme": "http",
-        "path": path,
-        "raw_path": path.encode("ascii"),
-        "query_string": b"",
+        "path": target.path,
+        "raw_path": target.path.encode("ascii"),
+        "query_string": target.query.encode("ascii"),
         "root_path": "",
         "headers": [
             (key.encode(), value.encode()) for key, value in request_headers.items()
@@ -200,6 +202,19 @@ class BackendApiTests(unittest.TestCase):
         confirmation = events[-1][1]
         return response, events, confirmation
 
+    def complete_response(self, app, source="sales.csv"):
+        _, _, pending = self.create_pending(app, source)
+        completed = asyncio.run(
+            asgi_request(
+                app,
+                "POST",
+                f"/api/v1/responses/{pending['response_id']}/decision",
+                headers={"X-Confirmation-Token": pending["confirmation_token"]},
+                json_body={"action": "confirm", "revision": pending["revision"]},
+            )
+        )
+        return pending, parse_sse(completed)
+
     def test_initial_request_pauses_before_engine_execution(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
@@ -252,6 +267,103 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(events[-1][1]["response_id"], response_id)
         self.assertEqual(factory.revise_calls, 1)
         self.assertEqual(factory.execute_calls, 1)
+
+    def test_response_history_lists_completed_runs_for_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
+            app = self.make_app(temp_dir)
+            pending, _ = self.complete_response(app)
+
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    "/api/v1/responses?session_id=session-1&limit=20",
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["items"][0]["response_id"], pending["response_id"]
+        )
+        self.assertEqual(response.json()["items"][0]["title"], "What is total revenue?")
+        self.assertEqual(response.json()["items"][0]["status"], "completed")
+        self.assertIn("Answer for", response.json()["items"][0]["output_preview"])
+
+    def test_response_history_detail_restores_output_and_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
+            app = self.make_app(temp_dir)
+            pending, _ = self.complete_response(app)
+
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    f"/api/v1/responses/{pending['response_id']}/history?session_id=session-1",
+                )
+            )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["input"], "What is total revenue?")
+        self.assertEqual(payload["output_text"], "Answer for: What is total revenue?")
+        self.assertEqual(Path(payload["evidence"]["sources"][0]).name, "sales.csv")
+        self.assertEqual(payload["metadata"], {"engine_name": "fake"})
+        self.assertTrue(payload["spec"]["confirmed"])
+
+    def test_response_history_hides_runs_from_another_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
+            app = self.make_app(temp_dir)
+            pending, _ = self.complete_response(app)
+
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    f"/api/v1/responses/{pending['response_id']}/history?session_id=session-2",
+                )
+            )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_response_history_delete_is_session_scoped(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
+            app = self.make_app(temp_dir)
+            pending, _ = self.complete_response(app)
+
+            deleted = asyncio.run(
+                asgi_request(
+                    app,
+                    "DELETE",
+                    f"/api/v1/responses/{pending['response_id']}?session_id=session-1",
+                )
+            )
+            missing = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    f"/api/v1/responses/{pending['response_id']}/history?session_id=session-1",
+                )
+            )
+
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(missing.status_code, 404)
+
+    def test_response_history_limit_is_bounded(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = self.make_app(temp_dir)
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "GET",
+                    "/api/v1/responses?session_id=session-1&limit=101",
+                )
+            )
+
+        self.assertEqual(response.status_code, 422)
 
     def test_structured_edit_can_be_revised_without_feedback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -325,7 +437,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
     def test_expired_confirmation_returns_gone(self):
-        now = datetime(2026, 7, 14, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         store = InMemoryRunRepository(clock=lambda: now + timedelta(days=2))
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
@@ -380,11 +492,23 @@ class BackendApiTests(unittest.TestCase):
                     },
                 )
             )
+            delete_cors = asyncio.run(
+                asgi_request(
+                    app,
+                    "OPTIONS",
+                    "/api/v1/responses/x",
+                    headers={
+                        "Origin": "http://localhost:3000",
+                        "Access-Control-Request-Method": "DELETE",
+                    },
+                )
+            )
         self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(cors.status_code, 200)
         self.assertIn(
             "X-Confirmation-Token", cors.headers["access-control-allow-headers"]
         )
+        self.assertEqual(delete_cors.status_code, 200)
 
 
 if __name__ == "__main__":

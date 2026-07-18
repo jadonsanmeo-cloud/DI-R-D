@@ -19,7 +19,9 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
+from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
+from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     create_example_pipeline,
 )
@@ -36,8 +38,6 @@ class SourceValidationError(ValueError):
 
 
 def resolve_sources(sources: list[str], data_corpus_root: Path) -> list[str]:
-    if not sources:
-        raise SourceValidationError("At least one data corpus source is required.")
     root = data_corpus_root.resolve()
     resolved_sources: list[str] = []
     for source in sources:
@@ -88,11 +88,19 @@ def build_workflow_invocation(
 
 
 def default_pipeline_factory(*, logger: RuntimeLogger) -> DataIntelligencePipeline:
+    config_manager = ConfigManager(os.getenv("MODEL_CONFIG_PATH") or None)
+    method_hub_settings = config_manager.method_hub_settings()
+    mcp_client = (
+        MCPMethodClient(method_hub_settings.endpoint)
+        if method_hub_settings.enabled
+        else None
+    )
     return create_example_pipeline(
         logger=logger,
-        config_path=os.getenv("MODEL_CONFIG_PATH") or None,
+        config_manager=config_manager,
         use_llm_spec_builder=True,
         intent_service_base_url=os.getenv("INTENT_SERVICE_BASE_URL") or None,
+        mcp_client=mcp_client,
     )
 
 

@@ -28,6 +28,10 @@ from data_intelligence_sdk.core.types import (
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.engines.report import ReportEngine
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
+from data_intelligence_sdk.registry.engine_selector import (
+    EngineSelector,
+    LLMEngineSelector,
+)
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.deep_agent_sandbox import (
     DeepAgentSandboxSession,
@@ -297,6 +301,7 @@ def create_example_pipeline(
     config_manager: ConfigManager | None = None,
     spec_builder: object | None = None,
     spec_llm_client: LLMClient | None = None,
+    engine_selector: EngineSelector | None = None,
     use_llm_spec_builder: bool = False,
     allow_method_generation: bool = True,
     method_hub: MethodHub | None = None,
@@ -310,19 +315,20 @@ def create_example_pipeline(
     intent_service_base_url: str | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
+    shared_llm_client = spec_llm_client
     if artifact_store is None:
         artifact_settings = resolved_config_manager.artifact_settings()
         artifact_store = FilesystemArtifactStore(artifact_settings.root)
     if spec_builder is None:
         if use_llm_spec_builder:
             settings = resolved_config_manager.openrouter_settings()
-            spec_llm_client = spec_llm_client or OpenAICompatibleLLMClient(
+            shared_llm_client = shared_llm_client or OpenAICompatibleLLMClient(
                 base_url=settings.base_url,
                 api_key=api_key or settings.api_key,
                 model=model or settings.model,
             )
             spec_builder = LLMSpecBuilder(
-                spec_llm_client,
+                shared_llm_client,
                 require_actionable_spec=True,
                 default_missing_requirements=True,
             )
@@ -336,18 +342,41 @@ def create_example_pipeline(
             )
     if engine is None:
         if llm is not None:
-            engine = GeneralPurposeEngine(llm=llm)
+            general_engine = GeneralPurposeEngine(llm=llm)
+            report_engine = ReportEngine(llm=llm)
         else:
-            engine = GeneralPurposeEngine(
+            general_engine = GeneralPurposeEngine(
                 model=model,
                 api_key=api_key,
                 config_path=config_path,
                 config_manager=resolved_config_manager,
                 allow_method_generation=allow_method_generation,
             )
+            report_engine = ReportEngine(
+                model=model,
+                api_key=api_key,
+                config_path=config_path,
+                config_manager=resolved_config_manager,
+            )
+        if engine_selector is None:
+            if shared_llm_client is None:
+                settings = resolved_config_manager.openrouter_settings()
+                shared_llm_client = OpenAICompatibleLLMClient(
+                    base_url=settings.base_url,
+                    api_key=api_key or settings.api_key,
+                    model=model or settings.model,
+                )
+            engine_selector = LLMEngineSelector(shared_llm_client)
+        registry = InMemoryEngineRegistry(
+            selector=engine_selector,
+            fallback_engine_name=general_engine.name,
+        )
+        registry.register(general_engine)
+        registry.register(report_engine)
+    else:
+        registry = InMemoryEngineRegistry(fallback_engine=engine)
+        registry.register(engine)
     interface_registry = interface_registry or InMemoryInterfaceRegistry()
-    registry = InMemoryEngineRegistry(fallback_engine=engine)
-    registry.register(engine)
     intent_analyzer = (
         AxiomIntentServiceAnalyzer(base_url=intent_service_base_url)
         if intent_service_base_url

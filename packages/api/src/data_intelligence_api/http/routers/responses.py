@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Thread
 from typing import AsyncIterator, Callable
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
@@ -28,6 +28,8 @@ from data_intelligence_api.infrastructure.persistence.run_store import (
 from data_intelligence_api.http.schemas.responses import (
     CreateResponseRequest,
     ResponseDecisionRequest,
+    ResponseHistoryDetail,
+    ResponseHistorySummary,
 )
 from data_intelligence_api.http.streaming import (
     PipelineLogMessage,
@@ -158,6 +160,60 @@ def _edited_spec(payload: dict, intent: str) -> ExecutionSpec:
     )
 
 
+def _isoformat(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _history_title(run) -> str:
+    input_text = run.request_payload.get("input")
+    if isinstance(input_text, str) and input_text.strip():
+        return input_text.strip()
+    objective = run.spec_payload.get("objective")
+    if isinstance(objective, str) and objective.strip():
+        return objective.strip()
+    return "Untitled task"
+
+
+def _history_summary(run) -> ResponseHistorySummary:
+    output_preview = run.output_text.strip()[:160] if run.output_text else None
+    return ResponseHistorySummary(
+        response_id=run.response_id,
+        title=_history_title(run),
+        status=run.status,
+        output_preview=output_preview,
+        created_at=_isoformat(run.created_at),
+        updated_at=_isoformat(run.updated_at),
+        completed_at=_isoformat(run.completed_at),
+    )
+
+
+def _history_detail(run) -> ResponseHistoryDetail:
+    spec_payload = dict(run.spec_payload)
+    if run.status == "completed":
+        spec_payload["confirmed"] = True
+    input_text = run.request_payload.get("input")
+    return ResponseHistoryDetail(
+        response_id=run.response_id,
+        status=run.status,
+        input=input_text if isinstance(input_text, str) else "",
+        spec=spec_payload,
+        output_text=run.output_text,
+        evidence=run.evidence,
+        metadata=run.response_metadata or {},
+        error=(
+            {
+                "code": run.error_code or "response_failed",
+                "message": run.error_message or "The response failed.",
+            }
+            if run.error_code or run.error_message
+            else None
+        ),
+        created_at=_isoformat(run.created_at),
+        updated_at=_isoformat(run.updated_at),
+        completed_at=_isoformat(run.completed_at),
+    )
+
+
 def create_responses_router(
     settings: ApiSettings,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
@@ -236,6 +292,38 @@ def create_responses_router(
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+    @router.get("/api/v1/responses")
+    async def list_response_history(
+        session_id: str = Query(min_length=1),
+        limit: int = Query(default=50, ge=1, le=100),
+    ) -> JSONResponse:
+        runs = run_repository.list_for_session(session_id, limit=limit)
+        return JSONResponse(
+            {"items": [_history_summary(run).model_dump(mode="json") for run in runs]}
+        )
+
+    @router.get("/api/v1/responses/{response_id}/history")
+    async def get_response_history(
+        response_id: str,
+        session_id: str = Query(min_length=1),
+    ) -> JSONResponse:
+        try:
+            run = run_repository.get_for_session(response_id, session_id)
+        except Exception as error:
+            _raise_store_error(error)
+        return JSONResponse(_history_detail(run).model_dump(mode="json"))
+
+    @router.delete("/api/v1/responses/{response_id}", status_code=204)
+    async def delete_response_history(
+        response_id: str,
+        session_id: str = Query(min_length=1),
+    ) -> Response:
+        try:
+            run_repository.delete_for_session(response_id, session_id)
+        except Exception as error:
+            _raise_store_error(error)
+        return Response(status_code=204)
+
     @router.get("/api/v1/responses/{response_id}")
     async def get_response(
         response_id: str,
@@ -304,19 +392,18 @@ def create_responses_router(
             feedback = (decision.feedback or "").strip()
 
             async def revision_stream() -> AsyncIterator[str]:
-                operation = lambda: (
-                    revise_workflow(
-                        prepared,
-                        base_spec,
-                        feedback,
-                        event_logger,
-                        pipeline_factory,
-                    )
-                    if feedback
-                    else lambda: base_spec
-                )
+                def execute_revision() -> ExecutionSpec:
+                    if feedback:
+                        return revise_workflow(
+                            prepared,
+                            base_spec,
+                            feedback,
+                            event_logger,
+                            pipeline_factory,
+                        )
+                    return base_spec
+
                 if not feedback:
-                    operation = lambda: base_spec
                     event_logger.log(
                         "pipeline.spec_revision_started", {"structured_edit": True}
                     )
@@ -326,7 +413,7 @@ def create_responses_router(
                 async for message in _stream_operation(
                     response_id=response_id,
                     messages=messages,
-                    operation=operation,
+                    operation=execute_revision,
                     settings=settings,
                     error_code="spec_revision_failed",
                     safe_error="The execution spec could not be revised.",
@@ -378,12 +465,15 @@ def create_responses_router(
         run_repository.record_confirmation(response_id, decision.revision)
 
         async def execution_stream() -> AsyncIterator[str]:
+            def execute_workflow() -> FinalResponse:
+                return execute_prepared_workflow(
+                    prepared, current_spec, event_logger, pipeline_factory
+                )
+
             async for message in _stream_operation(
                 response_id=response_id,
                 messages=messages,
-                operation=lambda: execute_prepared_workflow(
-                    prepared, current_spec, event_logger, pipeline_factory
-                ),
+                operation=execute_workflow,
                 settings=settings,
                 error_code="pipeline_execution_failed",
                 safe_error="The data intelligence workflow could not complete.",
@@ -412,6 +502,12 @@ def create_responses_router(
                         )
                         return
                     output_text = str(final_response.answer)
+                    evidence = (
+                        asdict(final_response.evidence)
+                        if final_response.evidence is not None
+                        else None
+                    )
+                    response_metadata = dict(final_response.metadata)
                     for delta in chunk_text(output_text):
                         yield encode_sse(
                             "response.output_text.delta",
@@ -429,7 +525,12 @@ def create_responses_router(
                             "text": output_text,
                         },
                     )
-                    run_repository.mark_completed(response_id)
+                    run_repository.mark_completed(
+                        response_id,
+                        output_text=output_text,
+                        evidence=evidence,
+                        response_metadata=response_metadata,
+                    )
                     yield encode_sse(
                         "response.completed",
                         {
@@ -440,12 +541,8 @@ def create_responses_router(
                                 "status": "completed",
                                 "output_text": output_text,
                             },
-                            "evidence": (
-                                asdict(final_response.evidence)
-                                if final_response.evidence is not None
-                                else None
-                            ),
-                            "metadata": dict(final_response.metadata),
+                            "evidence": evidence,
+                            "metadata": response_metadata,
                         },
                     )
 

@@ -1,13 +1,41 @@
-# Model provider configuration. Runtime secrets are resolved from the environment.
 [models]
 [[models.llms]]
-name = "${env:LLM_MODEL_NAME}"
+name = "nvidia/nemotron-3-nano-30b-a3b:free"
 provider = "proxy/openrouter"
 api_base = "https://openrouter.ai/api/v1"
 api_key = "${env:OPENROUTER_API_KEY}"
 
 [[models.embeddings]]
-name = "${env:EMBEDDING_MODEL_NAME}"
+name = "openai/text-embedding-3-small"
 provider = "proxy/openrouter"
 api_url = "https://openrouter.ai/api/v1/embeddings"
 api_key = "${env:OPENROUTER_API_KEY}"
+
+[sandbox]
+enabled = true
+endpoint = "http://host.docker.internal:8004"
+workspace_id = "00000000-0000-0000-0000-000000000001"
+token = "${env:SANDBOX_TOKEN}"
+
+[method_hub]
+enabled = false
+endpoint = "https://methods-example.ngrok.app/mcp"
+
+[artifacts]
+root = "/app/artifacts"
+
+[api]
+cors_origins = [
+  "http://SERVER_IP:3000",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+]
+pipeline_timeout_seconds = 300
+spec_confirmation_ttl_seconds = 86400
+max_spec_revision_rounds = 5
+max_upload_bytes = 52428800
+
+[api.chat]
+base_url = "https://openrouter.ai/api/v1"
+model = "nvidia/nemotron-3-nano-30b-a3b:free"
+api_key_env = "OPENROUTER_API_KEY"

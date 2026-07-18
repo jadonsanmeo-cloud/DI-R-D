@@ -20,6 +20,11 @@ import type { EditableExecutionSpec, ResponseConfirmationState } from '@/types/r
 import type { ChatReplayPayload } from '@/types/scheduled-task';
 import axios from '@/utils/ctx-axios';
 import { sendSpacePostRequest } from '@/utils/request';
+import {
+  getResponseHistory,
+  getResponseHistorySessionId,
+  notifyResponseHistoryChanged,
+} from '@/utils/responses-history';
 import ApiOutlined from '@ant-design/icons/ApiOutlined';
 import ArrowUpOutlined from '@ant-design/icons/ArrowUpOutlined';
 import BookOutlined from '@ant-design/icons/BookOutlined';
@@ -37,7 +42,6 @@ import PaperClipOutlined from '@ant-design/icons/PaperClipOutlined';
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
 import ReadOutlined from '@ant-design/icons/ReadOutlined';
 import RightOutlined from '@ant-design/icons/RightOutlined';
-import ThunderboltOutlined from '@ant-design/icons/ThunderboltOutlined';
 import UploadOutlined from '@ant-design/icons/UploadOutlined';
 import { useRequest } from 'ahooks';
 import { Button, ConfigProvider, Dropdown, Input, List, Modal, Spin, Tag, Tooltip, message } from 'antd';
@@ -140,6 +144,8 @@ interface ChatMessage {
   taskPlan?: TaskItem[];
   attachedConnectors?: AttachedConnector[];
   confirmation?: ResponseConfirmationState;
+  evidence?: unknown;
+  responseMetadata?: Record<string, unknown>;
 }
 
 interface ExecutionStep {
@@ -686,9 +692,10 @@ const Playground: NextPage = () => {
 
   useEffect(() => {
     const convId = router.query.id as string | undefined;
+    const historyResponseId = router.query.response_id as string | undefined;
     if (convId && convId !== conversationId) {
       loadConversation(convId);
-    } else if (!convId && conversationId) {
+    } else if (!convId && !historyResponseId && conversationId) {
       // URL 中 id 消失（如点击 new_task / 探索广场），清空当前会话状态
       setMessages([]);
       setConversationId(null);
@@ -706,7 +713,71 @@ const Playground: NextPage = () => {
       setSummaryComplete(false);
       setTaskPlan([]);
     }
-  }, [router.query.id]);
+  }, [router.query.id, router.query.response_id]);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    const responseId = router.query.response_id as string | undefined;
+    if (!responseId) return;
+    const sessionId = getResponseHistorySessionId();
+    if (!sessionId) return;
+
+    let active = true;
+    setHistoryLoading(true);
+    getResponseHistory(responseId, sessionId)
+      .then(detail => {
+        if (!active) return;
+        const viewId = `history-view-${detail.response_id}`;
+        const restoredTasks: TaskItem[] = [
+          ...(detail.spec.objective
+            ? [{ content: detail.spec.objective, status: 'completed' as const, priority: 'high' as const }]
+            : []),
+          ...detail.spec.capability_requirements.map(requirement => ({
+            content: requirement.description || requirement.name,
+            status: 'completed' as const,
+            priority: 'medium' as const,
+          })),
+        ];
+        const restoredOutput =
+          detail.output_text || detail.error?.message || 'Completed output was not persisted for this earlier task.';
+        const cleanedOutput = cleanFinalContent(restoredOutput);
+        setMessages([
+          {
+            id: `history-human-${detail.response_id}`,
+            role: 'human',
+            context: detail.input,
+          },
+          {
+            id: viewId,
+            role: 'view',
+            context: cleanedOutput,
+            thinking: false,
+            taskPlan: restoredTasks,
+            evidence: detail.evidence,
+            responseMetadata: detail.metadata,
+          },
+        ]);
+        setConversationId(detail.response_id);
+        setTaskPlan(restoredTasks);
+        setExecutionMap({});
+        setActiveMessageId(viewId);
+        setActiveViewMsgId(viewId);
+        setStreamingSummary(cleanedOutput);
+        setSummaryComplete(true);
+      })
+      .catch(error => {
+        if (active) {
+          message.error(error instanceof Error ? error.message : t('pg.loadHistoryFailed'));
+        }
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [router.isReady, router.query.response_id, t]);
 
   useEffect(() => {
     const lastView = [...messages].reverse().find(msg => msg.role === 'view');
@@ -1291,6 +1362,7 @@ const Playground: NextPage = () => {
     spec: EditableExecutionSpec,
     feedback: string,
   ) => {
+    let confirmationAccepted = false;
     setLoading(true);
     setMessages(current =>
       current.map(item =>
@@ -1330,6 +1402,14 @@ const Playground: NextPage = () => {
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.detail || `Request failed with status ${response.status}`);
+      }
+
+      if (action === 'confirm') {
+        confirmationAccepted = true;
+        sessionStorage.removeItem(PENDING_RESPONSE_STORAGE_KEY);
+        setMessages(current =>
+          current.map(item => (item.id === messageId ? { ...item, thinking: true, confirmation: undefined } : item)),
+        );
       }
       if (!response.body) throw new Error('No response body');
 
@@ -1393,6 +1473,7 @@ const Playground: NextPage = () => {
           );
         } else if (payload.type === 'response.completed') {
           sessionStorage.removeItem(PENDING_RESPONSE_STORAGE_KEY);
+          notifyResponseHistoryChanged();
           setExecutionMap(current => {
             const execution = current[messageId];
             if (!execution) return current;
@@ -1423,13 +1504,32 @@ const Playground: NextPage = () => {
     } catch (error) {
       const errorText = error instanceof Error ? error.message : 'Decision failed';
       setLoading(false);
+      if (confirmationAccepted) {
+        setExecutionMap(current => {
+          const execution = current[messageId];
+          if (!execution) return current;
+          return {
+            ...current,
+            [messageId]: {
+              ...execution,
+              steps: execution.steps.map(step =>
+                step.status === 'running' ? { ...step, status: 'failed' as const } : step,
+              ),
+              activeStepId: null,
+            },
+          };
+        });
+      }
       setMessages(current =>
         current.map(item =>
           item.id === messageId
             ? {
                 ...item,
                 thinking: false,
-                confirmation: { ...confirmation, submitting: false, error: errorText },
+                context: confirmationAccepted ? errorText : item.context,
+                confirmation: confirmationAccepted
+                  ? undefined
+                  : { ...confirmation, submitting: false, error: errorText },
               }
             : item,
         ),
@@ -1462,6 +1562,7 @@ const Playground: NextPage = () => {
     // Create the conversation id before upload so files are stored in the same
     // temporary memory that the following Q&A call will read.
     const currentConvId = conversationId || generateUUID();
+    const historySessionId = getResponseHistorySessionId() || currentConvId;
     if (!conversationId) {
       setConversationId(currentConvId);
     }
@@ -1643,11 +1744,11 @@ const Playground: NextPage = () => {
         body: JSON.stringify({
           input: finalQuery,
           data_corpus_package: {
-            sources: [currentUploadedFilePath || 'data/data.csv'],
+            sources: currentUploadedFilePath ? [currentUploadedFilePath] : [],
             schemas: {},
             metadata: {},
           },
-          session_id: currentConvId,
+          session_id: historySessionId,
         }),
         signal: controller.signal,
       });
@@ -1766,6 +1867,7 @@ const Playground: NextPage = () => {
           payload = { type: 'final', content: payload.text || '' };
         } else if (payload.type === 'response.completed') {
           setLoading(false);
+          notifyResponseHistoryChanged();
           return;
         } else if (payload.type === 'response.failed') {
           throw new Error(payload.error?.message || 'The workflow failed.');
@@ -2698,7 +2800,7 @@ const Playground: NextPage = () => {
 
             {/* Chat Messages or Hero Section */}
             {/* When from_task mode and loading history, show loading spinner instead of Hero */}
-            {router.query.from_task && historyLoading && messages.length === 0 ? (
+            {(router.query.from_task || router.query.response_id) && historyLoading && messages.length === 0 ? (
               <div className='flex-1 flex items-center justify-center'>
                 <Spin size='large' tip={t('pg.loadingConversationHistory')} />
               </div>
@@ -2962,24 +3064,6 @@ const Playground: NextPage = () => {
                                         icon: <UploadOutlined />,
                                         onClick: openUploadDialog,
                                       },
-                                      {
-                                        key: 'database',
-                                        label: 'Select Data Source',
-                                        icon: <DatabaseOutlined />,
-                                        onClick: openDbModal,
-                                      },
-                                      {
-                                        key: 'knowledge',
-                                        label: 'Select Knowledge Base',
-                                        icon: <BookOutlined />,
-                                        onClick: openKnowledgeModal,
-                                      },
-                                      {
-                                        key: 'connector',
-                                        label: t('use_connector'),
-                                        icon: <ApiOutlined />,
-                                        onClick: openConnectorPicker,
-                                      },
                                     ],
                                   }}
                                   trigger={['click']}
@@ -3221,30 +3305,6 @@ const Playground: NextPage = () => {
                                     label: <span data-testid='backend-qa-upload-menu-item'>Upload files or .zip</span>,
                                     icon: <PaperClipOutlined />,
                                     onClick: openUploadDialog,
-                                  },
-                                  {
-                                    key: 'skill',
-                                    label: t('use_skill'),
-                                    icon: <ThunderboltOutlined />,
-                                    onClick: openSkillPicker,
-                                  },
-                                  {
-                                    key: 'knowledge',
-                                    label: t('use_knowledge'),
-                                    icon: <BookOutlined />,
-                                    onClick: openKnowledgePicker,
-                                  },
-                                  {
-                                    key: 'database',
-                                    label: t('use_database'),
-                                    icon: <DatabaseOutlined />,
-                                    onClick: () => setTimeout(() => setIsDbPanelOpen(true), 100),
-                                  },
-                                  {
-                                    key: 'connector',
-                                    label: t('use_connector'),
-                                    icon: <ApiOutlined />,
-                                    onClick: () => setIsConnectorPanelOpen(true),
                                   },
                                 ],
                               }}

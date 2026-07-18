@@ -52,6 +52,21 @@ wheels = [
 ]
 
 [[package]]
+name = "axiom-sandbox-client"
+version = "0.1.0"
+source = { directory = "../AXIOM/packages/axiom-sandbox-client" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pydantic", specifier = ">=2.10.0" },
+]
+
+[[package]]
 name = "anyio"
 version = "4.14.1"
 source = { registry = "https://pypi.org/simple" }
@@ -360,6 +375,7 @@ name = "data-intelligence-api"
 version = "0.1.0"
 source = { editable = "packages/api" }
 dependencies = [
+    { name = "axiom-sandbox-client" },
     { name = "data-intelligence-sdk" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -369,6 +385,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "axiom-sandbox-client", directory = "../AXIOM/packages/axiom-sandbox-client" },
     { name = "data-intelligence-sdk", editable = "packages/sdk" },
     { name = "fastapi", specifier = ">=0.139.0" },
     { name = "httpx", specifier = ">=0.28.0" },

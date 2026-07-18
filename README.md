@@ -128,8 +128,10 @@ Configure OpenRouter with:
 
 ```text
 OPENROUTER_API_KEY
-LLM_MODEL_NAME
 ```
+
+Model names and provider endpoints are configured in
+`configs/proxy-openrouter.toml`.
 
 ### Runtime workflow CLI
 
@@ -153,22 +155,24 @@ uv run python examples/demo_workflow_cli.py \
   --verbose
 ```
 
-Provider settings normally come from `configs/development/proxy-openrouter.toml` and the
-environment. The CLI loads `docker/.env` by default so the checked-in TOML's
-`${env:...}` placeholders work in local runs. Use `--env-file PATH` to load a
-different env file; values already exported in the shell take precedence.
+Provider settings normally come from `configs/proxy-openrouter.toml`. The CLI
+loads `docker/.env` by default so secret `${env:...}` placeholders work in
+local runs. Use `--env-file PATH` to load a different env file; values already
+exported in the shell take precedence.
 Provider settings can also be overridden with `--config`, `--model`,
 `--api-key`, and `--base-url`. Structured pipeline events are written to
 `logs/pipeline.log` by default; pass `--no-trace` to disable that file.
 
 When the AXIOM sandbox is enabled, the application-owned pipeline factory
-creates one sandbox for the entire request. Configure it in `docker/.env`:
+creates one sandbox for the entire request. Configure it in
+`configs/proxy-openrouter.toml`:
 
-```env
-METHODS_HUB_ENABLED=false
-SANDBOX_ENABLED=true
-SANDBOX_URL=http://localhost:8004
-SANDBOX_WORKSPACE_ID=00000000-0000-0000-0000-000000000001
+```toml
+[sandbox]
+enabled = true
+endpoint = "http://host.docker.internal:8004"
+workspace_id = "00000000-0000-0000-0000-000000000001"
+token = "${env:SANDBOX_TOKEN}"
 ```
 
 The CLI example discovers the sibling client source directly for local
@@ -176,7 +180,8 @@ development. Production applications should install `axiom-sandbox-client`.
 The general engine requires `SANDBOX_ENABLED=true` and a workspace ID.
 
 Each invocation creates a persistent artifact bundle under `artifacts/<run-id>/`
-by default. Configure a different root with `ARTIFACT_ROOT`. The bundle retains
+by default. Configure a different root with `[artifacts].root` in the TOML file.
+The bundle retains
 `code/attempt-NNN.py`, `executions/attempt-NNN.json`, and `manifest.json` after
 the sandbox has been deleted.
 
@@ -237,15 +242,13 @@ Configure the workflow and API:
 
 ```text
 OPENROUTER_API_KEY=...
-LLM_MODEL_NAME=...
 DATA_CORPUS_ROOT=/absolute/path/to/Data-Intelligence-SDK
 DATABASE_URL=postgresql://data_intelligence:data_intelligence@127.0.0.1:5432/data_intelligence
-MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/development/proxy-openrouter.toml
-API_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-PIPELINE_TIMEOUT_SECONDS=300
-SPEC_CONFIRMATION_TTL_SECONDS=86400
-MAX_SPEC_REVISION_ROUNDS=5
+MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/proxy-openrouter.toml
 ```
+
+CORS, timeouts, upload limits, chat model, provider endpoints, Sandbox, and
+Method Hub settings are configured in `configs/proxy-openrouter.toml`.
 
 Start the data_intelligence_api:
 
@@ -305,51 +308,47 @@ Recover a paused response with `GET /api/v1/responses/RESP_ID` and the same
 
 ### Backend Docker Service
 
-The Compose configuration at `docker/docker-compose.yaml` runs the FastAPI
-data_intelligence_api and a private PostgreSQL 17 service. It exposes only the API at
-`http://127.0.0.1:8000`, mounts `./data` read-only, and persists both uploaded
-corpus files and confirmation state in Docker volumes. Optional model-provider
-credentials and `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` are read
-from `docker/.env` at container startup. The API loads its model definition from
-`/app/configs/development/proxy-openrouter.toml` through `MODEL_CONFIG_PATH`; values such as
-`LLM_MODEL_NAME` and `OPENROUTER_API_KEY` are resolved from `docker/.env`.
+The Docker build expects the AXIOM platform and Data Intelligence SDK to be
+sibling checkouts:
 
-Build and start the API:
+```text
+AXIOM/
+  AXIOM/
+    packages/axiom-sandbox-client/
+  Data-Intelligence-SDK/
+    docker/
+```
+
+Copy the environment template and fill the secrets:
 
 ```bash
+cp docker/.env.example docker/.env
+```
+
+Edit `configs/proxy-openrouter.toml` to change models, provider endpoints,
+Sandbox, Method Hub, CORS, timeouts, or upload limits. Compose bind-mounts this
+file at runtime, so configuration changes require only
+`docker compose -f docker/docker-compose.yaml restart api`, not an image rebuild.
+PostgreSQL stays private inside Docker, while the DI API is available at
+`http://SERVER_IP:8000`. API, upload, chat, artifact, and PostgreSQL data are
+stored in named Docker volumes.
+
+Validate and start the stack:
+
+```bash
+docker compose -f docker/docker-compose.yaml config --quiet
 docker compose -f docker/docker-compose.yaml up --build -d
-```
-
-Check container status and logs:
-
-```bash
 docker compose -f docker/docker-compose.yaml ps
-docker compose -f docker/docker-compose.yaml logs -f api
-```
-
-Check API health:
-
-```bash
 curl http://127.0.0.1:8000/health
 ```
 
-Run a streaming response:
+Inspect API logs:
 
 ```bash
-curl -N http://127.0.0.1:8000/api/v1/responses \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "input": "Analyze this dataset",
-    "data_corpus_package": {
-      "sources": ["data/samples/data.csv"],
-      "schemas": {},
-      "metadata": {}
-    },
-    "session_id": "docker-test"
-  }'
+docker compose -f docker/docker-compose.yaml logs -f api
 ```
 
-Stop the API container:
+Stop the stack while retaining database and API volumes:
 
 ```bash
 docker compose -f docker/docker-compose.yaml down

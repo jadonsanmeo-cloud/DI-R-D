@@ -42,7 +42,7 @@ export function useResponsesChat() {
 
       const submission = prepareResponseSubmission(input, sources, sessionIdRef.current);
       if (!submission) {
-        setValidationError('Add at least one server-side data source.');
+        setValidationError('Enter a question or add a server-side data source.');
         return false;
       }
 

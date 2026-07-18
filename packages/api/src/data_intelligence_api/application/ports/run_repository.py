@@ -12,6 +12,12 @@ class RunRepository(Protocol):
 
     def get_authorized(self, response_id: str, token: str) -> StoredRun: ...
 
+    def list_for_session(self, session_id: str, *, limit: int) -> list[StoredRun]: ...
+
+    def get_for_session(self, response_id: str, session_id: str) -> StoredRun: ...
+
+    def delete_for_session(self, response_id: str, session_id: str) -> None: ...
+
     def claim(
         self,
         response_id: str,
@@ -25,7 +31,14 @@ class RunRepository(Protocol):
 
     def record_confirmation(self, response_id: str, revision: int) -> None: ...
 
-    def mark_completed(self, response_id: str) -> None: ...
+    def mark_completed(
+        self,
+        response_id: str,
+        *,
+        output_text: str,
+        evidence: dict | None,
+        response_metadata: dict,
+    ) -> None: ...
 
     def mark_failed(self, response_id: str, code: str, message: str) -> None: ...
 

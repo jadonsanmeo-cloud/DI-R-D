@@ -119,6 +119,30 @@ export interface ResponseDecisionRequest {
   edited_spec?: Omit<EditableExecutionSpec, 'intent' | 'confirmed'>;
 }
 
+export interface ResponseHistorySummary {
+  response_id: string;
+  title: string;
+  status: string;
+  output_preview?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface ResponseHistoryDetail {
+  response_id: string;
+  status: string;
+  input: string;
+  spec: EditableExecutionSpec;
+  output_text?: string | null;
+  evidence?: unknown;
+  metadata: Record<string, unknown>;
+  error?: { code: string; message: string } | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+}
+
 export type ResponsesEvent =
   | ResponseCreatedEvent
   | PipelineEvent
