@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import inspect
 import json
 import operator
 import os
@@ -1087,43 +1086,8 @@ def _first_source_with_suffixes(
     )
 
 
-def _method_parameters_schema(method: object) -> dict[str, Any]:
-    try:
-        signature = inspect.signature(method)
-    except (TypeError, ValueError):
-        return {"type": "object", "properties": {}, "required": []}
-    properties: dict[str, Any] = {}
-    required = []
-    for name, parameter in signature.parameters.items():
-        if name in {"self", "args", "kwargs"}:
-            continue
-        properties[name] = {
-            "type": "string",
-            "description": f"Argument `{name}` for the tool.",
-        }
-        if parameter.default is inspect.Parameter.empty:
-            required.append(name)
-    return {"type": "object", "properties": properties, "required": required}
-
-
 def _method_hub_payload(runtime: EngineRuntimeContext) -> list[dict[str, Any]]:
-    local_methods = [
-        {
-            "tool_name": registered.name,
-            "description": registered.metadata.get("description", ""),
-            "parameters_schema": registered.metadata.get(
-                "parameters_schema", _method_parameters_schema(registered.method)
-            ),
-            "output_schema": registered.metadata.get("output_schema", {}),
-            "capability_names": registered.capability_names,
-            "trust_level": registered.trust_level,
-            "provider": "local",
-        }
-        for registered in runtime.method_hub.list_methods()
-        if not registered.metadata.get("request_scoped")
-        or registered.metadata.get("request_scope_id") == runtime.request_scope_id
-    ]
-    remote_methods = [
+    return [
         {
             "tool_name": definition.name,
             "description": definition.description,
@@ -1135,7 +1099,6 @@ def _method_hub_payload(runtime: EngineRuntimeContext) -> list[dict[str, Any]]:
         }
         for definition in runtime.mcp_tools
     ]
-    return [*local_methods, *remote_methods]
 
 
 def _execution_spec_payload(spec: ExecutionSpec) -> dict[str, Any]:
@@ -3690,9 +3653,6 @@ class ReportAgent(_PromptAgent):
 
 
 class ToolExecutor:
-    def __init__(self) -> None:
-        self._registration_lock = threading.RLock()
-
     def execute_existing(
         self,
         route: dict[str, Any],
@@ -3702,17 +3662,10 @@ class ToolExecutor:
         arguments = route.get("arguments", {})
         if not isinstance(arguments, dict):
             arguments = {}
-        remote_names = {definition.name for definition in runtime.mcp_tools}
         try:
-            if tool_name in remote_names:
-                if runtime.mcp_client is None:
-                    raise RuntimeError("Method Hub MCP client is unavailable.")
-                result = runtime.mcp_client.call_tool(tool_name, arguments)
-                provider = "mcp"
-            else:
-                method = runtime.method_hub.get(tool_name)
-                result = method(**arguments)
-                provider = "local"
+            if runtime.mcp_client is None:
+                raise RuntimeError("Method Hub MCP client is unavailable.")
+            result = runtime.mcp_client.call_tool(tool_name, arguments)
             status = "completed_no_data" if not _normalize_rows(result) else "completed"
             runtime.run_context.record_method_call(
                 tool_name,
@@ -3721,7 +3674,7 @@ class ToolExecutor:
                 outputs={
                     "result": result,
                     "result_summary": self._result_summary(result),
-                    "provider": provider,
+                    "provider": "mcp",
                 },
             )
             return {
@@ -3733,12 +3686,11 @@ class ToolExecutor:
                 "error": None,
             }
         except Exception as exc:
-            provider = "mcp" if tool_name in remote_names else "local"
             runtime.run_context.record_method_call(
                 tool_name,
                 status="failed",
                 inputs=arguments,
-                outputs={"error": str(exc), "provider": provider},
+                outputs={"error": str(exc), "provider": "mcp"},
             )
             return {
                 "schema_version": "1.0",
@@ -3777,38 +3729,6 @@ class ToolExecutor:
                 "raw_result": None,
                 "error": sandbox_result.error or "Generated code execution failed.",
             }
-        try:
-            registered_name = self._register_generated_method(
-                interface,
-                runtime,
-            )
-        except Exception as exc:
-            runtime.run_context.record_step(
-                "method_hub_register",
-                status="failed",
-                inputs={"tool_name": interface.name},
-                outputs={"error": str(exc)},
-            )
-            return {
-                "schema_version": "1.0",
-                "status": "failed",
-                "tool_name": interface.name,
-                "arguments": arguments,
-                "raw_result": sandbox_result.result,
-                "error": f"Generated method registration failed: {exc}",
-            }
-        runtime.run_context.record_step(
-            "method_hub_register",
-            inputs={
-                "tool_name": interface.name,
-                "registered_method_name": registered_name,
-            },
-            outputs={
-                "trust_level": interface.trust_level,
-                "request_scoped": True,
-                "reused_sandbox_result": True,
-            },
-        )
         result = sandbox_result.result
         status = "completed_no_data" if not _normalize_rows(result) else "completed"
         runtime.run_context.record_method_call(
@@ -3821,73 +3741,10 @@ class ToolExecutor:
             "schema_version": "1.0",
             "status": status,
             "tool_name": interface.name,
-            "registered_method_name": registered_name,
             "arguments": arguments,
             "raw_result": result,
             "error": None,
         }
-
-    def _register_generated_method(
-        self,
-        interface: InterfaceDefinition,
-        runtime: EngineRuntimeContext,
-    ) -> str:
-        if runtime.sandbox_executor is None:
-            raise RuntimeError("Sandbox executor is not configured.")
-
-        def generated_tool(**kwargs: Any) -> Any:
-            result = runtime.sandbox_executor.run(interface, kwargs, None)
-            if result.status != "completed":
-                raise RuntimeError(result.error or "Generated tool execution failed.")
-            return result.result
-
-        with self._registration_lock:
-            registered_name = self._available_registration_name(
-                interface,
-                runtime,
-            )
-            runtime.method_hub.register(
-                registered_name,
-                generated_tool,
-                capability_names=[GENERATED_TOOL_CAPABILITY],
-                trust_level="generated_validated",
-                metadata={
-                    "description": interface.description or "",
-                    "parameters_schema": interface.input_schema,
-                    "output_schema": interface.output_schema,
-                    "source_code": interface.metadata.get("source_code", ""),
-                    "interface_name": interface.name,
-                    "request_scoped": True,
-                    "request_scope_id": runtime.request_scope_id,
-                },
-                tags=["generated", "report", "request-scoped"],
-                source="report_code_agent",
-            )
-            runtime.request_method_names.append(registered_name)
-        return registered_name
-
-    @staticmethod
-    def _available_registration_name(
-        interface: InterfaceDefinition,
-        runtime: EngineRuntimeContext,
-    ) -> str:
-        existing = {method.name for method in runtime.method_hub.list_methods()}
-        if interface.name not in existing:
-            return interface.name
-        step = interface.metadata.get("step_request", {})
-        step_id = (
-            str(step.get("step_id", "step"))
-            if isinstance(step, dict)
-            else "step"
-        )
-        safe_step_id = re.sub(r"[^A-Za-z0-9_]+", "_", step_id).strip("_") or "step"
-        base = f"generated_{safe_step_id}_{interface.name}"
-        candidate = base
-        suffix = 2
-        while candidate in existing:
-            candidate = f"{base}_{suffix}"
-            suffix += 1
-        return candidate
 
     def _result_summary(self, result: Any) -> dict[str, Any]:
         rows = _normalize_rows(result)

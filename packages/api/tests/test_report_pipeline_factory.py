@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     _ReportDefaultsSpecBuilder,
-    _default_method_hub,
     create_example_pipeline,
 )
 from data_intelligence_sdk.core.types import (
@@ -63,15 +62,6 @@ class ReportPipelineFactoryTests(unittest.TestCase):
         result = _ReportDefaultsSpecBuilder._apply(spec)
 
         self.assertEqual(result.constraints["output_format"], "markdown")
-
-    def test_default_method_hub_contains_csv_and_local_data_tools(self):
-        method_names = {
-            method.name for method in _default_method_hub().list_methods()
-        }
-
-        self.assertIn("scan_csv", method_names)
-        self.assertIn("profile_delimited_file", method_names)
-        self.assertIn("extract_pdf_text", method_names)
 
     def test_api_defaults_report_engine_to_method_hub_routing(self):
         with patch.dict(os.environ, {"SANDBOX_ENABLED": "false"}, clear=False):

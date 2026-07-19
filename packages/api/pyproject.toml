@@ -12,6 +12,7 @@ dependencies = [
     "data-intelligence-sdk",
     "fastapi>=0.139.0",
     "httpx>=0.28.0",
+    "psycopg[binary]>=3.3.4",
     "python-multipart>=0.0.32",
     "uvicorn>=0.51.0",
 ]

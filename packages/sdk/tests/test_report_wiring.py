@@ -1118,20 +1118,7 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(result["lineage"]["upstream_step_refs"], ["load"])
         self.assertEqual(sandbox.validate_calls, 1)
         self.assertEqual(sandbox.run_calls, 0)
-        self.assertEqual(
-            state["execution_result"]["registered_method_name"],
-            "sum_rows",
-        )
-        self.assertEqual(runtime.request_method_names, ["sum_rows"])
-        registered = runtime.method_hub.list_methods()
-        self.assertEqual([method.name for method in registered], ["sum_rows"])
-        self.assertEqual(registered[0].trust_level, "generated_validated")
-        self.assertTrue(registered[0].metadata["request_scoped"])
-
-        DataIntelligencePipeline._cleanup_request_methods(runtime)
-
-        self.assertEqual(runtime.request_method_names, [])
-        self.assertEqual(runtime.method_hub.list_methods(), [])
+        self.assertNotIn("registered_method_name", state["execution_result"])
 
     def test_generated_runtime_failure_retries_code_agent_then_reuses_result(self):
         engine = ReportEngine(llm=object(), max_generation_attempts=2)

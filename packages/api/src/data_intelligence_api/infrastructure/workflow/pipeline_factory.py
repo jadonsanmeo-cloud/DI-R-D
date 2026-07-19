@@ -27,11 +27,6 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.engines.report import ReportEngine
-from data_intelligence_sdk.methods import (
-    register_csv_methods,
-    register_local_data_methods,
-    register_spreadsheet_methods,
-)
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.registry.engine_selector import (
     EngineSelector,
@@ -48,7 +43,6 @@ from data_intelligence_sdk.runtime.llm_client import (
     OpenAICompatibleLLMClient,
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
-from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
@@ -127,14 +121,6 @@ class _ReportDefaultsSpecBuilder:
         spec.constraints = dict(spec.constraints)
         spec.constraints.setdefault("output_format", "html")
         return spec
-
-
-def _default_method_hub() -> MethodHub:
-    method_hub = MethodHub()
-    register_csv_methods(method_hub)
-    register_local_data_methods(method_hub)
-    register_spreadsheet_methods(method_hub)
-    return method_hub
 
 
 class _AxiomSandboxProvider:
@@ -412,7 +398,6 @@ def create_example_pipeline(
     use_llm_spec_builder: bool = False,
     allow_method_generation: bool = True,
     force_report_code_agent: bool | None = None,
-    method_hub: MethodHub | None = None,
     mcp_client: MCPMethodClient | None = None,
     mcp_tools: tuple[MCPToolDefinition, ...] = (),
     method_hub_enabled: bool | None = None,
@@ -519,7 +504,6 @@ def create_example_pipeline(
         engine_registry=registry,
         evidence_collector=ExampleEvidenceCollector(),
         synthesizer=ExampleSynthesizer(),
-        method_hub=method_hub,
         mcp_client=mcp_client,
         mcp_tools=resolved_mcp_tools,
         interface_registry=interface_registry,
@@ -534,7 +518,6 @@ def create_example_pipeline(
 
 def create_report_pipeline(
     *,
-    method_hub: MethodHub | None = None,
     mcp_client: MCPMethodClient | None = None,
     interface_registry: object | None = None,
     logger: RuntimeLogger | None = None,
@@ -548,7 +531,6 @@ def create_report_pipeline(
                 default=False,
             )
         ),
-        method_hub=method_hub,
         mcp_client=mcp_client,
         interface_registry=interface_registry,
         logger=logger,
