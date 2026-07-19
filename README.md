@@ -92,16 +92,16 @@ Có thể clone bằng HTTPS với credential manager hoặc bằng SSH.
 PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item docker/.env.example docker/.env
 ```
 
 Bash:
 
 ```bash
-cp .env.example .env
+cp docker/.env.example docker/.env
 ```
 
-Mở `.env` và điền ít nhất:
+Mở `docker/.env` và điền ít nhất:
 
 ```env
 OPENROUTER_API_KEY=<your-openrouter-api-key>
@@ -112,7 +112,7 @@ DATA_CORPUS_ROOT=.
 Model IDs, provider endpoints, CORS, timeout và upload limits được cấu hình trong
 `configs/proxy-openrouter.toml`, không lặp lại trong `.env`.
 
-Các cấu hình local quan trọng đã có sẵn trong `.env.example`:
+Các cấu hình local quan trọng đã có sẵn trong `docker/.env.example`:
 
 ```env
 SANDBOX_BACKEND=docker
@@ -131,7 +131,8 @@ REPORT_FORCE_CODE_AGENT=false
 Đặt `[sandbox].enabled = true` trong `configs/proxy-openrouter.toml` để bật
 sandbox. Các giới hạn và endpoint chung vẫn nằm trong file TOML đó.
 
-Không commit `.env`. File `.env.example` chỉ chứa tên biến và được phép commit.
+Không commit `docker/.env`. File `docker/.env.example` chỉ chứa tên biến và được
+phép commit.
 
 ### 4. Cài Python workspace
 
@@ -175,7 +176,7 @@ chạy lại lệnh `docker build`.
 Mở terminal thứ nhất tại thư mục gốc:
 
 ```powershell
-uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8000 --env-file .env
+uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8000 --env-file docker/.env
 ```
 
 Kiểm tra:
@@ -234,7 +235,7 @@ Với package mẫu:
 uv run python examples/create_report.py --package examples/data_corpus_package/data_corpus_package.json --query "Create a report about this data corpus"
 ```
 
-CLI và API đọc secret cùng các cờ process-local từ `.env`; cấu hình model vẫn lấy
+CLI và API đọc secret cùng các cờ process-local từ `docker/.env`; cấu hình model vẫn lấy
 từ `configs/proxy-openrouter.toml`.
 
 ## Kiểm Tra Sau Setup
@@ -288,10 +289,10 @@ tự:
 3. `code/` để xem code do Code Agent sinh.
 4. `executions/` để xem stdout, stderr, validation và sandbox result.
 5. Docker Desktop để chắc Docker Engine đang chạy.
-6. `.env` để chắc API key và sandbox backend đúng; kiểm tra model ID trong
+6. `docker/.env` để chắc API key và sandbox backend đúng; kiểm tra model ID trong
    `configs/proxy-openrouter.toml`.
 
-`artifacts/`, `.uploads/`, logs, `.env`, `.venv`, `.next` và `node_modules` là dữ
+`artifacts/`, `.uploads/`, logs, `docker/.env`, `.venv`, `.next` và `node_modules` là dữ
 liệu local, đã được ignore và không nên push lên GitHub.
 
 ## PostgreSQL Tùy Chọn
@@ -306,7 +307,7 @@ database từ Compose:
 docker compose -f docker/docker-compose.yaml up -d db
 ```
 
-Sau đó thêm vào `.env`:
+Sau đó thêm vào `docker/.env`:
 
 ```env
 DATABASE_URL=postgresql://data_intelligence:data_intelligence@localhost:5432/data_intelligence
@@ -359,7 +360,7 @@ docker build -f docker/sandbox.Dockerfile -t data-intelligence-sandbox:local .
 
 ### LLM trả 401, 403 hoặc model not found
 
-Kiểm tra `OPENROUTER_API_KEY` trong `.env` và model ID trong
+Kiểm tra `OPENROUTER_API_KEY` trong `docker/.env` và model ID trong
 `configs/proxy-openrouter.toml`. Model ID phải đúng với model mà tài khoản
 OpenRouter được phép gọi.
 
@@ -482,7 +483,7 @@ Use the demo to run the complete non-interactive query-to-answer flow:
 uv run python examples/demo_workflow_cli.py \
   --package examples/data_corpus_package/data_corpus_package.json \
   --config configs/proxy-openrouter.toml \
-  --env-file .env \
+  --env-file docker/.env \
   --query "Summarize this data corpus package"
 ```
 
@@ -497,7 +498,7 @@ uv run python examples/demo_workflow_cli.py \
 ```
 
 Provider settings normally come from `configs/proxy-openrouter.toml`. The CLI
-loads `.env` by default so secret `${env:...}` placeholders work in
+loads `docker/.env` by default so secret `${env:...}` placeholders work in
 local runs. Use `--env-file PATH` to load a different env file; values already
 exported in the shell take precedence.
 Provider settings can also be overridden with `--config`, `--model`,

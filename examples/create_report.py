@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 EXAMPLES_DIR = Path(__file__).resolve().parent
-load_dotenv(EXAMPLES_DIR.parent / ".env", override=False)
+load_dotenv(EXAMPLES_DIR.parent / "docker" / ".env", override=False)
 if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 

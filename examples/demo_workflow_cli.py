@@ -31,7 +31,8 @@ from data_intelligence_sdk.runtime import (  # noqa: E402
 )
 from run_pipeline import _load_package_json  # noqa: E402
 
-load_dotenv()
+DEFAULT_ENV_FILE = EXAMPLES_DIR.parent / "docker" / ".env"
+load_dotenv(DEFAULT_ENV_FILE)
 
 DEFAULT_PACKAGE = EXAMPLES_DIR / "data_corpus_package" / "data_corpus_package.json"
 DEFAULT_QUERY = "Summarize this data corpus package."
@@ -84,7 +85,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--env-file",
-        default=".env",
+        default=str(DEFAULT_ENV_FILE),
         help="Environment file used by TOML env placeholders.",
     )
     parser.add_argument(

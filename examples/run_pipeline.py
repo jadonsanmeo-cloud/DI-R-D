@@ -9,7 +9,7 @@ Examples:
 Package JSON shape:
     {"vectordb": "vectordb", "db": "warehouse.db", "schema": "schema.json", "catalog": "catalog.json"}
 
-Requires OPENROUTER_API_KEY and LLM_MODEL_NAME in the environment or .env.
+Loads provider secrets from docker/.env and model settings from the TOML config.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from data_intelligence_sdk import DataCorpusPackage, UserQuery  # noqa: E402
 from data_intelligence_sdk.runtime import FileRuntimeLogger  # noqa: E402
 from basic_workflow import create_example_pipeline  # noqa: E402
 
-load_dotenv()
+load_dotenv(EXAMPLES_DIR.parent / "docker" / ".env")
 
 
 SAMPLE_CSV = """country,status,revenue
