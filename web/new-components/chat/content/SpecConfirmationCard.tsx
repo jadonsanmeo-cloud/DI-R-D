@@ -59,15 +59,15 @@ export default function SpecConfirmationCard({ confirmation, onDecision }: Props
         <div className='flex items-start gap-3'>
           <div className='mt-1 h-9 w-1 rounded-full bg-blue-500' />
           <div>
-            <div className='text-sm font-semibold text-slate-900 dark:text-slate-100'>Proposed analysis plan</div>
+            <div className='text-sm font-semibold text-slate-900 dark:text-slate-100'>Specification Analysis</div>
             <div className='mt-1 text-xs text-slate-500'>
-              Revision {confirmation.revision} · intent: {confirmation.intent} · expires {expiresLabel}
+              Revision {confirmation.revision} · Intent: {confirmation.intent}
             </div>
           </div>
         </div>
         {!editing && (
           <Button icon={<EditOutlined />} disabled={confirmation.submitting} onClick={() => setEditing(true)}>
-            Edit Markdown
+            Edit
           </Button>
         )}
       </header>
@@ -75,7 +75,6 @@ export default function SpecConfirmationCard({ confirmation, onDecision }: Props
       <div className='px-5 py-5'>
         {editing ? (
           <div>
-            <div className='mb-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-400'>Markdown editor</div>
             <Input.TextArea
               value={markdown}
               onChange={event => setMarkdown(event.target.value)}
@@ -100,9 +99,7 @@ export default function SpecConfirmationCard({ confirmation, onDecision }: Props
 
         {!editing && (
           <div className='mt-6 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40'>
-            <div className='mb-2 text-sm font-medium text-slate-800 dark:text-slate-200'>
-              Ask the workflow to revise
-            </div>
+            <div className='mb-2 text-sm font-medium text-slate-800 dark:text-slate-200'>Request Changes</div>
             <Input.TextArea
               value={feedback}
               onChange={event => setFeedback(event.target.value)}
@@ -112,7 +109,7 @@ export default function SpecConfirmationCard({ confirmation, onDecision }: Props
             />
             <div className='mt-3 flex flex-wrap justify-end gap-2'>
               <Button icon={<ReloadOutlined />} disabled={confirmation.submitting || !feedback.trim()} onClick={revise}>
-                Revise with feedback
+                Revise
               </Button>
               <Button
                 type='primary'
@@ -120,7 +117,7 @@ export default function SpecConfirmationCard({ confirmation, onDecision }: Props
                 loading={confirmation.submitting}
                 onClick={() => onDecision('confirm', confirmation.spec, '')}
               >
-                Confirm and run
+                Confirm
               </Button>
             </div>
           </div>

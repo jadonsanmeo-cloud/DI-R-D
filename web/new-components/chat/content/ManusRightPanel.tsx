@@ -2195,20 +2195,6 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
           </div>
         )}
       </div>
-
-      {/* Footer Status Bar */}
-      <div className='px-5 py-2 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111217]'>
-        <div className='flex items-center justify-between text-[10px] text-gray-400'>
-          <div className='flex items-center gap-4'>
-            <span className='flex items-center gap-1'>
-              <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500'}`} />
-              {isRunning ? t('chatc.running') : t('chatc.ready')}
-            </span>
-            {visibleOutputs.length > 0 && <span>{t('chatc.outputsCount', { count: visibleOutputs.length })}</span>}
-          </div>
-          {activeStep && <span>Step ID: {activeStep.id}</span>}
-        </div>
-      </div>
     </div>
   );
 };

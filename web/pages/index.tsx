@@ -234,9 +234,7 @@ const isHtmlDocument = (content: unknown): content is string => {
 };
 
 const reportArtifactFromResponse = (payload: any, messageId: string): Artifact | null => {
-  const renderedReports = Array.isArray(payload?.metadata?.rendered_reports)
-    ? payload.metadata.rendered_reports
-    : [];
+  const renderedReports = Array.isArray(payload?.metadata?.rendered_reports) ? payload.metadata.rendered_reports : [];
   const renderedHtml = renderedReports.find(
     (item: any) => item?.format === 'html' && typeof item?.content === 'string',
   );
@@ -1055,6 +1053,14 @@ const Playground: NextPage = () => {
     return lastRound?.viewMsg?.id || null;
   }, [activeViewMsgId, rounds]);
 
+  useEffect(() => {
+    setSelectedStepId(null);
+    if (previewArtifact?.messageId !== selectedViewMsgId) {
+      setPreviewArtifact(null);
+      setRightPanelView('execution');
+    }
+  }, [selectedViewMsgId, previewArtifact?.messageId]);
+
   const _getArtifactName = (outputType: string, content: any): string => {
     if (outputType === 'table') {
       const rowCount = content?.rows?.length || 0;
@@ -1598,10 +1604,7 @@ const Playground: NextPage = () => {
         } else if (payload.type === 'response.completed') {
           const reportArtifact = reportArtifactFromResponse(payload, messageId);
           if (reportArtifact) {
-            setArtifacts(current => [
-              ...current.filter(item => item.id !== reportArtifact.id),
-              reportArtifact,
-            ]);
+            setArtifacts(current => [...current.filter(item => item.id !== reportArtifact.id), reportArtifact]);
             setPreviewArtifact(reportArtifact);
             setRightPanelView('html-preview');
             setRightPanelCollapsed(false);
@@ -2022,10 +2025,7 @@ const Playground: NextPage = () => {
         } else if (payload.type === 'response.completed') {
           const reportArtifact = reportArtifactFromResponse(payload, responseId);
           if (reportArtifact) {
-            setArtifacts(current => [
-              ...current.filter(item => item.id !== reportArtifact.id),
-              reportArtifact,
-            ]);
+            setArtifacts(current => [...current.filter(item => item.id !== reportArtifact.id), reportArtifact]);
             setPreviewArtifact(reportArtifact);
             setRightPanelView('html-preview');
             setRightPanelCollapsed(false);
@@ -3314,53 +3314,6 @@ const Playground: NextPage = () => {
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* Recommended Examples */}
-                  <div className='mt-10 w-full'>
-                    <div className='flex items-center justify-center gap-2 mb-4'>
-                      <div className='h-px flex-1 bg-gradient-to-r from-transparent to-gray-200 dark:to-gray-700' />
-                      <span className='text-xs font-medium text-gray-400 dark:text-gray-500 tracking-wider uppercase'>
-                        {t('recommend_examples')}
-                      </span>
-                      <div className='h-px flex-1 bg-gradient-to-l from-transparent to-gray-200 dark:to-gray-700' />
-                    </div>
-                    <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
-                      {EXAMPLE_CARDS.map(example => (
-                        <div
-                          key={example.id}
-                          onClick={() => handleExampleClick(example)}
-                          className={`group relative bg-gradient-to-br ${example.color} border ${example.borderColor} rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300`}
-                        >
-                          <div className='flex items-start gap-3'>
-                            <div
-                              className={`w-10 h-10 ${example.iconBg} rounded-xl flex items-center justify-center text-xl flex-shrink-0`}
-                            >
-                              {example.icon}
-                            </div>
-                            <div className='flex-1 min-w-0'>
-                              <h3 className='text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1'>
-                                {(() => {
-                                  const key = `example_${example.id}_title`;
-                                  const val = t(key) as string;
-                                  return val && val !== key ? val : example.title;
-                                })()}
-                              </h3>
-                              <p className='text-xs text-gray-500 dark:text-gray-400 line-clamp-2'>
-                                {(() => {
-                                  const key = `example_${example.id}_desc`;
-                                  const val = t(key) as string;
-                                  return val && val !== key ? val : example.description;
-                                })()}
-                              </p>
-                            </div>
-                          </div>
-                          <div className='absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity'>
-                            <RightOutlined className='text-xs text-gray-400' />
-                          </div>
-                        </div>
-                      ))}
                     </div>
                   </div>
                 </div>

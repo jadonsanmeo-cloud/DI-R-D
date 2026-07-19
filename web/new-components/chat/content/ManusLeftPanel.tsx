@@ -974,9 +974,6 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
                     <div className='text-sm font-medium text-gray-800 dark:text-gray-200 truncate'>
                       {attachedKnowledge.name}
                     </div>
-                    <div className='text-[11px] text-gray-400 dark:text-gray-500'>
-                      {attachedKnowledge.desc || attachedKnowledge.vector_type}
-                    </div>
                   </div>
                 </div>
               )}
