@@ -18,6 +18,12 @@ from data_intelligence_sdk.methods.local_data import (
     summarize_delimited_columns,
     summarize_wide_numeric_table,
 )
+from data_intelligence_sdk.methods.spreadsheet import (
+    SpreadsheetReadError,
+    detect_spreadsheet_format,
+    materialize_spreadsheet,
+    register_spreadsheet_methods,
+)
 from data_intelligence_sdk.methods.vector import (
     get_vector_stats,
     inspect_vector_chunks,
@@ -49,6 +55,7 @@ __all__ = [
     "profile_delimited_file",
     "register_csv_methods",
     "register_local_data_methods",
+    "register_spreadsheet_methods",
     "register_vector_methods",
     "scan_csv",
     "search_text_files",
@@ -56,4 +63,7 @@ __all__ = [
     "sum_csv",
     "summarize_delimited_columns",
     "summarize_wide_numeric_table",
+    "SpreadsheetReadError",
+    "detect_spreadsheet_format",
+    "materialize_spreadsheet",
 ]

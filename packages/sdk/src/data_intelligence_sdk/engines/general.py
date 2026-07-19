@@ -261,7 +261,7 @@ class GeneralPurposeEngine:
             "assign its final JSON-serializable value to a top-level variable "
             "named result. Always call execute_python. The code runs in a fresh "
             "Python namespace: helper names such as read_file are not defined. "
-            "Use Python imports plus open, pathlib, pandas, openpyxl, pyarrow, "
+            "Use Python imports plus open, pathlib, pandas, openpyxl, xlrd, pyarrow, "
             "or pypdf to read the staged paths directly. The Python program is "
             "only for data inspection and analysis: return compact structured "
             "data such as schema, counts, metrics, samples, and findings in "

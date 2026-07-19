@@ -73,7 +73,7 @@ class ReportPipelineFactoryTests(unittest.TestCase):
         self.assertIn("profile_delimited_file", method_names)
         self.assertIn("extract_pdf_text", method_names)
 
-    def test_api_defaults_report_engine_to_forced_code_agent_mode(self):
+    def test_api_defaults_report_engine_to_method_hub_routing(self):
         with patch.dict(os.environ, {"SANDBOX_ENABLED": "false"}, clear=False):
             os.environ.pop("REPORT_FORCE_CODE_AGENT", None)
             pipeline = create_example_pipeline(
@@ -89,7 +89,7 @@ class ReportPipelineFactoryTests(unittest.TestCase):
             )
         )
 
-        self.assertTrue(engine.force_code_agent)
+        self.assertFalse(engine.force_code_agent)
 
     def test_api_can_restore_normal_router_selection(self):
         pipeline = create_example_pipeline(

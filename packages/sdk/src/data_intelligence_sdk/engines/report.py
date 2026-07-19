@@ -153,7 +153,9 @@ one validated PlanStep.
 2. Honor filters, grouping, metrics, named outputs, and upstream input references.
    Preserve the content and value fields declared as objective evidence; do not
    replace them with a structural profile or introduce an undeclared filter.
-3. Return an empty list for a valid no-data result.
+3. Return an empty list only after the source was read successfully and contains
+   no records. Never convert a missing dependency, unsupported format, file I/O
+   error, or parser exception into an empty result; let that error propagate.
 4. Include type hints and a complete docstring.
 5. Do not perform network access outside the supplied data connection.
 6. For every resolved upstream input, declare a matching parameter. Prefer the
@@ -202,6 +204,8 @@ and the original PlanStep.
    specific transformation.
 8. Semantic roles describe the purpose of a named plan output. They are not
    required row-field names unless the PlanStep explicitly declares those fields.
+9. Fail code that catches source loading/parsing errors and returns an empty
+   collection. A read failure is not a valid no-data result.
 
 # OUTPUT
 Return only JSON with `status` (`Pass`, `Fail`, or `NeedsRevision`) and `feedback`.
@@ -1065,6 +1069,20 @@ def _first_source(sources: list[str], suffix: str | None = None) -> str | None:
         if suffix is None or str(source).lower().endswith(suffix):
             return str(source)
     return str(sources[0]) if sources else None
+
+
+def _first_source_with_suffixes(
+    sources: list[str], suffixes: tuple[str, ...]
+) -> str | None:
+    normalized = tuple(item.lower() for item in suffixes)
+    return next(
+        (
+            str(source)
+            for source in sources
+            if str(source).lower().endswith(normalized)
+        ),
+        None,
+    )
 
 
 def _method_parameters_schema(method: object) -> dict[str, Any]:
@@ -2329,6 +2347,47 @@ class RouterAgent(_PromptAgent):
             if isinstance(operation, dict)
             else operation or ""
         ).lower()
+        spreadsheet_source = _first_source_with_suffixes(
+            sources,
+            (".xls", ".xlsx", ".xlsm", ".xltx", ".xltm"),
+        )
+        spreadsheet_tool = next(
+            (
+                tool
+                for tool in method_hub
+                if tool["tool_name"] == "materialize_spreadsheet"
+            ),
+            None,
+        )
+        spreadsheet_operation_kinds = {
+            "inspect",
+            "inspect_data",
+            "inspect_schema",
+            "load",
+            "load_excel",
+            "load_spreadsheet",
+            "materialize_excel",
+            "materialize_source",
+            "materialize_spreadsheet",
+            "profile",
+            "read",
+            "read_excel",
+            "read_spreadsheet",
+        }
+        if (
+            spreadsheet_source
+            and spreadsheet_tool is not None
+            and operation_kind in spreadsheet_operation_kinds
+        ):
+            return {
+                "route": "existing_tool",
+                "tool_name": "materialize_spreadsheet",
+                "arguments": {"path": spreadsheet_source},
+                "reason": (
+                    "The selected Excel workbook can be read by the built-in "
+                    "spreadsheet materializer."
+                ),
+            }
         pdf_source = _first_source(sources, ".pdf")
         pdf_tool = next(
             (tool for tool in method_hub if tool["tool_name"] == "extract_pdf_text"),
@@ -2430,6 +2489,53 @@ class RouterAgent(_PromptAgent):
         method_hub: list[dict[str, Any]],
         sources: list[str],
     ) -> dict[str, Any]:
+        operation = step_request.get("operation", {})
+        operation_kind = str(
+            operation.get("kind")
+            if isinstance(operation, dict)
+            else operation or ""
+        ).lower()
+        spreadsheet_source = _first_source_with_suffixes(
+            sources,
+            (".xls", ".xlsx", ".xlsm", ".xltx", ".xltm"),
+        )
+        spreadsheet_tool = next(
+            (
+                tool
+                for tool in method_hub
+                if tool["tool_name"] == "materialize_spreadsheet"
+            ),
+            None,
+        )
+        if (
+            spreadsheet_source
+            and spreadsheet_tool is not None
+            and operation_kind
+            in {
+                "inspect",
+                "inspect_data",
+                "inspect_schema",
+                "load",
+                "load_excel",
+                "load_spreadsheet",
+                "materialize_excel",
+                "materialize_source",
+                "materialize_spreadsheet",
+                "profile",
+                "read",
+                "read_excel",
+                "read_spreadsheet",
+            }
+        ):
+            return {
+                "route": "existing_tool",
+                "tool_name": "materialize_spreadsheet",
+                "arguments": {"path": spreadsheet_source},
+                "reason": (
+                    "The selected Excel workbook can be read by the built-in "
+                    "spreadsheet materializer."
+                ),
+            }
         pdf_source = _first_source(sources, ".pdf")
         if pdf_source:
             pdf_tool = next(
@@ -4433,6 +4539,7 @@ class ChartInputAssembler:
                 datasets = []
                 results = []
                 unresolved_outputs = []
+                empty_outputs = []
                 for output_ref in output_refs:
                     match = _STEP_OUTPUT_REF.match(output_ref)
                     result = (
@@ -4446,8 +4553,11 @@ class ChartInputAssembler:
                         output_ref,
                         chart_id,
                     )
-                    if not dataset or not dataset.get("data"):
+                    if not dataset:
                         unresolved_outputs.append(output_ref)
+                        continue
+                    if not dataset.get("data"):
+                        empty_outputs.append(output_ref)
                         continue
                     if dataset.get("artifact_ref") not in {
                         item.get("artifact_ref") for item in datasets
@@ -4458,6 +4568,7 @@ class ChartInputAssembler:
                 complete = (
                     not unresolved_requirements
                     and not unresolved_outputs
+                    and not empty_outputs
                     and bool(datasets)
                 )
                 presentation = deepcopy(slot.get("presentation", {}))
@@ -4499,6 +4610,14 @@ class ChartInputAssembler:
                                 + ", ".join(unresolved_outputs)
                             ]
                             if unresolved_outputs
+                            else []
+                        ),
+                        *(
+                            [
+                                "Plan outputs contain no chartable rows: "
+                                + ", ".join(empty_outputs)
+                            ]
+                            if empty_outputs
                             else []
                         ),
                     ],
@@ -6270,6 +6389,7 @@ class ReportEngine:
                 "pandas",
                 "pyarrow",
                 "pypdf",
+                "xlrd",
             ],
             "network_access": False,
             "source_access": "read_only",
@@ -6425,6 +6545,7 @@ class ReportEngine:
         argument_errors = self._execution_argument_errors(
             state["code_spec"],
             validation_inputs,
+            state["step"],
         )
         if argument_errors:
             sandbox_result = SandboxRunResult(
@@ -6643,6 +6764,7 @@ class ReportEngine:
     def _execution_argument_errors(
         code_spec: dict[str, Any],
         arguments: dict[str, Any],
+        step: dict[str, Any] | None = None,
     ) -> list[str]:
         generation_error = str(code_spec.get("generation_error") or "").strip()
         if generation_error:
@@ -6657,6 +6779,54 @@ class ReportEngine:
                 "Generated source_code is invalid Python: "
                 f"{exc.msg} at line {exc.lineno}."
             ]
+        operation = step.get("operation", {}) if isinstance(step, dict) else {}
+        operation_kind = str(
+            operation.get("kind")
+            if isinstance(operation, dict)
+            else operation or ""
+        ).lower()
+        if operation_kind in {
+            "load_excel",
+            "load_spreadsheet",
+            "materialize_excel",
+            "materialize_source",
+            "materialize_spreadsheet",
+            "read_excel",
+            "read_spreadsheet",
+        }:
+            masks_read_failure = False
+            for handler in (
+                node
+                for node in ast.walk(syntax_tree)
+                if isinstance(node, ast.ExceptHandler)
+            ):
+                for node in handler.body:
+                    for nested in ast.walk(node):
+                        if not isinstance(nested, ast.Return):
+                            continue
+                        value = nested.value
+                        if (
+                            value is None
+                            or isinstance(value, ast.Constant)
+                            and value.value is None
+                            or isinstance(value, ast.List)
+                            and not value.elts
+                            or isinstance(value, ast.Dict)
+                            and not value.keys
+                        ):
+                            masks_read_failure = True
+                            break
+                    if masks_read_failure:
+                        break
+                if masks_read_failure:
+                    break
+            if masks_read_failure:
+                return [
+                    "Generated source materialization must not catch read or "
+                    "parser errors and return an empty result. Let ingestion "
+                    "errors propagate; return an empty collection only after a "
+                    "successful read."
+                ]
         tool_name = str(code_spec.get("tool_name") or "").strip()
         if not tool_name.isidentifier():
             return ["Generated tool_name must be a valid Python identifier."]

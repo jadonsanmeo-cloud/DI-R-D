@@ -116,15 +116,15 @@ Các cấu hình local quan trọng đã có sẵn trong `.env.example`:
 SANDBOX_ENABLED=true
 SANDBOX_BACKEND=docker
 SANDBOX_DOCKER_IMAGE=data-intelligence-sandbox:local
-REPORT_FORCE_CODE_AGENT=true
+REPORT_FORCE_CODE_AGENT=false
 ```
 
 Ý nghĩa:
 
 - `SANDBOX_BACKEND=docker`: generated Python code chạy trong container cô lập.
-- `REPORT_FORCE_CODE_AGENT=true`: tạm buộc data step đi qua Code Agent để kiểm thử
-  đầy đủ nhánh sinh code. Đổi thành `false` để Router ưu tiên method có sẵn trong
-  Method Hub.
+- `REPORT_FORCE_CODE_AGENT=false`: Router ưu tiên method deterministic có sẵn trong
+  Method Hub, bao gồm reader `.xls`/`.xlsx`. Chỉ đổi thành `true` khi cần kiểm thử
+  riêng nhánh sinh code.
 - `DATA_CORPUS_ROOT=.`: file upload được lưu dưới `.uploads/` trong repository.
 - `PIPELINE_TIMEOUT_SECONDS=300`: timeout tối đa của một pipeline request.
 
@@ -526,7 +526,7 @@ Then configure the API process:
 SANDBOX_ENABLED=true
 SANDBOX_BACKEND=docker
 SANDBOX_DOCKER_IMAGE=data-intelligence-sandbox:local
-REPORT_FORCE_CODE_AGENT=true
+REPORT_FORCE_CODE_AGENT=false
 ```
 
 The Docker backend creates one network-disabled container per request, stages
@@ -534,9 +534,9 @@ the uploaded sources under `/workspace/input`, applies CPU, memory, and process
 limits, and removes the container after the workflow completes. Optional local
 limits are `SANDBOX_DOCKER_MEMORY`, `SANDBOX_DOCKER_CPUS`,
 `SANDBOX_DOCKER_PIDS_LIMIT`, and `SANDBOX_DOCKER_WORKSPACE_SIZE`.
-The API currently defaults `REPORT_FORCE_CODE_AGENT` to `true` so report data
-steps exercise generated code even when Method Hub contains a matching tool.
-Set it to `false` to restore normal Router selection.
+The API defaults `REPORT_FORCE_CODE_AGENT` to `false` so deterministic Method Hub
+tools are preferred when their contracts match. Set it to `true` only to exercise
+the generated-code route even when a matching tool exists.
 
 Each invocation creates a persistent artifact bundle under `artifacts/<run-id>/`
 by default. Configure a different root with `ARTIFACT_ROOT`. The bundle retains

@@ -233,6 +233,57 @@ class _AlwaysPassValidator:
 
 
 class ReportWiringTests(unittest.TestCase):
+    def test_router_prefers_builtin_spreadsheet_materializer(self):
+        source = r"G:\uploads\scores.xls"
+        route = RouterAgent(None).run(
+            {
+                "step_id": "load-scores",
+                "description": "Materialize the spreadsheet rows.",
+                "operation": {"kind": "materialize_source"},
+            },
+            [
+                {
+                    "tool_name": "materialize_spreadsheet",
+                    "description": "Read XLS and XLSX workbooks.",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                    },
+                    "capability_names": ["materialize_source"],
+                }
+            ],
+            [source],
+        )
+
+        self.assertEqual(route["route"], "existing_tool")
+        self.assertEqual(route["tool_name"], "materialize_spreadsheet")
+        self.assertEqual(route["arguments"], {"path": source})
+
+    def test_generated_materializer_cannot_mask_read_error_as_empty(self):
+        source_code = """
+def load_rows(path: str) -> list[dict]:
+    try:
+        return read_workbook(path)
+    except Exception:
+        return []
+"""
+        errors = ReportEngine._execution_argument_errors(
+            {
+                "tool_name": "load_rows",
+                "source_code": source_code,
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+            {"path": "scores.xls"},
+            {"operation": {"kind": "materialize_source"}},
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("must not catch read or parser errors", errors[0])
+
     def test_general_engine_does_not_claim_report_specs(self):
         engine = object.__new__(GeneralPurposeEngine)
         spec = ExecutionSpec(intent="report", objective="Create a report")

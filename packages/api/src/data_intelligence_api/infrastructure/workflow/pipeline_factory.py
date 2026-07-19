@@ -30,6 +30,7 @@ from data_intelligence_sdk.engines.report import ReportEngine
 from data_intelligence_sdk.methods import (
     register_csv_methods,
     register_local_data_methods,
+    register_spreadsheet_methods,
 )
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.runtime.config import ConfigManager
@@ -127,6 +128,7 @@ def _default_method_hub() -> MethodHub:
     method_hub = MethodHub()
     register_csv_methods(method_hub)
     register_local_data_methods(method_hub)
+    register_spreadsheet_methods(method_hub)
     return method_hub
 
 
@@ -408,7 +410,7 @@ def create_example_pipeline(
     if force_report_code_agent is None:
         force_report_code_agent = _env_flag(
             "REPORT_FORCE_CODE_AGENT",
-            default=True,
+            default=False,
         )
     if artifact_store is None:
         artifact_settings = resolved_config_manager.artifact_settings()
@@ -499,7 +501,7 @@ def create_report_pipeline(
         engine=ReportEngine(
             force_code_agent=_env_flag(
                 "REPORT_FORCE_CODE_AGENT",
-                default=True,
+                default=False,
             )
         ),
         method_hub=method_hub,

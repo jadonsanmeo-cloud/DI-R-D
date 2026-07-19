@@ -20,6 +20,7 @@ __all__ = [
 DEFAULT_METHODS = (
     "inspect_data_folder",
     "profile_delimited_file",
+    "materialize_spreadsheet",
     "summarize_delimited_columns",
     "aggregate_delimited_file",
     "filter_delimited_rows",

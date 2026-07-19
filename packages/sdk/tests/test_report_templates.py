@@ -772,6 +772,44 @@ class ReportTemplateTests(unittest.TestCase):
         )
         self.assertEqual(aligned["execution_arguments"], {})
 
+    def test_chart_fallback_distinguishes_empty_output_from_missing_output(self):
+        chart_id = "profile.primary.chart"
+        template_instance = {
+            "bindings": [
+                {
+                    "requirement_ref": "comparison",
+                    "status": "resolved",
+                    "plan_output_refs": ["step-output://load/rows"],
+                }
+            ],
+            "sections": [
+                {
+                    "blocks": [
+                        {
+                            "chart_slot": {
+                                "chart_id": chart_id,
+                                "suggested_type": "bar",
+                                "data_requirement_refs": ["comparison"],
+                                "fallback": {"action": "omit"},
+                            }
+                        }
+                    ]
+                }
+            ],
+        }
+        result = self._step_result("load", "artifact://rows", chart_id, "value", 1)
+        result["chart_datasets"][0]["data"] = []
+
+        ready, fallbacks = ChartInputAssembler().prepare(
+            template_instance,
+            [result],
+        )
+
+        self.assertFalse(ready)
+        self.assertEqual(len(fallbacks), 1)
+        self.assertIn("no chartable rows", fallbacks[0]["warnings"][0])
+        self.assertNotIn("Unavailable plan outputs", fallbacks[0]["warnings"][0])
+
     @staticmethod
     def _step_result(step_id, artifact_ref, chart_id, field, value):
         return {
