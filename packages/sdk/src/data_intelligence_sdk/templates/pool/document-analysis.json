@@ -1,0 +1,171 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "document-analysis",
+  "version": "1.2.0",
+  "name": "Document Analysis",
+  "description": "A goal-driven report for PDF, text, Markdown, and chunked document sources that emphasizes subjects, claims, evidence, relationships, and limitations.",
+  "tags": ["document", "pdf", "text", "content", "insight"],
+  "selection": {
+    "report_intents": ["document_report", "document_analysis", "content_overview"],
+    "keywords": ["document", "pdf", "text", "content", "analysis", "file report"],
+    "data_signals": ["document_pages_or_chunks", "text_content", "ordered_document_units"]
+  },
+  "defaults": {
+    "locale": "en-US",
+    "max_narrative_sentences": 6,
+    "chart_library": "echarts"
+  },
+  "data_requirements": [
+    {
+      "requirement_id": "goal-evidence",
+      "description": "Materialize evidence from the actual document content that is sufficient to answer the user's objective.",
+      "required": true,
+      "semantic_roles": {
+        "measures": ["goal_evidence"]
+      },
+      "calculation_hints": [
+        "Preserve text and source locations needed to identify the subject, main claims, arguments, sections, relationships, and limitations.",
+        "Include bounded supporting excerpts or locations for consequential findings.",
+        "Do not substitute page, chunk, word, or character counts for content evidence."
+      ],
+      "expected_output": {"shape": "table", "max_rows": 200},
+      "fallback": {"action": "message", "message": "Explain that readable content evidence is unavailable."}
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "report-overview",
+      "title": "Overview",
+      "purpose": "Answer the objective and surface the most important content findings immediately.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "executive-summary",
+          "type": "narrative",
+          "title": "Executive Summary",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Lead with the document's subject, purpose, and direct answer to the user objective.",
+            "Synthesize the strongest evidence-backed findings in no more than five sentences.",
+            "Do not lead with extraction or file-size statistics."
+          ]
+        },
+        {
+          "block_id": "key-findings",
+          "type": "recommendations",
+          "title": "Key Findings",
+          "required": true,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Present distinct, evidence-backed findings as concise scan-friendly items.",
+            "Prefer claims, relationships, implications, and limitations over metadata."
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "headline-evidence",
+      "title": "Data at a Glance",
+      "purpose": "Provide four dynamically selected overview measures for the analyzed evidence.",
+      "required": true,
+      "layout": {"columns": 12, "density": "compact"},
+      "blocks": [
+        {
+          "block_id": "dynamic-kpis",
+          "type": "kpi_group",
+          "title": "Overview",
+          "required": true,
+          "layout": {"span": 12, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Show exactly four dynamically selected metrics in the supplied order.",
+            "Prefer objective-relevant measures and use structural measures to complete the overview."
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "visual-analysis",
+      "title": "Focused Analysis",
+      "purpose": "Pair one meaningful visual comparison with interpretation when quantitative evidence exists.",
+      "required": false,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "primary-analysis-chart",
+          "type": "chart",
+          "title": "Evidence Comparison",
+          "required": false,
+          "layout": {"span": 8, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "primary-analysis-chart",
+            "intent": "Visualize the most informative objective-relevant comparison supported by the document.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "scatter", "pie"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {
+              "title": "Evidence comparison",
+              "value_format": "compact_number",
+              "show_legend": true
+            },
+            "fallback": {"action": "omit", "message": "No meaningful quantitative comparison is available."}
+          },
+          "instructions": ["Use only evidence that helps answer the objective."]
+        },
+        {
+          "block_id": "analysis-interpretation",
+          "type": "narrative",
+          "title": "Interpretation",
+          "required": false,
+          "layout": {"span": 4, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Explain what the evidence means and any material caveats.",
+            "Do not narrate chart mechanics or repeat labels."
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "evidence-and-caveats",
+      "title": "Evidence and Caveats",
+      "purpose": "Ground the report in source evidence and state important limitations.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "supporting-evidence",
+          "type": "narrative",
+          "title": "Supporting Evidence",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "standard"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Connect major findings to available excerpts, sections, or source locations.",
+            "Paraphrase by default and keep quotations brief."
+          ]
+        },
+        {
+          "block_id": "limitations",
+          "type": "recommendations",
+          "title": "Limitations and Next Questions",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "State only limitations supported by extraction coverage or evidence gaps.",
+            "Suggest next questions only when they follow from the findings."
+          ]
+        }
+      ]
+    }
+  ]
+}

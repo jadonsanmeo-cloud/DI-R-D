@@ -67,6 +67,7 @@
           "type": "kpi_group",
           "title": "Trend Metrics",
           "required": true,
+          "layout": {"span": 12, "emphasis": "featured"},
           "data_requirement_refs": ["time-series-values", "period-change"],
           "instructions": ["Include start, end, minimum, maximum, and overall change when available."]
         },
@@ -74,6 +75,7 @@
           "block_id": "trend-narrative",
           "type": "narrative",
           "required": true,
+          "layout": {"span": 12, "emphasis": "standard"},
           "data_requirement_refs": ["time-series-values", "period-change"],
           "instructions": ["Distinguish sustained trends from single-period movement."]
         }
@@ -91,6 +93,7 @@
           "type": "chart",
           "title": "Measure Over Time",
           "required": true,
+          "layout": {"span": 8, "emphasis": "featured"},
           "data_requirement_refs": ["time-series-values"],
           "chart_slot": {
             "chart_slot_id": "main-time-series-chart",
@@ -110,6 +113,7 @@
           "type": "chart",
           "title": "Period-over-period Change",
           "required": false,
+          "layout": {"span": 4, "emphasis": "supporting"},
           "data_requirement_refs": ["period-change"],
           "chart_slot": {
             "chart_slot_id": "period-change-chart",
@@ -138,6 +142,7 @@
           "type": "chart",
           "title": "Anomaly Candidates",
           "required": false,
+          "layout": {"span": 8, "emphasis": "featured"},
           "data_requirement_refs": ["anomaly-candidates"],
           "chart_slot": {
             "chart_slot_id": "anomaly-chart",
@@ -156,6 +161,7 @@
           "block_id": "caveats",
           "type": "narrative",
           "required": true,
+          "layout": {"span": 4, "emphasis": "supporting"},
           "data_requirement_refs": ["time-series-values"],
           "instructions": ["Report missing periods, incomplete latest periods, and changes in time grain."]
         }

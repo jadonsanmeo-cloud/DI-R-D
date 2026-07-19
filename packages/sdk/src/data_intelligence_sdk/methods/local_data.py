@@ -424,6 +424,59 @@ def search_text_files(
     }
 
 
+def extract_pdf_text(
+    path: str | None = None,
+    data_root: str = "data",
+    max_pages: int = 200,
+    max_characters_per_page: int = 20_000,
+) -> dict[str, Any]:
+    """Extract bounded, page-level text and metadata from a local PDF."""
+
+    from pypdf import PdfReader
+
+    root = _resolve_data_root(data_root)
+    pdf_path = _resolve_file(path, root, {".pdf"})
+    if pdf_path.suffix.lower() != ".pdf":
+        raise ValueError(f"Expected a PDF file, received: {pdf_path}")
+
+    reader = PdfReader(pdf_path)
+    if reader.is_encrypted:
+        try:
+            reader.decrypt("")
+        except Exception as exc:
+            raise ValueError("The PDF is encrypted and could not be opened.") from exc
+
+    page_limit = max(1, min(int(max_pages), 1000))
+    character_limit = max(1, min(int(max_characters_per_page), 100_000))
+    rows = []
+    for index, page in enumerate(reader.pages[:page_limit], start=1):
+        text = (page.extract_text() or "").strip()
+        rows.append(
+            {
+                "page_number": index,
+                "text": text[:character_limit],
+                "character_count": len(text),
+                "truncated": len(text) > character_limit,
+            }
+        )
+
+    metadata = {
+        str(key).lstrip("/"): str(value)
+        for key, value in (reader.metadata or {}).items()
+        if value is not None
+    }
+    return {
+        "schema_version": "1.0",
+        "source": str(pdf_path),
+        "relative_path": _relative(pdf_path, root),
+        "page_count": len(reader.pages),
+        "extracted_page_count": len(rows),
+        "character_count": sum(int(row["character_count"]) for row in rows),
+        "metadata": metadata,
+        "rows": rows,
+    }
+
+
 def summarize_wide_numeric_table(
     path: str | None = None,
     id_column: str | None = None,
@@ -591,6 +644,25 @@ def register_local_data_methods(method_hub: MethodHub) -> None:
             132,
             [
                 "The report needs context or evidence from local text or markdown documents.",
+            ],
+        ),
+        (
+            "extract_pdf_text",
+            extract_pdf_text,
+            [
+                "load_document",
+                "read_pdf",
+                "extract_document_text",
+                "inspect_documents",
+                "data_folder_report",
+                "generate_report",
+            ],
+            "Extract bounded page-level text and metadata from a local PDF document.",
+            ["local-data", "documents", "pdf", "extraction"],
+            144,
+            [
+                "The report needs text, page counts, or metadata from a local PDF.",
+                "A plan step loads or extracts content from a PDF document.",
             ],
         ),
         (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from data_intelligence_sdk.runtime.interfaces import InterfaceBuilder, InterfaceRegistry
 from data_intelligence_sdk.runtime.method_hub import MethodHub
@@ -31,3 +32,5 @@ class EngineRuntimeContext:
     resource_manager: ResourceManager | None = None
     sandbox: DeepAgentSandboxSession | None = None
     run_artifact: RunArtifactSession | None = None
+    request_scope_id: str = field(default_factory=lambda: str(uuid4()))
+    request_method_names: list[str] = field(default_factory=list)

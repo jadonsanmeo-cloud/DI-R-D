@@ -365,7 +365,9 @@ def _latest_successful_grounding(
     return None
 
 
-def _execution_value(execution: dict[str, Any]) -> object | None:
+def _execution_value(execution: dict[str, Any] | None) -> object | None:
+    if execution is None:
+        return None
     result = execution.get("result")
     if result is not None and result != "":
         return result
@@ -373,7 +375,7 @@ def _execution_value(execution: dict[str, Any]) -> object | None:
     return stdout or None
 
 
-def _render_execution_result(execution: dict[str, Any]) -> str:
+def _render_execution_result(execution: dict[str, Any] | None) -> str:
     value = _execution_value(execution)
     if value is None:
         return ""

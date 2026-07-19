@@ -5,6 +5,22 @@
   "template_schema": "template.schema.json",
   "templates": [
     {
+      "template_id": "document-analysis",
+      "version": "1.1.0",
+      "path": "document-analysis.json",
+      "name": "Document Analysis",
+      "tags": ["document", "pdf", "text", "content", "insight"],
+      "selection_hint": "Use for PDF, text, Markdown, and document sources that need goal-driven analysis of subjects, claims, evidence, relationships, and limitations."
+    },
+    {
+      "template_id": "data-profile",
+      "version": "1.1.0",
+      "path": "data-profile.json",
+      "name": "Data Analysis",
+      "tags": ["dataset", "table", "csv", "spreadsheet", "analysis"],
+      "selection_hint": "Use for CSV, TSV, Excel, Parquet, and JSON tables that need goal-driven patterns, comparisons, relationships, anomalies, and limitations."
+    },
+    {
       "template_id": "executive-overview",
       "version": "1.0.0",
       "path": "executive-overview.json",

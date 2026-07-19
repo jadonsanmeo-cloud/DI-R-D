@@ -14,7 +14,6 @@ services:
         required: false
     environment:
       DATA_CORPUS_ROOT: /app/data
-      CHAT_STORE_DIR: /app/.data/chat
       DATABASE_URL: postgresql://${POSTGRES_USER:-data_intelligence}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-data_intelligence}
       MODEL_CONFIG_PATH: /app/configs/proxy-openrouter.toml
       PYTHONUNBUFFERED: "1"

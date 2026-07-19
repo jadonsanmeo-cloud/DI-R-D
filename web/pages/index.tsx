@@ -220,6 +220,46 @@ interface Artifact {
   chartConfig?: Partial<ChartConfig>;
 }
 
+const isHtmlDocument = (content: unknown): content is string => {
+  if (typeof content !== 'string') return false;
+  const normalized = content.trimStart().toLowerCase();
+  return normalized.startsWith('<!doctype html') || normalized.startsWith('<html');
+};
+
+const reportArtifactFromResponse = (payload: any, messageId: string): Artifact | null => {
+  const renderedReports = Array.isArray(payload?.metadata?.rendered_reports)
+    ? payload.metadata.rendered_reports
+    : [];
+  const renderedHtml = renderedReports.find(
+    (item: any) => item?.format === 'html' && typeof item?.content === 'string',
+  );
+  const responseHtml = payload?.response?.output_text;
+  const content = renderedHtml?.content || (isHtmlDocument(responseHtml) ? responseHtml : null);
+  if (!content) return null;
+
+  const reportTitle = payload?.metadata?.structured_report?.title;
+  const safeTitle =
+    typeof reportTitle === 'string' && reportTitle.trim()
+      ? reportTitle.trim().replace(/[\\/:*?"<>|]+/g, '-')
+      : 'Data intelligence report';
+  return {
+    id: `${messageId}-report-html`,
+    type: 'html',
+    name: `${safeTitle}.html`,
+    content,
+    createdAt: Date.now(),
+    messageId,
+    downloadable: true,
+    mimeType: renderedHtml?.media_type || 'text/html',
+    size: new Blob([content]).size,
+  };
+};
+
+const reportSummaryFromResponse = (payload: any): string | null => {
+  const summary = payload?.metadata?.structured_report?.summary;
+  return typeof summary === 'string' && summary.trim() ? summary.trim() : null;
+};
+
 // Convert execution data to Manus panel format
 const convertToManusFormat = (
   execution:
@@ -1499,11 +1539,36 @@ const Playground: NextPage = () => {
           setMessages(current =>
             current.map(item =>
               item.id === messageId
-                ? { ...item, context: cleanFinalContent(payload.text || ''), thinking: false, confirmation: undefined }
+                ? {
+                    ...item,
+                    context: isHtmlDocument(payload.text)
+                      ? 'HTML report generated.'
+                      : cleanFinalContent(payload.text || ''),
+                    thinking: false,
+                    confirmation: undefined,
+                  }
                 : item,
             ),
           );
         } else if (payload.type === 'response.completed') {
+          const reportArtifact = reportArtifactFromResponse(payload, messageId);
+          if (reportArtifact) {
+            setArtifacts(current => [
+              ...current.filter(item => item.id !== reportArtifact.id),
+              reportArtifact,
+            ]);
+            setPreviewArtifact(reportArtifact);
+            setRightPanelView('html-preview');
+            setRightPanelCollapsed(false);
+            const reportSummary = reportSummaryFromResponse(payload);
+            if (reportSummary) {
+              setMessages(current =>
+                current.map(item =>
+                  item.id === messageId ? { ...item, context: reportSummary, thinking: false } : item,
+                ),
+              );
+            }
+          }
           sessionStorage.removeItem(PENDING_RESPONSE_STORAGE_KEY);
           notifyResponseHistoryChanged();
           setExecutionMap(current => {
@@ -1899,8 +1964,29 @@ const Playground: NextPage = () => {
           return;
         }
         if (payload.type === 'response.output_text.done') {
-          payload = { type: 'final', content: payload.text || '' };
+          payload = {
+            type: 'final',
+            content: isHtmlDocument(payload.text) ? 'HTML report generated.' : payload.text || '',
+          };
         } else if (payload.type === 'response.completed') {
+          const reportArtifact = reportArtifactFromResponse(payload, responseId);
+          if (reportArtifact) {
+            setArtifacts(current => [
+              ...current.filter(item => item.id !== reportArtifact.id),
+              reportArtifact,
+            ]);
+            setPreviewArtifact(reportArtifact);
+            setRightPanelView('html-preview');
+            setRightPanelCollapsed(false);
+            const reportSummary = reportSummaryFromResponse(payload);
+            if (reportSummary) {
+              setMessages(current =>
+                current.map(item =>
+                  item.id === responseId ? { ...item, context: reportSummary, thinking: false } : item,
+                ),
+              );
+            }
+          }
           setLoading(false);
           notifyResponseHistoryChanged();
           return;

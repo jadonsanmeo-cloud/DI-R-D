@@ -1,0 +1,183 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "data-profile",
+  "version": "1.2.0",
+  "name": "Data Analysis",
+  "description": "A goal-driven report for CSV, TSV, spreadsheet, Parquet, and tabular JSON sources that emphasizes patterns, comparisons, relationships, anomalies, and limitations.",
+  "tags": ["dataset", "table", "csv", "spreadsheet", "analysis"],
+  "selection": {
+    "report_intents": ["data_profile", "dataset_overview", "file_report", "data_analysis"],
+    "keywords": ["csv", "spreadsheet", "dataset", "table", "analysis", "insight"],
+    "data_signals": ["tabular_rows", "named_columns", "optional_numeric_measures"]
+  },
+  "defaults": {
+    "locale": "en-US",
+    "max_narrative_sentences": 6,
+    "chart_library": "echarts"
+  },
+  "data_requirements": [
+    {
+      "requirement_id": "goal-evidence",
+      "description": "Materialize rows, fields, and computed evidence sufficient to answer the user's objective from actual data values.",
+      "required": true,
+      "semantic_roles": {
+        "measures": ["goal_evidence"]
+      },
+      "calculation_hints": [
+        "Preserve the fields needed for objective-relevant distributions, comparisons, relationships, anomalies, and limitations.",
+        "Do not substitute row count, column count, or schema description for analysis of values.",
+        "Apply only filters confirmed by the user objective or execution spec."
+      ],
+      "expected_output": {"shape": "table", "max_rows": 500},
+      "fallback": {"action": "message", "message": "Explain that objective-relevant value evidence is unavailable."}
+    },
+    {
+      "requirement_id": "quality-evidence",
+      "description": "Profile material quality issues only when they affect interpretation of the objective.",
+      "required": false,
+      "semantic_roles": {
+        "measures": ["quality_measure"],
+        "dimensions": ["field_name"]
+      },
+      "calculation_hints": [
+        "Focus on missingness, duplicates, invalid values, or coverage gaps that can change the conclusion.",
+        "Do not create a quality section when no material issue is present."
+      ],
+      "expected_output": {"shape": "category_series", "max_rows": 100},
+      "fallback": {"action": "omit", "message": "Omit quality details when they are not material."}
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "report-overview",
+      "title": "Overview",
+      "purpose": "Answer the objective and surface the most important value-based findings.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "executive-summary",
+          "type": "narrative",
+          "title": "Executive Summary",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Lead with a direct answer to the objective and the strongest observed patterns.",
+            "Do not lead with row count, column count, or field names alone.",
+            "Use no more than five sentences."
+          ]
+        },
+        {
+          "block_id": "key-findings",
+          "type": "recommendations",
+          "title": "Key Findings",
+          "required": true,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Present distinct comparisons, relationships, anomalies, or limitations.",
+            "Keep each item tied to observed values."
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "headline-evidence",
+      "title": "Data at a Glance",
+      "purpose": "Provide four dynamically selected overview measures for the analyzed data.",
+      "required": true,
+      "layout": {"columns": 12, "density": "compact"},
+      "blocks": [
+        {
+          "block_id": "dynamic-kpis",
+          "type": "kpi_group",
+          "title": "Overview",
+          "required": true,
+          "layout": {"span": 12, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Show exactly four dynamically selected metrics in the supplied order.",
+            "Prefer objective-relevant measures and use structural measures to complete the overview."
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "primary-analysis",
+      "title": "Focused Analysis",
+      "purpose": "Pair the most useful visual evidence with concise interpretation.",
+      "required": false,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "primary-analysis-chart",
+          "type": "chart",
+          "title": "Primary Comparison",
+          "required": false,
+          "layout": {"span": 8, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "primary-analysis-chart",
+            "intent": "Visualize the most informative comparison, trend, or distribution for the objective.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "scatter", "pie", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {
+              "title": "Primary comparison",
+              "value_format": "compact_number",
+              "show_legend": true
+            },
+            "fallback": {"action": "omit", "message": "No meaningful quantitative comparison is available."}
+          },
+          "instructions": ["Use the visual form that best fits the bound evidence."]
+        },
+        {
+          "block_id": "analysis-interpretation",
+          "type": "narrative",
+          "title": "Interpretation",
+          "required": false,
+          "layout": {"span": 4, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": [
+            "Explain the implication of the comparison and material caveats.",
+            "Do not repeat chart labels or narrate chart mechanics."
+          ]
+        }
+      ]
+    },
+    {
+      "section_id": "quality-and-caveats",
+      "title": "Quality and Caveats",
+      "purpose": "Explain only the data limitations that materially affect interpretation.",
+      "required": false,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "quality-evidence-table",
+          "type": "table",
+          "title": "Material Data Issues",
+          "required": false,
+          "layout": {"span": 7, "emphasis": "standard"},
+          "data_requirement_refs": ["quality-evidence"],
+          "instructions": ["Include only fields with interpretation-relevant issues."]
+        },
+        {
+          "block_id": "limitations",
+          "type": "recommendations",
+          "title": "Limitations and Next Checks",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence", "quality-evidence"],
+          "instructions": [
+            "Tie every limitation or next check to observed evidence.",
+            "Do not add generic data-cleaning advice."
+          ]
+        }
+      ]
+    }
+  ]
+}

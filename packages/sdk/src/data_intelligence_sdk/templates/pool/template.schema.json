@@ -146,6 +146,14 @@
         "density": {"enum": ["compact", "comfortable", "detailed"]}
       }
     },
+    "blockLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "span": {"type": "integer", "minimum": 1, "maximum": 12},
+        "emphasis": {"enum": ["standard", "featured", "supporting"]}
+      }
+    },
     "chartSlot": {
       "type": "object",
       "additionalProperties": false,
@@ -235,6 +243,7 @@
         "type": {"enum": ["narrative", "kpi_group", "chart", "table", "recommendations"]},
         "title": {"type": "string"},
         "required": {"type": "boolean"},
+        "layout": {"$ref": "#/$defs/blockLayout"},
         "data_requirement_refs": {
           "type": "array",
           "items": {"$ref": "#/$defs/identifier"},

@@ -79,12 +79,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", help="OpenAI-compatible base URL override.")
     parser.add_argument(
         "--config",
-        default="configs/development/proxy-openrouter.toml",
+        default="configs/proxy-openrouter.toml",
         help="Model configuration TOML path.",
     )
     parser.add_argument(
         "--env-file",
-        default="docker/.env",
+        default=".env",
         help="Environment file used by TOML env placeholders.",
     )
     parser.add_argument(
