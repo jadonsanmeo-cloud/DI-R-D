@@ -54,9 +54,7 @@ class ArtifactConcurrencyTests(unittest.TestCase):
                 "application/javascript",
                 "console.log('report');",
             )
-            manifest = json.loads(
-                session.manifest_path.read_text(encoding="utf-8")
-            )
+            manifest = json.loads(session.manifest_path.read_text(encoding="utf-8"))
 
             self.assertEqual(
                 css.path.read_text(encoding="utf-8"),

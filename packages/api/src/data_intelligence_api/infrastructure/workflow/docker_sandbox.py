@@ -336,8 +336,7 @@ def _stage_sources(
         host_path = Path(source_text)
         if not host_path.is_file():
             raise ValueError(
-                "The Docker sandbox requires local source files: "
-                f"{source_text}"
+                "The Docker sandbox requires local source files: " f"{source_text}"
             )
         filename = host_path.name
         if filename in used_names:

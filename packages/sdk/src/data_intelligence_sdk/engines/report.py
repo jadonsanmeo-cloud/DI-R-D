@@ -422,11 +422,7 @@ def _json_structure(value: Any, depth: int = 0) -> Any:
     if isinstance(value, list):
         return {
             "type": "array",
-            "item": (
-                _json_structure(value[0], depth + 1)
-                if value
-                else "unknown"
-            ),
+            "item": (_json_structure(value[0], depth + 1) if value else "unknown"),
         }
     if isinstance(value, dict):
         return {
@@ -671,9 +667,7 @@ def _bind_dependency_inputs(steps: list[dict[str, Any]]) -> None:
             )
             if existing_binding is not None:
                 existing_binding.setdefault("name", output_name)
-                existing_binding["ref"] = (
-                    f"step-output://{dependency}/{output_name}"
-                )
+                existing_binding["ref"] = f"step-output://{dependency}/{output_name}"
                 continue
             empty_input = next(
                 (item for item in inputs if not str(item.get("ref", "")).strip()),
@@ -735,7 +729,9 @@ class _StepOutputRegistry:
                 if isinstance(value, list)
                 else ("object" if isinstance(value, dict) else type(value).__name__)
             )
-            artifact_ref = f"memory://report/{_safe_id(step_id)}/{_safe_id(output_name)}"
+            artifact_ref = (
+                f"memory://report/{_safe_id(step_id)}/{_safe_id(output_name)}"
+            )
             host_path = None
             if runtime.run_artifact is not None:
                 try:
@@ -897,7 +893,9 @@ class _StepInputResolver:
             ]
             candidates = list(dict.fromkeys(base_names))
             candidates.extend(
-                f"{name}_path" for name in list(candidates) if not name.endswith("_path")
+                f"{name}_path"
+                for name in list(candidates)
+                if not name.endswith("_path")
             )
             parameter_names = [
                 name
@@ -905,9 +903,7 @@ class _StepInputResolver:
                 if name in properties and name not in assigned
             ]
             if not parameter_names:
-                available = [
-                    str(name) for name in properties if name not in assigned
-                ]
+                available = [str(name) for name in properties if name not in assigned]
                 if len(resolved_inputs) == 1 and len(available) == 1:
                     parameter_names = [available[0]]
             if not parameter_names:
@@ -942,9 +938,7 @@ class _StepInputResolver:
     ) -> dict[str, Any]:
         return {
             "argument_name": _python_argument_name(
-                item.get("name")
-                or item.get("argument_name")
-                or record.output_name
+                item.get("name") or item.get("argument_name") or record.output_name
             ),
             "ref": f"step-output://{record.step_id}/{record.output_name}",
             "required": bool(item.get("required", True)),
@@ -967,11 +961,7 @@ class _StepInputResolver:
         sandbox: bool,
     ) -> Any:
         if parameter_name == "path" or parameter_name.endswith("_path"):
-            path = (
-                binding.get("sandbox_path")
-                if sandbox
-                else binding.get("host_path")
-            )
+            path = binding.get("sandbox_path") if sandbox else binding.get("host_path")
             if path:
                 return path
         return binding.get("value")
@@ -1077,11 +1067,7 @@ def _first_source_with_suffixes(
 ) -> str | None:
     normalized = tuple(item.lower() for item in suffixes)
     return next(
-        (
-            str(source)
-            for source in sources
-            if str(source).lower().endswith(normalized)
-        ),
+        (str(source) for source in sources if str(source).lower().endswith(normalized)),
         None,
     )
 
@@ -1381,16 +1367,12 @@ class PlanAgent(_PromptAgent):
                 else raw_operation or "analyze"
             ).lower()
             if _is_downstream_owned_step(raw_step, operation_kind):
-                ignored_steps.append(
-                    str(raw_step.get("step_id", f"step-{index}"))
-                )
+                ignored_steps.append(str(raw_step.get("step_id", f"step-{index}")))
                 continue
             required_data = raw_step.get("required_data", {})
             if not isinstance(required_data, dict):
                 required_data = {}
-            tables = [
-                str(item) for item in _list_value(required_data.get("tables"))
-            ]
+            tables = [str(item) for item in _list_value(required_data.get("tables"))]
             vectors = [
                 str(item)
                 for item in _list_value(required_data.get("vector_collections"))
@@ -1404,9 +1386,7 @@ class PlanAgent(_PromptAgent):
             if step_id in seen:
                 step_id = f"{step_id}-{index}"
             seen.add(step_id)
-            columns = [
-                str(item) for item in _list_value(required_data.get("columns"))
-            ]
+            columns = [str(item) for item in _list_value(required_data.get("columns"))]
             if tables and scope["columns"].get(tables[0]):
                 columns = [
                     item for item in columns if item in scope["columns"][tables[0]]
@@ -1455,13 +1435,10 @@ class PlanAgent(_PromptAgent):
                     }:
                         continue
                     roles = [
-                        str(role)
-                        for role in _list_value(output.get("semantic_roles"))
+                        str(role) for role in _list_value(output.get("semantic_roles"))
                     ]
                     output["semantic_roles"] = list(
-                        dict.fromkeys(
-                            roles + ["source_content", "goal_evidence"]
-                        )
+                        dict.fromkeys(roles + ["source_content", "goal_evidence"])
                     )
             source_registration_step = operation_kind.startswith(
                 ("register", "upload")
@@ -1503,8 +1480,7 @@ class PlanAgent(_PromptAgent):
                     "required": bool(raw_step.get("required", True)),
                     "inputs": _normalize_plan_inputs(raw_step.get("inputs")),
                     "depends_on": [
-                        str(item)
-                        for item in _list_value(raw_step.get("depends_on"))
+                        str(item) for item in _list_value(raw_step.get("depends_on"))
                     ],
                     "required_data": {
                         **required_data,
@@ -1525,18 +1501,19 @@ class PlanAgent(_PromptAgent):
                 if dependency in valid_step_ids
             ]
         _bind_dependency_inputs(normalized_steps)
-        warnings = [
-            str(item) for item in _list_value(payload.get("warnings"))
-        ]
+        warnings = [str(item) for item in _list_value(payload.get("warnings"))]
         if ignored_steps:
             warnings.append(
                 "Ignored downstream-owned presentation steps: "
                 + ", ".join(ignored_steps)
             )
-        default_revision = _int_value(
-            (previous_plan or {}).get("revision"),
-            0,
-        ) + 1
+        default_revision = (
+            _int_value(
+                (previous_plan or {}).get("revision"),
+                0,
+            )
+            + 1
+        )
         revision = _int_value(
             payload.get("revision"),
             default_revision,
@@ -1983,9 +1960,7 @@ class PlanAgent(_PromptAgent):
                     "request_id": feedback.get("request_id"),
                     "requirement_ref": feedback.get("requirement_ref"),
                     "decision": "added",
-                    "output_refs": [
-                        f"step-output://{request_id}/{request_id}"
-                    ],
+                    "output_refs": [f"step-output://{request_id}/{request_id}"],
                     "reason": None,
                 }
             )
@@ -2225,9 +2200,7 @@ class TemplateAgent(_PromptAgent):
                     applied_fallbacks.append(
                         {
                             "requirement_ref": requirement_id,
-                            "fallback": requirement.get(
-                                "fallback", {"action": "omit"}
-                            ),
+                            "fallback": requirement.get("fallback", {"action": "omit"}),
                         }
                     )
         sections = deepcopy(definition.get("sections", []))
@@ -2322,9 +2295,7 @@ class RouterAgent(_PromptAgent):
     ) -> dict[str, Any]:
         operation = step_request.get("operation", {})
         operation_kind = str(
-            operation.get("kind")
-            if isinstance(operation, dict)
-            else operation or ""
+            operation.get("kind") if isinstance(operation, dict) else operation or ""
         ).lower()
         spreadsheet_source = _first_source_with_suffixes(
             sources,
@@ -2432,9 +2403,7 @@ class RouterAgent(_PromptAgent):
         arguments = dict(arguments)
         parameters = tool.get("parameters_schema", {})
         properties = (
-            parameters.get("properties", {})
-            if isinstance(parameters, dict)
-            else {}
+            parameters.get("properties", {}) if isinstance(parameters, dict) else {}
         )
         if sources and "path" in properties:
             arguments["path"] = self._allowed_source(
@@ -2470,9 +2439,7 @@ class RouterAgent(_PromptAgent):
     ) -> dict[str, Any]:
         operation = step_request.get("operation", {})
         operation_kind = str(
-            operation.get("kind")
-            if isinstance(operation, dict)
-            else operation or ""
+            operation.get("kind") if isinstance(operation, dict) else operation or ""
         ).lower()
         spreadsheet_source = _first_source_with_suffixes(
             sources,
@@ -2645,9 +2612,10 @@ class CodeAgent(_PromptAgent):
             while "\\\\" in collapsed:
                 collapsed = collapsed.replace("\\\\", "\\")
             for source in allowed_sources:
-                if collapsed == source or Path(collapsed).name.lower() == Path(
-                    source
-                ).name.lower():
+                if (
+                    collapsed == source
+                    or Path(collapsed).name.lower() == Path(source).name.lower()
+                ):
                     return source
             return item
 
@@ -2688,7 +2656,8 @@ class CodeAgent(_PromptAgent):
                 rendered = str(value or "").strip().lower()
                 placeholder = (
                     not rendered
-                    or rendered in {
+                    or rendered
+                    in {
                         "file",
                         "file_path",
                         "path",
@@ -2942,14 +2911,10 @@ class ChartAgent(_PromptAgent):
             "library": "echarts",
             "selected_type": chart_type,
             "selection_reason": "The deterministic fallback used the template suggestion.",
-            "dataset_refs": [
-                item.get("artifact_ref") for item in datasets
-            ],
+            "dataset_refs": [item.get("artifact_ref") for item in datasets],
             "option": {
                 "title": {
-                    "text": presentation.get(
-                        "title", request.get("intent", "Chart")
-                    ),
+                    "text": presentation.get("title", request.get("intent", "Chart")),
                     "left": 0,
                     "textStyle": {
                         "color": "#182033",
@@ -2970,9 +2935,7 @@ class ChartAgent(_PromptAgent):
                     "bottom": 48,
                     "containLabel": True,
                 },
-                "dataset": [
-                    {"source": item.get("data", [])} for item in datasets
-                ],
+                "dataset": [{"source": item.get("data", [])} for item in datasets],
                 "xAxis": {
                     "type": "category",
                     "name": presentation.get("x_axis_label", ""),
@@ -3265,8 +3228,7 @@ class ReportAgent(_PromptAgent):
                 else:
                     content = {
                         "rows": [
-                            item.get("aggregated_data", {})
-                            for item in block_results
+                            item.get("aggregated_data", {}) for item in block_results
                         ]
                     }
                 blocks.append(
@@ -3358,9 +3320,8 @@ class ReportAgent(_PromptAgent):
         identity = f"{block_id} {title}"
         contents = []
         for item in results:
-            content = (
-                item.get("report_content")
-                or item.get("analysis", {}).get("report_content")
+            content = item.get("report_content") or item.get("analysis", {}).get(
+                "report_content"
             )
             contents.append(content if isinstance(content, dict) else {})
 
@@ -3400,17 +3361,13 @@ class ReportAgent(_PromptAgent):
                 values = [
                     observation
                     for item in results
-                    for observation in item.get("analysis", {}).get(
-                        "observations", []
-                    )
+                    for observation in item.get("analysis", {}).get("observations", [])
                 ]
             return cls._format_report_items(values)
 
         summaries = [
             str(
-                content.get("executive_summary")
-                or result.get("analysis_summary")
-                or ""
+                content.get("executive_summary") or result.get("analysis_summary") or ""
             ).strip()
             for result, content in zip(results, contents)
         ]
@@ -3435,8 +3392,10 @@ class ReportAgent(_PromptAgent):
                     or value.get("content")
                     or ""
                 ).strip()
-                text = f"{title}: {statement}" if title and statement else (
-                    statement or title
+                text = (
+                    f"{title}: {statement}"
+                    if title and statement
+                    else (statement or title)
                 )
                 if include_location and text:
                     location = value.get("source_location")
@@ -3444,9 +3403,8 @@ class ReportAgent(_PromptAgent):
                         refs = [
                             str(ref)
                             for ref in _list_value(value.get("evidence_refs"))
-                            if ref and not str(ref).startswith(
-                                ("artifact://", "memory://")
-                            )
+                            if ref
+                            and not str(ref).startswith(("artifact://", "memory://"))
                         ]
                         location = ", ".join(refs)
                     if location:
@@ -3865,12 +3823,8 @@ class DataScienceProcessor:
                         chart_data["rows"],
                         chart_data["rows"],
                     ),
-                    "data": deepcopy(
-                        chart_data["rows"][: self.max_inline_chart_rows]
-                    ),
-                    "truncated": (
-                        len(chart_data["rows"]) > self.max_inline_chart_rows
-                    ),
+                    "data": deepcopy(chart_data["rows"][: self.max_inline_chart_rows]),
+                    "truncated": (len(chart_data["rows"]) > self.max_inline_chart_rows),
                 }
             )
         result = {
@@ -3938,9 +3892,7 @@ class DataScienceProcessor:
         }
         for observation in observations:
             category = str(
-                observation.get("category")
-                or observation.get("type")
-                or "finding"
+                observation.get("category") or observation.get("type") or "finding"
             ).lower()
             target = next(
                 (name for name in categorized if name in category),
@@ -3959,20 +3911,20 @@ class DataScienceProcessor:
             return fallback
 
         summary_value = (
-            content.get("executive_summary")
-            or decision.get("analysis_summary")
-            or ""
+            content.get("executive_summary") or decision.get("analysis_summary") or ""
         )
         if isinstance(summary_value, list):
             summary = " ".join(
-                str(
-                    item.get("statement")
-                    or item.get("text")
-                    or item.get("content")
-                    or ""
-                ).strip()
-                if isinstance(item, dict)
-                else str(item).strip()
+                (
+                    str(
+                        item.get("statement")
+                        or item.get("text")
+                        or item.get("content")
+                        or ""
+                    ).strip()
+                    if isinstance(item, dict)
+                    else str(item).strip()
+                )
                 for item in summary_value
                 if str(item).strip()
             )
@@ -4021,9 +3973,7 @@ class DataScienceProcessor:
                 )
             ):
                 display_name = (
-                    str(name)
-                    if "percent" in str(name).lower()
-                    else f"{name}_percent"
+                    str(name) if "percent" in str(name).lower() else f"{name}_percent"
                 )
                 value = value * 100
                 key = re.sub(r"[^a-z0-9]+", "", display_name.lower())
@@ -4042,12 +3992,7 @@ class DataScienceProcessor:
 
     @staticmethod
     def _structural_overview_metrics(rows: list[Any]) -> dict[str, int]:
-        fields = {
-            str(key)
-            for row in rows
-            if isinstance(row, dict)
-            for key in row
-        }
+        fields = {str(key) for row in rows if isinstance(row, dict) for key in row}
         text_values: list[str] = []
 
         def collect(value: Any) -> None:
@@ -4101,12 +4046,8 @@ class DataScienceProcessor:
         if len(normalized_rows) < 2:
             normalized_rows = cls._default_chart_rows(rows)
         return {
-            "title": str(
-                chart_data.get("title") or "Evidence distribution"
-            )[:120],
-            "coverage": str(
-                chart_data.get("coverage") or "materialized_result"
-            )[:200],
+            "title": str(chart_data.get("title") or "Evidence distribution")[:120],
+            "coverage": str(chart_data.get("coverage") or "materialized_result")[:200],
             "rows": normalized_rows[:40],
         }
 
@@ -4123,13 +4064,7 @@ class DataScienceProcessor:
                 {"category": str(index + 1), "value": value}
                 for index, value in enumerate(scalar_numbers[:40])
             ]
-        fields = list(
-            dict.fromkeys(
-                str(key)
-                for row in dict_rows
-                for key in row
-            )
-        )
+        fields = list(dict.fromkeys(str(key) for row in dict_rows for key in row))
         numeric_fields = [
             field
             for field in fields
@@ -4149,9 +4084,7 @@ class DataScienceProcessor:
         ]
         if dimension_fields and len(numeric_fields) > 1:
             dimension = dimension_fields[0]
-            measure = next(
-                field for field in numeric_fields if field != dimension
-            )
+            measure = next(field for field in numeric_fields if field != dimension)
             return [
                 {
                     "category": str(row.get(dimension)),
@@ -4176,10 +4109,7 @@ class DataScienceProcessor:
                 )
                 / max(
                     1,
-                    sum(
-                        isinstance(row.get(field), str)
-                        for row in dict_rows
-                    ),
+                    sum(isinstance(row.get(field), str) for row in dict_rows),
                 )
             )
             <= 80
@@ -4187,8 +4117,7 @@ class DataScienceProcessor:
         preferred_dimensions = [
             field
             for field in short_text_fields
-            if not field.lower().endswith("id")
-            and "_id" not in field.lower()
+            if not field.lower().endswith("id") and "_id" not in field.lower()
         ] or short_text_fields
         if numeric_fields and preferred_dimensions:
             dimension = preferred_dimensions[0]
@@ -4229,12 +4158,49 @@ class DataScienceProcessor:
     @staticmethod
     def _term_frequency_chart_rows(rows: list[Any]) -> list[dict[str, Any]]:
         stopwords = {
-            "about", "after", "also", "and", "are", "been", "being", "between",
-            "can", "could", "data", "does", "each", "for", "from", "had", "has",
-            "have", "into", "its", "more", "not", "only", "other", "should",
-            "such", "than", "that", "the", "their", "then", "there", "these",
-            "they", "this", "those", "through", "using", "was", "were", "which",
-            "with", "would",
+            "about",
+            "after",
+            "also",
+            "and",
+            "are",
+            "been",
+            "being",
+            "between",
+            "can",
+            "could",
+            "data",
+            "does",
+            "each",
+            "for",
+            "from",
+            "had",
+            "has",
+            "have",
+            "into",
+            "its",
+            "more",
+            "not",
+            "only",
+            "other",
+            "should",
+            "such",
+            "than",
+            "that",
+            "the",
+            "their",
+            "then",
+            "there",
+            "these",
+            "they",
+            "this",
+            "those",
+            "through",
+            "using",
+            "was",
+            "were",
+            "which",
+            "with",
+            "would",
         }
         texts: list[str] = []
 
@@ -4286,16 +4252,11 @@ class DataScienceProcessor:
                 segment_count = 6
                 segment_size = max_string_chars // segment_count
                 starts = {
-                    round(
-                        index
-                        * (len(value) - segment_size)
-                        / (segment_count - 1)
-                    )
+                    round(index * (len(value) - segment_size) / (segment_count - 1))
                     for index in range(segment_count)
                 }
                 return "\n... [sample gap] ...\n".join(
-                    value[start : start + segment_size]
-                    for start in sorted(starts)
+                    value[start : start + segment_size] for start in sorted(starts)
                 )
             if isinstance(value, dict):
                 return {str(key): bounded(item) for key, item in value.items()}
@@ -4304,8 +4265,7 @@ class DataScienceProcessor:
                     selected_items = value
                 else:
                     indices = {
-                        round(index * (len(value) - 1) / 49)
-                        for index in range(50)
+                        round(index * (len(value) - 1) / 49) for index in range(50)
                     }
                     selected_items = [value[index] for index in sorted(indices)]
                 return [bounded(item) for item in selected_items]
@@ -4339,9 +4299,7 @@ class DataScienceProcessor:
         truncated_record_count = sum(
             row.get("truncated") is True for row in rows if isinstance(row, dict)
         )
-        if any(
-            isinstance(row, dict) and "truncated" in row for row in rows
-        ):
+        if any(isinstance(row, dict) and "truncated" in row for row in rows):
             source_context["truncated_record_count"] = truncated_record_count
         aggregated["source_context"] = source_context
         normalized["aggregated_data"] = aggregated
@@ -4350,10 +4308,7 @@ class DataScienceProcessor:
             str(warning)
             for warning in _list_value(normalized.get("warnings"))
             if str(warning)
-            and not (
-                "truncat" in str(warning).lower()
-                and truncated_record_count == 0
-            )
+            and not ("truncat" in str(warning).lower() and truncated_record_count == 0)
         ]
         if truncated_record_count:
             warnings.append(
@@ -4428,9 +4383,7 @@ class ChartInputAssembler:
                 empty_outputs = []
                 for output_ref in output_refs:
                     match = _STEP_OUTPUT_REF.match(output_ref)
-                    result = (
-                        results_by_step.get(match.group(1)) if match else None
-                    )
+                    result = results_by_step.get(match.group(1)) if match else None
                     if result is None:
                         unresolved_outputs.append(output_ref)
                         continue
@@ -4472,9 +4425,7 @@ class ChartInputAssembler:
                     "constraints": slot.get("constraints", {}),
                     "dataset": datasets[0] if datasets else {},
                     "datasets": datasets,
-                    "dataset_refs": [
-                        item.get("artifact_ref") for item in datasets
-                    ],
+                    "dataset_refs": [item.get("artifact_ref") for item in datasets],
                     "aggregated_metrics": [
                         metric
                         for result in results
@@ -4676,9 +4627,8 @@ class ReportRenderer:
         for section in report.get("sections", []):
             rendered_blocks = []
             for block in section.get("blocks", []):
-                if (
-                    block.get("status") == "no_data"
-                    and not block.get("required", False)
+                if block.get("status") == "no_data" and not block.get(
+                    "required", False
                 ):
                     continue
                 content = block.get("content", {})
@@ -4707,9 +4657,7 @@ class ReportRenderer:
                     if not text:
                         continue
                     for paragraph in self._paragraphs(text):
-                        block_body.append(
-                            f"<p>{self._escape(paragraph)}</p>"
-                        )
+                        block_body.append(f"<p>{self._escape(paragraph)}</p>")
                 elif block_type == "recommendations":
                     raw_text = str(content.get("text", ""))
                     line_items = [
@@ -4778,12 +4726,9 @@ class ReportRenderer:
                             f'data-chart-id="{chart_id}">{option}</script>'
                         )
                     else:
-                        fallback = chart.get("fallback") or content.get(
-                            "fallback", {}
-                        )
-                        if (
-                            fallback.get("action") == "omit"
-                            and not block.get("required", False)
+                        fallback = chart.get("fallback") or content.get("fallback", {})
+                        if fallback.get("action") == "omit" and not block.get(
+                            "required", False
                         ):
                             continue
                         block_body.append(
@@ -4801,7 +4746,7 @@ class ReportRenderer:
                 rendered_blocks.append(
                     '<div class="report-block '
                     f"report-block-{_safe_id(block_type)} "
-                    f"block-{emphasis}\" style=\"--block-span:{span}\">"
+                    f'block-{emphasis}" style="--block-span:{span}">'
                     + "".join(block_body)
                     + "</div>"
                 )
@@ -4889,9 +4834,7 @@ class ReportRenderer:
         sentences = [
             sentence
             for sentence in cls._sentences(value)
-            if not any(
-                phrase in sentence.lower() for phrase in internal_phrases
-            )
+            if not any(phrase in sentence.lower() for phrase in internal_phrases)
         ]
         selected = []
         for sentence in sentences:
@@ -4951,8 +4894,7 @@ class ReportRenderer:
         body = []
         for row in normalized[:100]:
             cells = "".join(
-                f"<td>{self._escape(str(row.get(key, '')))}</td>"
-                for key in columns
+                f"<td>{self._escape(str(row.get(key, '')))}</td>" for key in columns
             )
             body.append(f"<tr>{cells}</tr>")
         return (
@@ -5616,8 +5558,7 @@ class ReportEngine:
                 "selection": proposal.get("selection"),
                 "missing_data_requests": proposal.get("missing_data_requests", []),
                 "scheduled_step_ids": [
-                    step.get("step_id")
-                    for step in execution_plan.get("steps", [])
+                    step.get("step_id") for step in execution_plan.get("steps", [])
                 ],
             },
         )
@@ -5658,8 +5599,7 @@ class ReportEngine:
             if not step:
                 continue
             dependencies = {
-                str(dependency)
-                for dependency in _list_value(step.get("depends_on"))
+                str(dependency) for dependency in _list_value(step.get("depends_on"))
             }
             dependencies.update(
                 dependency
@@ -5673,9 +5613,7 @@ class ReportEngine:
                     pending.append(dependency)
         execution_plan = deepcopy(plan)
         execution_plan["steps"] = [
-            step
-            for step in steps
-            if str(step.get("step_id")) in required_step_ids
+            step for step in steps if str(step.get("step_id")) in required_step_ids
         ]
         omitted = [
             str(step.get("step_id"))
@@ -5774,9 +5712,7 @@ class ReportEngine:
         self,
         state: _ReportGraphState,
     ) -> dict[str, Any]:
-        missing = state.get("template_proposal", {}).get(
-            "missing_data_requests", []
-        )
+        missing = state.get("template_proposal", {}).get("missing_data_requests", [])
         warnings = [
             str(item.get("reason") or item.get("description"))
             for item in missing
@@ -5798,9 +5734,9 @@ class ReportEngine:
             "sections": [],
             "metrics": [],
             "charts": [],
-            "sources": _scope_from_spec(
-                state["spec"], state["corpus_package"]
-            )["sources"],
+            "sources": _scope_from_spec(state["spec"], state["corpus_package"])[
+                "sources"
+            ],
             "warnings": warnings,
         }
         return {"structured_report": structured, "legacy_markdown": None}
@@ -5849,8 +5785,7 @@ class ReportEngine:
         unresolved = [
             step
             for step in remaining
-            if str(step.get("step_id")) not in skipped_ids
-            and step not in ready
+            if str(step.get("step_id")) not in skipped_ids and step not in ready
         ]
         if unresolved and not ready and not skipped_ids:
             for step in unresolved:
@@ -6071,9 +6006,7 @@ class ReportEngine:
                 )
                 item["artifact_ref"] = artifact.artifact_ref
                 rendered_artifact_refs.append(artifact.artifact_ref)
-                state["runtime"].run_context.add_artifact_ref(
-                    artifact.artifact_ref
-                )
+                state["runtime"].run_context.add_artifact_ref(artifact.artifact_ref)
         output_format = (
             state["spec"].constraints.get("output_format")
             if isinstance(state["spec"].constraints, dict)
@@ -6301,12 +6234,10 @@ class ReportEngine:
             validation_feedback=state.get("validation_feedback"),
         )
         code_spec = self._align_generated_parameter_schema(code_spec)
-        code_spec["execution_arguments"] = (
-            CodeAgent._normalize_execution_arguments(
-                code_spec.get("execution_arguments"),
-                code_spec.get("parameters_schema", {}),
-                scoped.get("sources", []),
-            )
+        code_spec["execution_arguments"] = CodeAgent._normalize_execution_arguments(
+            code_spec.get("execution_arguments"),
+            code_spec.get("parameters_schema", {}),
+            scoped.get("sources", []),
         )
         code_spec["execution_arguments"] = self.input_resolver.merge_arguments(
             code_spec.get("execution_arguments"),
@@ -6362,8 +6293,7 @@ class ReportEngine:
             if default is None
         ]
         required_names = [
-            argument.arg
-            for argument in required_positional + required_keyword_only
+            argument.arg for argument in required_positional + required_keyword_only
         ]
 
         raw_schema = aligned.get("parameters_schema")
@@ -6412,9 +6342,7 @@ class ReportEngine:
     ) -> str:
         if parameter_name == "path" or parameter_name.endswith("_path"):
             return "string"
-        rendered = (
-            ast.unparse(annotation).lower() if annotation is not None else ""
-        )
+        rendered = ast.unparse(annotation).lower() if annotation is not None else ""
         if "list" in rendered or "sequence" in rendered or "tuple" in rendered:
             return "array"
         if "dict" in rendered or "mapping" in rendered:
@@ -6474,8 +6402,8 @@ class ReportEngine:
         )
         sandbox_logs = self._sandbox_logs(sandbox_result)
         if contract_errors:
-            sandbox_logs = (
-                f"{sandbox_logs}\nContract errors: " + "; ".join(contract_errors)
+            sandbox_logs = f"{sandbox_logs}\nContract errors: " + "; ".join(
+                contract_errors
             )
         validation = self.validator_agent.run(
             _json_dumps(state["step"]),
@@ -6517,11 +6445,7 @@ class ReportEngine:
         validator_passed = (
             str(state.get("validation", {}).get("status", "")).lower() == "pass"
         )
-        if (
-            sandbox_passed
-            and validator_passed
-            and not state.get("contract_errors")
-        ):
+        if sandbox_passed and validator_passed and not state.get("contract_errors"):
             return "execute"
         if int(state.get("attempt", 0)) < self.max_generation_attempts:
             return "retry"
@@ -6601,9 +6525,7 @@ class ReportEngine:
         code_spec: dict[str, Any],
     ) -> dict[str, Any]:
         outputs = [
-            item
-            for item in _list_value(step.get("outputs"))
-            if isinstance(item, dict)
+            item for item in _list_value(step.get("outputs")) if isinstance(item, dict)
         ]
         declared = code_spec.get("output_schema")
         declared = deepcopy(declared) if isinstance(declared, dict) else {}
@@ -6614,9 +6536,7 @@ class ReportEngine:
         expected_type = (
             "array"
             if shape in {"table", "time_series", "category_series"}
-            else "object"
-            if shape == "record"
-            else None
+            else "object" if shape == "record" else None
         )
         if expected_type is None:
             return declared or {}
@@ -6671,9 +6591,7 @@ class ReportEngine:
             ]
         operation = step.get("operation", {}) if isinstance(step, dict) else {}
         operation_kind = str(
-            operation.get("kind")
-            if isinstance(operation, dict)
-            else operation or ""
+            operation.get("kind") if isinstance(operation, dict) else operation or ""
         ).lower()
         if operation_kind in {
             "load_excel",
@@ -6762,12 +6680,10 @@ class ReportEngine:
             if default is None
         ]
         function_required = {
-            argument.arg
-            for argument in required_positional + required_keyword_only
+            argument.arg for argument in required_positional + required_keyword_only
         }
         function_parameters = {
-            argument.arg
-            for argument in positional + function_node.args.kwonlyargs
+            argument.arg for argument in positional + function_node.args.kwonlyargs
         }
         for name in sorted(function_required):
             if name not in properties:
@@ -6775,9 +6691,7 @@ class ReportEngine:
                     f"parameters_schema must declare required function argument: {name}"
                 )
             if name not in arguments:
-                errors.append(
-                    f"Missing required function execution argument: {name}"
-                )
+                errors.append(f"Missing required function execution argument: {name}")
         if function_node.args.kwarg is None:
             errors.extend(
                 f"Unexpected execution argument for generated function: {name}"

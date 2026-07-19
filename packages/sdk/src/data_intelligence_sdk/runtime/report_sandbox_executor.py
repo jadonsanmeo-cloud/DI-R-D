@@ -66,9 +66,7 @@ class RequestSandboxExecutor:
             )
 
         source_code = str(
-            interface.metadata.get("source_code")
-            or interface.implementation_ref
-            or ""
+            interface.metadata.get("source_code") or interface.implementation_ref or ""
         )
         if not source_code.strip():
             return SandboxRunResult(

@@ -51,8 +51,7 @@ class ReportTemplateTests(unittest.TestCase):
             "time-series-values",
         )
         missing_by_requirement = {
-            item["requirement_ref"]: item
-            for item in proposal["missing_data_requests"]
+            item["requirement_ref"]: item for item in proposal["missing_data_requests"]
         }
         self.assertFalse(missing_by_requirement["period-change"]["required"])
         self.assertFalse(missing_by_requirement["anomaly-candidates"]["required"])
@@ -147,9 +146,7 @@ class ReportTemplateTests(unittest.TestCase):
                     {
                         "request_id": "provide-headline",
                         "decision": "added",
-                        "output_refs": [
-                            "step-output://headline/metrics"
-                        ],
+                        "output_refs": ["step-output://headline/metrics"],
                     }
                 ],
             },
@@ -163,11 +160,7 @@ class ReportTemplateTests(unittest.TestCase):
 
     def test_plan_shape_overrides_incompatible_generated_output_schema(self):
         schema = ReportEngine._step_output_schema(
-            {
-                "outputs": [
-                    {"name": "rows", "shape": "table"}
-                ]
-            },
+            {"outputs": [{"name": "rows", "shape": "table"}]},
             {"output_schema": {"type": "object"}},
         )
 
@@ -243,8 +236,7 @@ class ReportTemplateTests(unittest.TestCase):
         for template_id in ("document-analysis", "data-profile"):
             definition = self.pool.get(template_id)
             requirements = {
-                item["requirement_id"]: item
-                for item in definition["data_requirements"]
+                item["requirement_id"]: item for item in definition["data_requirements"]
             }
             self.assertTrue(requirements["goal-evidence"]["required"])
             serialized = str(definition)
@@ -413,7 +405,9 @@ class ReportTemplateTests(unittest.TestCase):
                                         "option": {
                                             "xAxis": {"type": "category"},
                                             "yAxis": {"type": "value"},
-                                            "series": [{"type": "line", "data": [1, 2]}],
+                                            "series": [
+                                                {"type": "line", "data": [1, 2]}
+                                            ],
                                         }
                                     },
                                 },
@@ -438,10 +432,7 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertIn('data-chart-id="report.overview.chart"', html)
 
     def test_renderer_uses_dashboard_layout_and_limits_kpis(self):
-        metrics = [
-            {"name": f"metric_{index}", "value": index}
-            for index in range(1, 7)
-        ]
+        metrics = [{"name": f"metric_{index}", "value": index} for index in range(1, 7)]
         rendered = ReportRenderer().render(
             {
                 "title": "Document report",
@@ -660,9 +651,7 @@ class ReportTemplateTests(unittest.TestCase):
             )
         )
         self.assertTrue(
-            ReportAgent._is_material_warning(
-                "Three source records were truncated."
-            )
+            ReportAgent._is_material_warning("Three source records were truncated.")
         )
 
     def test_negotiation_hash_ignores_revision_counters(self):

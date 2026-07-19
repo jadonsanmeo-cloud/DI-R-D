@@ -169,8 +169,7 @@ class _ConstantCodeAgent(_SumCodeAgent):
             },
             "execution_arguments": {},
             "source_code": (
-                "def produce_total() -> list[dict]:\n"
-                "    return [{'total': 5}]\n"
+                "def produce_total() -> list[dict]:\n" "    return [{'total': 5}]\n"
             ),
         }
 
@@ -370,7 +369,7 @@ def load_rows(path: str) -> list[dict]:
                         "operation": "inspect",
                         "outputs": "sales-profile",
                     }
-                ]
+                ],
             },
             spec,
             DataCorpusPackage(),
@@ -540,9 +539,7 @@ def load_rows(path: str) -> list[dict]:
             {
                 "route": "existing_tool",
                 "tool_name": "scan_csv",
-                "arguments": {
-                    "path": "G:\\\\repo\\\\.uploads\\\\hyperactivated.csv"
-                },
+                "arguments": {"path": "G:\\\\repo\\\\.uploads\\\\hyperactivated.csv"},
             },
             {"description": "Read CSV"},
             [
@@ -616,10 +613,7 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(route["arguments"]["path"], source)
 
     def test_generated_source_repairs_double_escaped_newlines(self):
-        source = (
-            'def load_pdf(path: str):\\n'
-            '    return [{\\"path\\": path}]\\n'
-        )
+        source = "def load_pdf(path: str):\\n" '    return [{\\"path\\": path}]\\n'
 
         repaired = _normalize_generated_source(source)
 
@@ -752,10 +746,7 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(decision["warnings"], [])
 
     def test_analysis_sample_is_stratified_and_bounded(self):
-        rows = [
-            {"position": index, "text": "x" * 20}
-            for index in range(20)
-        ]
+        rows = [{"position": index, "text": "x" * 20} for index in range(20)]
 
         sample = DataScienceProcessor._analysis_sample(
             rows,
@@ -926,8 +917,12 @@ def load_rows(path: str) -> list[dict]:
             self.assertEqual(warnings, [])
             self.assertEqual(missing, [])
             self.assertTrue(persisted.exists())
-            self.assertEqual(descriptors[0]["artifact_ref"].split("/")[-1], "loaded-rows.json")
-            self.assertIn("intermediate/load-data/loaded-rows.json", sandbox.sandbox.files)
+            self.assertEqual(
+                descriptors[0]["artifact_ref"].split("/")[-1], "loaded-rows.json"
+            )
+            self.assertIn(
+                "intermediate/load-data/loaded-rows.json", sandbox.sandbox.files
+            )
             self.assertEqual(
                 arguments["rows_path"],
                 "/workspace/intermediate/load-data/loaded-rows.json",
@@ -1021,9 +1016,7 @@ def load_rows(path: str) -> list[dict]:
             "bindings": [
                 {
                     "status": "resolved",
-                    "plan_output_refs": [
-                        "step-output://derive/evidence"
-                    ],
+                    "plan_output_refs": ["step-output://derive/evidence"],
                 }
             ]
         }
@@ -1104,9 +1097,7 @@ def load_rows(path: str) -> list[dict]:
                 "runtime": runtime,
                 "output_registry": registry,
                 "template_requirements": [],
-                "upstream_step_results": [
-                    {"step_id": "load", "status": "completed"}
-                ],
+                "upstream_step_results": [{"step_id": "load", "status": "completed"}],
                 "attempt": 0,
             },
             config={"recursion_limit": 30},

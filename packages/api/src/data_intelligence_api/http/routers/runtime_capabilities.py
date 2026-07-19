@@ -26,4 +26,3 @@ def create_runtime_capabilities_router(settings: ApiSettings) -> APIRouter:
         )
 
     return router
-

@@ -234,8 +234,7 @@ def _configure_request_sandbox_provider(
     if backend == "docker":
         return docker_provider_from_env()
     raise ValueError(
-        "SANDBOX_BACKEND must be either 'axiom' or 'docker', "
-        f"not {backend!r}."
+        "SANDBOX_BACKEND must be either 'axiom' or 'docker', " f"not {backend!r}."
     )
 
 
@@ -411,9 +410,7 @@ def create_example_pipeline(
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
     resolved_method_hub_enabled = (
-        mcp_client is not None
-        if method_hub_enabled is None
-        else method_hub_enabled
+        mcp_client is not None if method_hub_enabled is None else method_hub_enabled
     )
     resolved_mcp_tools = mcp_tools
     if method_hub_enabled is None and mcp_client is not None and not resolved_mcp_tools:

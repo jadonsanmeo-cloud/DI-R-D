@@ -85,9 +85,7 @@ def _run_worker(
         messages.put(
             WorkflowFailedMessage(
                 code="method_hub_unavailable",
-                message=(
-                    "Method Hub is enabled for this request but is unavailable."
-                ),
+                message=("Method Hub is enabled for this request but is unavailable."),
             )
         )
     except Exception:

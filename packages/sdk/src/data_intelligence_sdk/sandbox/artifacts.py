@@ -295,9 +295,7 @@ class RunArtifactSession:
                 format=normalized_format,
                 media_type=str(media_type),
                 path=path,
-                artifact_ref=(
-                    f"artifact://{self.run_id}/rendered/{path.name}"
-                ),
+                artifact_ref=(f"artifact://{self.run_id}/rendered/{path.name}"),
             )
             manifest_items = self._manifest.setdefault("rendered_reports", [])
             manifest_items[:] = [
