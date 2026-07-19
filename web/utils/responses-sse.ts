@@ -1,15 +1,90 @@
-import type { PipelineStage, ResponsesChatMessage, ResponsesEvent } from '@/types/responses';
+import type { EditableExecutionSpec, PipelineStage, ResponsesChatMessage, ResponsesEvent } from '@/types/responses';
+import { specToMarkdown } from '@/utils/spec-markdown';
 
 const PIPELINE_STAGE_DEFINITIONS = [
   ['pipeline.start', 'Starting workflow'],
   ['pipeline.intent_analyzed', 'Understanding intent'],
   ['pipeline.spec_built', 'Planning execution'],
+  ['pipeline.spec_revised', 'Revising plan'],
   ['pipeline.spec_confirmed', 'Confirming plan'],
   ['pipeline.engine_selected', 'Selecting engine'],
   ['pipeline.engine_completed', 'Running analysis'],
   ['pipeline.evidence_collected', 'Collecting evidence'],
   ['pipeline.completed', 'Finalizing response'],
 ] as const;
+
+export interface PipelineStageOutput {
+  output_type: 'markdown';
+  content: string;
+}
+
+export function getPipelineStageLabel(eventType: string): string {
+  return PIPELINE_STAGE_DEFINITIONS.find(([id]) => id === eventType)?.[1] || eventType;
+}
+
+function intentValue(event: Record<string, unknown>, spec?: EditableExecutionSpec): string {
+  const intent = event.intent;
+  if (typeof intent === 'string' && intent.trim()) return intent.trim();
+  if (intent && typeof intent === 'object') {
+    const value = (intent as Record<string, unknown>).value;
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return spec?.intent || 'unknown';
+}
+
+function preliminarySpecMarkdown(event: Record<string, unknown>): string {
+  const objective = typeof event.objective === 'string' && event.objective.trim() ? event.objective.trim() : 'Pending';
+  const intent = intentValue(event);
+  const dataCount = Number(event.data_requirement_count || 0);
+  const capabilityCount = Number(event.capability_count || 0);
+
+  return `# Analysis Plan
+
+## Objective
+${objective}
+
+## Intent
+${intent}
+
+## Data
+${dataCount} data requirement${dataCount === 1 ? '' : 's'} selected
+
+## Workflow
+${capabilityCount} capability requirement${capabilityCount === 1 ? '' : 's'} selected
+
+## Guardrails
+Full details will be available in the proposed plan.
+
+## Engine Preference
+Automatic
+`;
+}
+
+export function getPipelineStageOutput(
+  event: Record<string, unknown>,
+  spec?: EditableExecutionSpec,
+): PipelineStageOutput | null {
+  if (event.type === 'pipeline.intent_analyzed') {
+    return {
+      output_type: 'markdown',
+      content: `# Intent\n\n**Classification:** \`${intentValue(event, spec)}\``,
+    };
+  }
+  if (event.type === 'pipeline.spec_built' || event.type === 'pipeline.spec_revised') {
+    return {
+      output_type: 'markdown',
+      content: spec ? specToMarkdown(spec) : preliminarySpecMarkdown(event),
+    };
+  }
+  if (event.type === 'pipeline.spec_confirmed') {
+    const status = event.confirmed === false ? 'Pending confirmation' : 'Confirmed';
+    const content = spec
+      ? `> **Status:** ${status}\n\n${specToMarkdown(spec)}`
+      : `# Plan Confirmation\n\n**Status:** ${status}\n\n**Engine:** ${String(event.engine_hint || 'Automatic')}`;
+    return { output_type: 'markdown', content };
+  }
+  return null;
+}
 
 const RESPONSE_EVENT_TYPES = new Set([
   'response.created',

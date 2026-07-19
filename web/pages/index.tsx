@@ -26,6 +26,7 @@ import {
   getResponseHistorySessionId,
   notifyResponseHistoryChanged,
 } from '@/utils/responses-history';
+import { getPipelineStageLabel, getPipelineStageOutput } from '@/utils/responses-sse';
 import { fetchRuntimeCapabilities, initialMethodHubEnabled } from '@/utils/runtime-capabilities';
 import ApiOutlined from '@ant-design/icons/ApiOutlined';
 import ArrowUpOutlined from '@ant-design/icons/ArrowUpOutlined';
@@ -169,6 +170,12 @@ interface ExecutionOutput {
   output_type: string;
   content: any;
 }
+
+const withPipelineStageOutput = (
+  outputs: Record<string, ExecutionOutput[]>,
+  eventType: string,
+  output: ExecutionOutput | null,
+): Record<string, ExecutionOutput[]> => (output ? { ...outputs, [eventType]: [output] } : outputs);
 
 interface FilePreview {
   kind: 'table' | 'text';
@@ -1493,6 +1500,7 @@ const Playground: NextPage = () => {
         if (!line) return;
         const payload = JSON.parse(line.slice(5).trim());
         if (payload.type?.startsWith('pipeline.')) {
+          const stageOutput = getPipelineStageOutput(payload, spec);
           setExecutionMap(current => {
             const execution = current[messageId];
             if (!execution) return current;
@@ -1503,12 +1511,20 @@ const Playground: NextPage = () => {
               steps.push({
                 id: payload.type,
                 step: steps.length + 1,
-                title: payload.type.replace('pipeline.', '').replaceAll('_', ' '),
+                title: getPipelineStageLabel(payload.type),
                 detail: '',
                 status: 'running',
               });
             }
-            return { ...current, [messageId]: { ...execution, steps, activeStepId: payload.type } };
+            return {
+              ...current,
+              [messageId]: {
+                ...execution,
+                steps,
+                outputs: withPipelineStageOutput(execution.outputs, payload.type, stageOutput),
+                activeStepId: payload.type,
+              },
+            };
           });
         } else if (payload.type === 'response.requires_confirmation') {
           const next: ResponseConfirmationState = {
@@ -1526,6 +1542,35 @@ const Playground: NextPage = () => {
           setMessages(current =>
             current.map(item => (item.id === messageId ? { ...item, thinking: false, confirmation: next } : item)),
           );
+          setExecutionMap(current => {
+            const execution = current[messageId];
+            if (!execution) return current;
+            const intentOutput = getPipelineStageOutput(
+              { type: 'pipeline.intent_analyzed', intent: next.intent },
+              next.spec,
+            );
+            const specOutput = getPipelineStageOutput({ type: 'pipeline.spec_built' }, next.spec);
+            const revisedSpecOutput = getPipelineStageOutput({ type: 'pipeline.spec_revised' }, next.spec);
+            return {
+              ...current,
+              [messageId]: {
+                ...execution,
+                steps: execution.steps.map(step =>
+                  step.status === 'running' ? { ...step, status: 'done' as const } : step,
+                ),
+                outputs: withPipelineStageOutput(
+                  withPipelineStageOutput(
+                    withPipelineStageOutput(execution.outputs, 'pipeline.intent_analyzed', intentOutput),
+                    'pipeline.spec_built',
+                    specOutput,
+                  ),
+                  'pipeline.spec_revised',
+                  revisedSpecOutput,
+                ),
+                activeStepId: null,
+              },
+            };
+          });
           setLoading(false);
         } else if (payload.type === 'response.output_text.delta') {
           setMessages(current =>
@@ -1905,12 +1950,22 @@ const Playground: NextPage = () => {
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
+            const intentOutput = getPipelineStageOutput(
+              { type: 'pipeline.intent_analyzed', intent: confirmation.intent },
+              confirmation.spec,
+            );
+            const specOutput = getPipelineStageOutput({ type: 'pipeline.spec_built' }, confirmation.spec);
             return {
               ...prev,
               [responseId]: {
                 ...current,
                 steps: current.steps.map(step =>
                   step.status === 'running' ? { ...step, status: 'done' as const } : step,
+                ),
+                outputs: withPipelineStageOutput(
+                  withPipelineStageOutput(current.outputs, 'pipeline.intent_analyzed', intentOutput),
+                  'pipeline.spec_built',
+                  specOutput,
                 ),
                 activeStepId: null,
               },
@@ -1920,16 +1975,7 @@ const Playground: NextPage = () => {
           return;
         }
         if (payload.type?.startsWith('pipeline.')) {
-          const pipelineLabels: Record<string, string> = {
-            'pipeline.start': 'Starting workflow',
-            'pipeline.intent_analyzed': 'Understanding intent',
-            'pipeline.spec_built': 'Planning execution',
-            'pipeline.spec_confirmed': 'Confirming plan',
-            'pipeline.engine_selected': 'Selecting engine',
-            'pipeline.engine_completed': 'Running analysis',
-            'pipeline.evidence_collected': 'Collecting evidence',
-            'pipeline.completed': 'Finalizing response',
-          };
+          const stageOutput = getPipelineStageOutput(payload);
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
@@ -1941,14 +1987,19 @@ const Playground: NextPage = () => {
               steps.push({
                 id: payload.type,
                 step: steps.length + 1,
-                title: pipelineLabels[payload.type] || payload.type,
+                title: getPipelineStageLabel(payload.type),
                 detail: '',
                 status: 'running',
               });
             }
             return {
               ...prev,
-              [responseId]: { ...current, steps, activeStepId: payload.type },
+              [responseId]: {
+                ...current,
+                steps,
+                outputs: withPipelineStageOutput(current.outputs, payload.type, stageOutput),
+                activeStepId: payload.type,
+              },
             };
           });
           return;
