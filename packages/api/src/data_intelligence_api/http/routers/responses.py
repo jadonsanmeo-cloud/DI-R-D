@@ -16,7 +16,11 @@ from fastapi import APIRouter, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
+from data_intelligence_api.application.runtime_capabilities import (
+    MethodHubUnavailableError,
+)
 from data_intelligence_api.application.ports.run_repository import RunRepository
+from data_intelligence_api.domain.workflow import WorkflowRuntimeOptions
 from data_intelligence_api.domain.runs import (
     RunConflictError,
     RunExpiredError,
@@ -30,6 +34,7 @@ from data_intelligence_api.http.schemas.responses import (
     ResponseDecisionRequest,
     ResponseHistoryDetail,
     ResponseHistorySummary,
+    RuntimeOptionsRequest,
 )
 from data_intelligence_api.http.streaming import (
     PipelineLogMessage,
@@ -75,6 +80,16 @@ def _run_worker(
 ) -> None:
     try:
         messages.put(WorkflowResultMessage(result=operation()))
+    except MethodHubUnavailableError:
+        logger.exception("Method Hub is unavailable")
+        messages.put(
+            WorkflowFailedMessage(
+                code="method_hub_unavailable",
+                message=(
+                    "Method Hub is enabled for this request but is unavailable."
+                ),
+            )
+        )
     except Exception:
         logger.exception("Data Intelligence workflow phase failed")
         messages.put(WorkflowFailedMessage(code=error_code, message=safe_error))
@@ -192,11 +207,19 @@ def _history_detail(run) -> ResponseHistoryDetail:
     if run.status == "completed":
         spec_payload["confirmed"] = True
     input_text = run.request_payload.get("input")
+    method_hub_value = run.request_payload.get("runtime_options", {}).get(
+        "method_hub_enabled"
+    )
     return ResponseHistoryDetail(
         response_id=run.response_id,
         status=run.status,
         input=input_text if isinstance(input_text, str) else "",
         spec=spec_payload,
+        runtime_options=RuntimeOptionsRequest(
+            method_hub_enabled=(
+                method_hub_value if isinstance(method_hub_value, bool) else False
+            )
+        ),
         output_text=run.output_text,
         evidence=run.evidence,
         metadata=run.response_metadata or {},
@@ -214,6 +237,19 @@ def _history_detail(run) -> ResponseHistoryDetail:
     )
 
 
+def _runtime_options_from_payload(
+    payload: dict,
+    *,
+    default_enabled: bool,
+) -> WorkflowRuntimeOptions:
+    raw_value = payload.get("runtime_options", {}).get("method_hub_enabled")
+    return WorkflowRuntimeOptions(
+        method_hub_enabled=(
+            raw_value if isinstance(raw_value, bool) else default_enabled
+        )
+    )
+
+
 def create_responses_router(
     settings: ApiSettings,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
@@ -228,7 +264,11 @@ def create_responses_router(
     @router.post("/api/v1/responses")
     async def create_response(payload: CreateResponseRequest) -> StreamingResponse:
         try:
-            invocation = build_workflow_invocation(payload, settings.data_corpus_root)
+            invocation = build_workflow_invocation(
+                payload,
+                settings.data_corpus_root,
+                method_hub_default_enabled=settings.method_hub_default_enabled,
+            )
         except SourceValidationError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -272,7 +312,14 @@ def create_responses_router(
                     run_repository.create_pending(
                         response_id=response_id,
                         token_hash=hash_confirmation_token(confirmation_token),
-                        request_payload=payload.model_dump(mode="json"),
+                        request_payload={
+                            **payload.model_dump(mode="json"),
+                            "runtime_options": {
+                                "method_hub_enabled": (
+                                    invocation.runtime_options.method_hub_enabled
+                                ),
+                            },
+                        },
                         prepared_execution=prepared_to_payload(prepared),
                         intent_payload=intent_payload,
                         spec_payload=spec_payload,
@@ -340,6 +387,12 @@ def create_responses_router(
                 "revision": run.current_revision,
                 "intent": run.intent_payload,
                 "spec": run.spec_payload,
+                "runtime_options": {
+                    "method_hub_enabled": _runtime_options_from_payload(
+                        run.request_payload,
+                        default_enabled=settings.method_hub_default_enabled,
+                    ).method_hub_enabled,
+                },
                 "expires_at": run.expires_at.isoformat(),
                 "error": (
                     {"code": run.error_code, "message": run.error_message}
@@ -375,6 +428,10 @@ def create_responses_router(
 
         current_spec = spec_from_payload(run.spec_payload)
         prepared = prepared_from_payload(run.prepared_execution, current_spec)
+        runtime_options = _runtime_options_from_payload(
+            run.request_payload,
+            default_enabled=settings.method_hub_default_enabled,
+        )
         messages: queue.Queue[object] = queue.Queue()
         event_logger = QueueRuntimeLogger(messages)
 
@@ -399,6 +456,7 @@ def create_responses_router(
                             base_spec,
                             feedback,
                             event_logger,
+                            runtime_options,
                             pipeline_factory,
                         )
                     return base_spec
@@ -467,7 +525,11 @@ def create_responses_router(
         async def execution_stream() -> AsyncIterator[str]:
             def execute_workflow() -> FinalResponse:
                 return execute_prepared_workflow(
-                    prepared, current_spec, event_logger, pipeline_factory
+                    prepared,
+                    current_spec,
+                    event_logger,
+                    runtime_options,
+                    pipeline_factory,
                 )
 
             async for message in _stream_operation(

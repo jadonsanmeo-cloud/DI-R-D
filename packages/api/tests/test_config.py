@@ -41,11 +41,6 @@ pipeline_timeout_seconds = 12.5
 spec_confirmation_ttl_seconds = 600
 max_spec_revision_rounds = 7
 max_upload_bytes = 123456
-
-[api.chat]
-base_url = "https://chat.example/v1"
-model = "example/chat-model"
-api_key_env = "CHAT_API_KEY"
 """.strip(),
                 encoding="utf-8",
             )
@@ -55,8 +50,6 @@ api_key_env = "CHAT_API_KEY"
                     "DATA_CORPUS_ROOT": temp_dir,
                     "DATABASE_URL": "postgresql://user:pass@db:5432/app",
                     "MODEL_CONFIG_PATH": str(config_path),
-                    "CHAT_STORE_DIR": str(root / "chat"),
-                    "CHAT_API_KEY": "secret-key",
                 },
                 clear=True,
             ):
@@ -72,10 +65,9 @@ api_key_env = "CHAT_API_KEY"
         self.assertEqual(settings.spec_confirmation_ttl_seconds, 600)
         self.assertEqual(settings.max_spec_revision_rounds, 7)
         self.assertEqual(settings.max_upload_bytes, 123456)
-        self.assertEqual(settings.chat_store_dir, root / "chat")
-        self.assertEqual(settings.openai_compatible_base_url, "https://chat.example/v1")
-        self.assertEqual(settings.openai_compatible_api_key, "secret-key")
-        self.assertEqual(settings.openai_compatible_model, "example/chat-model")
+        self.assertFalse(hasattr(settings, "openai_compatible_base_url"))
+        self.assertFalse(hasattr(settings, "openai_compatible_api_key"))
+        self.assertFalse(hasattr(settings, "openai_compatible_model"))
 
     def test_model_config_path_loads_from_environment(self) -> None:
         with patch.dict(

@@ -191,7 +191,7 @@ class GeneralPurposeEngineRecoveryTests(unittest.TestCase):
         self.assertIn('"topic": "planning"', output.result)
         self.assertEqual(len(agent.invocations), 2)
 
-    def test_two_attempts_without_successful_execution_fail(self) -> None:
+    def test_two_blank_attempts_without_execution_fail(self) -> None:
         runtime = make_runtime()
         agent = SequencedAgent(
             [
@@ -201,7 +201,7 @@ class GeneralPurposeEngineRecoveryTests(unittest.TestCase):
         )
         engine = make_engine(agent, FakeSynthesisModel("unused"))
 
-        with self.assertRaisesRegex(RuntimeError, "successful execute_python"):
+        with self.assertRaisesRegex(RuntimeError, "no usable answer"):
             run_engine(engine, runtime)
 
         self.assertEqual(len(agent.invocations), 2)

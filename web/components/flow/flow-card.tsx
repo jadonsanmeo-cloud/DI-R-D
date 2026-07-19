@@ -1,5 +1,4 @@
-import { ChatContext } from '@/app/chat-context';
-import { apiInterceptors, deleteFlowById, newDialogue } from '@/client/api';
+import { apiInterceptors, deleteFlowById } from '@/client/api';
 import { IFlow } from '@/types/flow';
 import {
   CopyFilled,
@@ -11,8 +10,7 @@ import {
 } from '@ant-design/icons';
 import { Modal, Tooltip } from 'antd';
 import { useRouter } from 'next/router';
-import qs from 'querystring';
-import React, { useContext } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 import GptCard from '../common/gpt-card';
 import FlowPreview from './preview-flow';
@@ -24,7 +22,6 @@ interface FlowCardProps {
 }
 
 const FlowCard: React.FC<FlowCardProps> = ({ flow, onCopy, deleteCallback }) => {
-  const { model } = useContext(ChatContext);
   const { t } = useTranslation();
   const [modal, contextHolder] = Modal.useModal();
   const router = useRouter();
@@ -41,16 +38,7 @@ const FlowCard: React.FC<FlowCardProps> = ({ flow, onCopy, deleteCallback }) => 
   }
 
   const handleChat = async () => {
-    const [, res] = await apiInterceptors(newDialogue({ chat_mode: 'chat_agent' }));
-    if (res) {
-      const queryStr = qs.stringify({
-        scene: 'chat_flow',
-        id: res.conv_uid,
-        model: model,
-        select_param: flow.uid,
-      });
-      router.push(`/chat?${queryStr}`);
-    }
+    await router.push('/');
   };
 
   const handleDel = () => {

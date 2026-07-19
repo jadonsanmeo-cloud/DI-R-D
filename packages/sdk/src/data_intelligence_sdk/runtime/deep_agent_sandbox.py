@@ -151,6 +151,14 @@ class DeepAgentSandboxSession:
             "attempt": attempt.attempt,
             "code_artifact_ref": attempt.artifact_ref,
             "execution_artifact_ref": run_artifact.execution_ref(attempt),
+            "method_calls": [
+                (
+                    call.model_dump(mode="json")
+                    if hasattr(call, "model_dump")
+                    else dict(call)
+                )
+                for call in getattr(command, "method_calls", [])
+            ],
         }
         run_artifact.record_execution(attempt, observation)
         return observation

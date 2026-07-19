@@ -24,22 +24,19 @@ class ApiSettings:
     max_spec_revision_rounds: int = 5
     max_upload_bytes: int = 50 * 1024 * 1024
     model_config_path: Path | None = None
-    chat_store_dir: Path = Path(".data/chat")
-    openai_compatible_base_url: str = "http://localhost:20128/v1"
-    openai_compatible_api_key: str = ""
-    openai_compatible_model: str = "cx/gpt-5.5"
+    method_hub_default_enabled: bool = False
+    method_hub_endpoint: str = "http://localhost:8000/mcp"
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
         model_config_value = os.getenv("MODEL_CONFIG_PATH")
         model_config_path = Path(model_config_value) if model_config_value else None
-        payload = ConfigManager(model_config_path).load()
+        config_manager = ConfigManager(model_config_path)
+        payload = config_manager.load()
+        method_hub = config_manager.method_hub_settings()
         api_payload = payload.get("api", {})
         if not isinstance(api_payload, dict):
             raise ValueError("The [api] configuration must be a TOML table.")
-        chat_payload = api_payload.get("chat", {})
-        if not isinstance(chat_payload, dict):
-            raise ValueError("The [api.chat] configuration must be a TOML table.")
 
         root = Path(os.getenv("DATA_CORPUS_ROOT", Path.cwd())).resolve()
         origins_value = api_payload.get("cors_origins", DEFAULT_CORS_ORIGINS)
@@ -66,9 +63,6 @@ class ApiSettings:
         if max_upload_bytes <= 0:
             raise ValueError("api.max_upload_bytes must be greater than zero.")
 
-        chat_api_key_env = str(
-            chat_payload.get("api_key_env", "OPENAI_COMPATIBLE_API_KEY")
-        ).strip()
         return cls(
             data_corpus_root=root,
             cors_origins=origins,
@@ -78,14 +72,6 @@ class ApiSettings:
             max_spec_revision_rounds=max_revisions,
             max_upload_bytes=max_upload_bytes,
             model_config_path=model_config_path,
-            chat_store_dir=Path(os.getenv("CHAT_STORE_DIR", ".data/chat")),
-            openai_compatible_base_url=str(
-                chat_payload.get("base_url", "http://localhost:20128/v1")
-            ),
-            openai_compatible_api_key=(
-                os.getenv(chat_api_key_env, "") if chat_api_key_env else ""
-            ),
-            openai_compatible_model=str(
-                chat_payload.get("model", "cx/gpt-5.5")
-            ),
+            method_hub_default_enabled=method_hub.enabled,
+            method_hub_endpoint=method_hub.endpoint,
         )

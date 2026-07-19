@@ -44,7 +44,7 @@ from data_intelligence_sdk.runtime.llm_client import (
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
-from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
+from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
 from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
@@ -67,14 +67,19 @@ class _AxiomSandboxProvider:
         *,
         workspace_id: UUID,
         cleanup: bool,
+        capability_profiles: tuple[str, ...] = (),
     ) -> None:
         self.client = client
         self.workspace_id = workspace_id
         self.cleanup = cleanup
+        self.capability_profiles = capability_profiles
 
     @contextmanager
     def open(self, corpus_package: DataCorpusPackage):
-        sandbox = self.client.create_sandbox(self.workspace_id)
+        sandbox = self.client.create_sandbox(
+            self.workspace_id,
+            capability_profiles=list(self.capability_profiles),
+        )
         try:
             sandbox.wait_until_ready()
             source_paths = self._stage_sources(sandbox, corpus_package)
@@ -115,6 +120,7 @@ class _AxiomSandboxProvider:
 def _configure_axiom_sandbox_provider(
     *,
     config_manager: object,
+    method_hub_enabled: bool,
 ) -> SandboxSessionProvider:
     """Build the request-scoped AXIOM sandbox provider."""
 
@@ -143,6 +149,7 @@ def _configure_axiom_sandbox_provider(
         sandbox_client,
         workspace_id=UUID(settings.workspace_id),
         cleanup=not keep_sandbox,
+        capability_profiles=("method_hub",) if method_hub_enabled else (),
     )
 
 
@@ -306,6 +313,8 @@ def create_example_pipeline(
     allow_method_generation: bool = True,
     method_hub: MethodHub | None = None,
     mcp_client: MCPMethodClient | None = None,
+    mcp_tools: tuple[MCPToolDefinition, ...] = (),
+    method_hub_enabled: bool | None = None,
     interface_registry: object | None = None,
     interface_builder: object | None = None,
     sandbox_executor: object | None = None,
@@ -315,6 +324,14 @@ def create_example_pipeline(
     intent_service_base_url: str | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
+    resolved_method_hub_enabled = (
+        mcp_client is not None
+        if method_hub_enabled is None
+        else method_hub_enabled
+    )
+    resolved_mcp_tools = mcp_tools
+    if method_hub_enabled is None and mcp_client is not None and not resolved_mcp_tools:
+        resolved_mcp_tools = tuple(mcp_client.list_tools())
     shared_llm_client = spec_llm_client
     if artifact_store is None:
         artifact_settings = resolved_config_manager.artifact_settings()
@@ -339,6 +356,7 @@ def create_example_pipeline(
         if sandbox_settings.enabled:
             sandbox_provider = _configure_axiom_sandbox_provider(
                 config_manager=resolved_config_manager,
+                method_hub_enabled=resolved_method_hub_enabled,
             )
     if engine is None:
         if llm is not None:
@@ -391,6 +409,7 @@ def create_example_pipeline(
         synthesizer=ExampleSynthesizer(),
         method_hub=method_hub,
         mcp_client=mcp_client,
+        mcp_tools=resolved_mcp_tools,
         interface_registry=interface_registry,
         interface_builder=interface_builder,
         sandbox_executor=sandbox_executor,

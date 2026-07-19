@@ -122,6 +122,8 @@ export const ChatEn = {
   added: 'Added',
   add: 'Add',
   add_context: 'Add Context (File, DB, Knowledge)',
+  method_hub_toggle: 'Method Hub',
+  method_hub_unavailable: 'Method Hub is unavailable. Turn it off to run code-only.',
   select_skill: 'Select Skill',
   skill_selected: 'Skill: {{name}}',
   select_database: 'Select Database',

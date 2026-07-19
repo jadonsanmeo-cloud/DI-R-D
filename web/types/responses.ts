@@ -8,10 +8,22 @@ export interface CorpusRequest {
   metadata: Record<string, unknown>;
 }
 
+export interface RuntimeOptions {
+  method_hub_enabled: boolean;
+}
+
+export interface RuntimeCapabilities {
+  method_hub: {
+    default_enabled: boolean;
+    available: boolean;
+  };
+}
+
 export interface CreateResponseRequest {
   input?: string;
   data_corpus_package: CorpusRequest;
   session_id: string;
+  runtime_options?: RuntimeOptions;
 }
 
 export interface PipelineStage {
@@ -134,6 +146,7 @@ export interface ResponseHistoryDetail {
   status: string;
   input: string;
   spec: EditableExecutionSpec;
+  runtime_options: RuntimeOptions;
   output_text?: string | null;
   evidence?: unknown;
   metadata: Record<string, unknown>;

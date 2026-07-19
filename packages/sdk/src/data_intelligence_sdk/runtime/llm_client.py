@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Protocol
@@ -22,6 +23,9 @@ class LLMClient(Protocol):
 
 
 Transport = Callable[[str, dict[str, str], dict[str, Any], int], dict[str, Any]]
+
+_TRANSPORT_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.5
 
 
 class OpenAICompatibleLLMClient:
@@ -146,11 +150,22 @@ class OpenAICompatibleLLMClient:
             headers=headers,
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                body = response.read().decode("utf-8")
-        except urllib.error.URLError as exc:
-            raise ConnectionError(f"OpenAI-compatible request failed: {exc}") from exc
+        for attempt in range(1, _TRANSPORT_ATTEMPTS + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    body = response.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
+                raise ConnectionError(
+                    f"OpenAI-compatible request failed with HTTP {exc.code}."
+                ) from exc
+            except (urllib.error.URLError, TimeoutError) as exc:
+                if attempt == _TRANSPORT_ATTEMPTS:
+                    raise ConnectionError(
+                        "OpenAI-compatible request failed after "
+                        f"{_TRANSPORT_ATTEMPTS} attempts: {exc}"
+                    ) from exc
+                time.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
         parsed = json.loads(body)
         if not isinstance(parsed, dict):

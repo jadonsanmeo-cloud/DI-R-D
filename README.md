@@ -69,15 +69,15 @@ Supporting layers:
 - `Intent` is a controlled string selected from `SUPPORTED_INTENTS`: `reason` for data questions, `report` for report generation, `general` for general-purpose queries handled by `GeneralPurposeEngine`, and `unknown` for classifier failures or legacy payloads. The spec carries the richer objective, constraints, and capability requirements.
 - `ExecutionSpec.capability_requirements` describes what the selected engine/runtime must resolve.
 - Engines receive an `EngineRuntimeContext`, which owns an `EngineRunContext` and the request-scoped sandbox session.
-- `GeneralPurposeEngine` contains one Deep Agent. Method Hub, MCP, generated interface registration, and evidence synthesis are outside this first runtime flow.
-- The agent sees exactly one custom `execute_python(code)` tool. The runtime stores the source before submitting it to the sandbox.
+- `GeneralPurposeEngine` contains one Deep Agent with request-scoped sandbox and optional Method Hub MCP capabilities.
+- With Method Hub disabled, the agent uses `execute_python(code)`. With it enabled, simple operations use direct MCP tools while composed operations use `execute_python(code)` and the sandbox broker helper.
 - `EngineOutput` contains raw engine output plus `EngineTrace`.
 - `EvidenceBundle` uses engine trace, method calls, interface definitions, sandbox results, observations, artifact refs, and log refs for audit and final response generation.
 - `SessionContext` is separate from `UserContext`: session context is short-lived conversation/task state, while user context is longer-lived preference and history.
 
 ## Base Query-to-Answer Workflow
 
-The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, and AXIOM sandbox-service. `GeneralPurposeEngine` is the selected analysis engine and uses `deepagents==0.6.12` to generate, execute, observe, and correct Python analysis through one tool.
+The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, Method Hub, and AXIOM sandbox-service. `GeneralPurposeEngine` uses `deepagents==0.6.12` to select direct MCP tools or generate, execute, observe, and correct sandboxed Python analysis.
 
 ```python
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
@@ -178,6 +178,47 @@ token = "${env:SANDBOX_TOKEN}"
 The CLI example discovers the sibling client source directly for local
 development. Production applications should install `axiom-sandbox-client`.
 The general engine requires `SANDBOX_ENABLED=true` and a workspace ID.
+
+### Per-request Method Hub mode
+
+The frontend reads `GET /api/v1/runtime-capabilities` and sends an explicit
+Method Hub choice with each Responses request:
+
+```json
+{
+  "input": "Scan the files and normalize the result",
+  "data_corpus_package": {
+    "sources": [],
+    "schemas": {},
+    "metadata": {}
+  },
+  "runtime_options": {
+    "method_hub_enabled": true
+  }
+}
+```
+
+The capability response exposes only public state:
+
+```json
+{
+  "method_hub": {
+    "default_enabled": false,
+    "available": true
+  }
+}
+```
+
+If `runtime_options.method_hub_enabled` is omitted, `[method_hub].enabled` in
+`configs/proxy-openrouter.toml` supplies the default. The API persists the
+resolved boolean before spec confirmation so revise and confirm use the same
+mode. Enabled requests discover the MCP catalog immediately; an unavailable
+server returns `method_hub_unavailable` instead of silently falling back.
+
+Simple operations are exposed to engines as direct MCP tools. Composite work
+runs generated Python in the request sandbox and calls Method Hub through the
+worker-owned `/run/axiom/method-hub.sock` broker. The gVisor child keeps network
+access disabled and never receives the MCP endpoint or credentials.
 
 Each invocation creates a persistent artifact bundle under `artifacts/<run-id>/`
 by default. Configure a different root with `[artifacts].root` in the TOML file.

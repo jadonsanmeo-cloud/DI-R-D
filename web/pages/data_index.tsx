@@ -1,4 +1,4 @@
-import { apiInterceptors, collectApp, getAppList, newDialogue, recommendApps, unCollectApp } from '@/client/api';
+import { apiInterceptors, collectApp, getAppList, recommendApps, unCollectApp } from '@/client/api';
 import { PlusOutlined, SearchOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import { useRequest } from 'ahooks';
 import type { SegmentedProps } from 'antd';
@@ -6,12 +6,11 @@ import { Avatar, Button, ConfigProvider, Input, Segmented, Spin, message } from 
 import cls from 'classnames';
 import { NextPage } from 'next';
 import { useRouter } from 'next/router';
-import { useContext, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { GridCellRenderer, Index, IndexRange } from 'react-virtualized';
 import { AutoSizer, Grid, InfiniteLoader } from 'react-virtualized';
 
-import { ChatContext } from '@/app/chat-context';
 import IconFont from '@/new-components/common/Icon';
 import BlurredCard from '@/new-components/common/blurredCard';
 import { AppListResponse } from '@/types/app';
@@ -20,7 +19,6 @@ import moment from 'moment';
 const Playground: NextPage = () => {
   const router = useRouter();
   const { t } = useTranslation();
-  const { setAgent, setCurrentDialogInfo, model } = useContext(ChatContext);
 
   const [activeKey, setActiveKey] = useState<string>('all');
   const [apps, setApps] = useState<any>({
@@ -195,46 +193,7 @@ const Playground: NextPage = () => {
               />
             )
           }
-          onClick={async () => {
-            // 原生应用跳转
-
-            if (item.team_mode === 'native_app') {
-              const { chat_scene = '' } = item.team_context;
-              const [, res] = await apiInterceptors(newDialogue({ chat_mode: chat_scene }));
-              if (res) {
-                setCurrentDialogInfo?.({
-                  chat_scene: res.chat_mode,
-                  app_code: item.app_code,
-                });
-                localStorage.setItem(
-                  'cur_dialog_info',
-                  JSON.stringify({
-                    chat_scene: res.chat_mode,
-                    app_code: item.app_code,
-                  }),
-                );
-                router.push(`/chat?scene=${chat_scene}&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-              }
-            } else {
-              // 自定义应用
-              const [, res] = await apiInterceptors(newDialogue({ chat_mode: 'chat_agent' }));
-              if (res) {
-                setCurrentDialogInfo?.({
-                  chat_scene: res.chat_mode,
-                  app_code: item.app_code,
-                });
-                localStorage.setItem(
-                  'cur_dialog_info',
-                  JSON.stringify({
-                    chat_scene: res.chat_mode,
-                    app_code: item.app_code,
-                  }),
-                );
-                setAgent?.(item.app_code);
-                router.push(`/chat/?scene=chat_agent&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-              }
-            }
-          }}
+          onClick={() => router.push('/')}
           LeftBottom={
             <div className='flex gap-8 items-center text-[#878c93] text-sm dark:text-stone-200'>
               {item.owner_name && (

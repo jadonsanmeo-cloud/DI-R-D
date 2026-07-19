@@ -1,5 +1,4 @@
-import { ChatContext } from '@/app/chat-context';
-import { addFlow, apiInterceptors, deleteFlowById, getFlows, newDialogue } from '@/client/api';
+import { addFlow, apiInterceptors, deleteFlowById, getFlows } from '@/client/api';
 import MyEmpty from '@/components/common/MyEmpty';
 import BlurredCard, { ChatButton, InnerDropdown } from '@/new-components/common/blurredCard';
 import ConstructLayout from '@/new-components/layout/Construct';
@@ -10,13 +9,11 @@ import { Button, Checkbox, Form, Input, Modal, Pagination, Popconfirm, Spin, Tag
 import { t } from 'i18next';
 import moment from 'moment';
 import { useRouter } from 'next/router';
-import qs from 'querystring';
-import { useContext, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 function Flow() {
   const router = useRouter();
-  const { model } = useContext(ChatContext);
   const [messageApi] = message.useMessage();
   const [form] = Form.useForm<Pick<IFlow, 'label' | 'name'>>();
 
@@ -102,17 +99,8 @@ function Flow() {
   //   };
   // }, [loading, handleScroll, loadMoreData]);
 
-  const handleChat = async (flow: IFlow) => {
-    const [, res] = await apiInterceptors(newDialogue({ chat_mode: 'chat_agent' }));
-    if (res) {
-      const queryStr = qs.stringify({
-        scene: 'chat_flow',
-        id: res.conv_uid,
-        model: model,
-        select_param: flow.uid,
-      });
-      router.push(`/chat?${queryStr}`);
-    }
+  const handleChat = async (_flow: IFlow) => {
+    await router.push('/');
   };
 
   async function deleteFlow(flow: IFlow) {

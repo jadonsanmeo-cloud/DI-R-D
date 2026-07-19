@@ -1,12 +1,11 @@
-import { ChatContext } from '@/app/chat-context';
-import { apiInterceptors, collectApp, newDialogue, unCollectApp } from '@/client/api';
+import { apiInterceptors, collectApp, unCollectApp } from '@/client/api';
 import BlurredCard from '@/new-components/common/blurredCard';
 import { IApp } from '@/types/app';
 import { StarFilled, StarOutlined } from '@ant-design/icons';
 import { Avatar, Empty, Spin } from 'antd';
 import Image from 'next/image';
 import { useRouter } from 'next/router';
-import React, { useContext } from 'react';
+import React from 'react';
 import IconFont from '../common/Icon';
 
 const TabContent: React.FC<{ apps: IApp[]; loading: boolean; refresh: () => void; type: 'used' | 'recommend' }> = ({
@@ -24,47 +23,10 @@ const TabContent: React.FC<{ apps: IApp[]; loading: boolean; refresh: () => void
     if (error) return;
     refresh();
   };
-  const { setAgent: setAgentToChat, model, setCurrentDialogInfo } = useContext(ChatContext);
   const router = useRouter();
 
-  const toChat = async (data: IApp) => {
-    // 原生应用跳转
-    if (data.team_mode === 'native_app') {
-      const { chat_scene = '' } = data.team_context;
-      const [, res] = await apiInterceptors(newDialogue({ chat_mode: chat_scene }));
-      if (res) {
-        setCurrentDialogInfo?.({
-          chat_scene: res.chat_mode,
-          app_code: data.app_code,
-        });
-        localStorage.setItem(
-          'cur_dialog_info',
-          JSON.stringify({
-            chat_scene: res.chat_mode,
-            app_code: data.app_code,
-          }),
-        );
-        router.push(`/chat?scene=${chat_scene}&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-      }
-    } else {
-      // 自定义应用
-      const [, res] = await apiInterceptors(newDialogue({ chat_mode: 'chat_agent' }));
-      if (res) {
-        setCurrentDialogInfo?.({
-          chat_scene: res.chat_mode,
-          app_code: data.app_code,
-        });
-        localStorage.setItem(
-          'cur_dialog_info',
-          JSON.stringify({
-            chat_scene: res.chat_mode,
-            app_code: data.app_code,
-          }),
-        );
-        setAgentToChat?.(data.app_code);
-        router.push(`/chat/?scene=chat_agent&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-      }
-    }
+  const toChat = async (_data: IApp) => {
+    await router.push('/');
   };
 
   if (loading) {

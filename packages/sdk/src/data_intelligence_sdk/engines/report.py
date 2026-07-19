@@ -27,6 +27,7 @@ from data_intelligence_sdk.core.types import (
 from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
+from data_intelligence_sdk.tools import record_sandbox_method_calls
 
 PLAN_AGENT_PROMPT = """
 You are the Data Planning Agent. Build a validated, data-aware DAG for a report.
@@ -116,6 +117,9 @@ one validated PlanStep.
 3. Return an empty list for a valid no-data result.
 4. Include type hints and a complete docstring.
 5. Do not perform network access outside the supplied data connection.
+6. For Method Hub composition, import `call_tool` from `axiom_method_hub`.
+7. Never open HTTP sockets or embed an MCP endpoint or token.
+8. Define the requested function and keep its return value JSON-serializable.
 
 # OUTPUT
 Return only JSON with `tool_name`, `parameters_schema`, `output_schema`,
@@ -329,7 +333,7 @@ def _method_parameters_schema(method: object) -> dict[str, Any]:
 
 
 def _method_hub_payload(runtime: EngineRuntimeContext) -> list[dict[str, Any]]:
-    return [
+    local_methods = [
         {
             "tool_name": registered.name,
             "description": registered.metadata.get("description", ""),
@@ -339,9 +343,23 @@ def _method_hub_payload(runtime: EngineRuntimeContext) -> list[dict[str, Any]]:
             "output_schema": registered.metadata.get("output_schema", {}),
             "capability_names": registered.capability_names,
             "trust_level": registered.trust_level,
+            "provider": "local",
         }
         for registered in runtime.method_hub.list_methods()
     ]
+    remote_methods = [
+        {
+            "tool_name": definition.name,
+            "description": definition.description,
+            "parameters_schema": definition.input_schema,
+            "output_schema": definition.metadata.get("output_schema", {}),
+            "capability_names": list(definition.capability_names),
+            "trust_level": "platform_remote",
+            "provider": "mcp",
+        }
+        for definition in runtime.mcp_tools
+    ]
+    return [*local_methods, *remote_methods]
 
 
 def _execution_spec_payload(spec: ExecutionSpec) -> dict[str, Any]:
@@ -1680,15 +1698,27 @@ class ToolExecutor:
         arguments = route.get("arguments", {})
         if not isinstance(arguments, dict):
             arguments = {}
+        remote_names = {definition.name for definition in runtime.mcp_tools}
         try:
-            method = runtime.method_hub.get(tool_name)
-            result = method(**arguments)
+            if tool_name in remote_names:
+                if runtime.mcp_client is None:
+                    raise RuntimeError("Method Hub MCP client is unavailable.")
+                result = runtime.mcp_client.call_tool(tool_name, arguments)
+                provider = "mcp"
+            else:
+                method = runtime.method_hub.get(tool_name)
+                result = method(**arguments)
+                provider = "local"
             status = "completed_no_data" if not _normalize_rows(result) else "completed"
             runtime.run_context.record_method_call(
                 tool_name,
                 status="completed",
                 inputs=arguments,
-                outputs={"result_summary": self._result_summary(result)},
+                outputs={
+                    "result": result,
+                    "result_summary": self._result_summary(result),
+                    "provider": provider,
+                },
             )
             return {
                 "schema_version": "1.0",
@@ -1699,11 +1729,12 @@ class ToolExecutor:
                 "error": None,
             }
         except Exception as exc:
+            provider = "mcp" if tool_name in remote_names else "local"
             runtime.run_context.record_method_call(
                 tool_name,
                 status="failed",
                 inputs=arguments,
-                outputs={"error": str(exc)},
+                outputs={"error": str(exc), "provider": provider},
             )
             return {
                 "schema_version": "1.0",
@@ -1724,49 +1755,49 @@ class ToolExecutor:
         interface.trust_level = "generated_validated"
         if runtime.interface_registry is not None:
             runtime.interface_registry.register(interface)
-        if runtime.sandbox_executor is None:
+        if runtime.sandbox is None or runtime.run_artifact is None:
             return {
                 "schema_version": "1.0",
                 "status": "failed",
                 "tool_name": interface.name,
                 "raw_result": sample_data,
-                "error": "Sandbox executor is not configured.",
+                "error": "Request sandbox is unavailable.",
             }
-
-        def generated_tool(**kwargs: Any) -> Any:
-            result = runtime.sandbox_executor.run(interface, kwargs, None)
-            if result.status != "completed":
-                raise RuntimeError(result.error or "Generated tool execution failed.")
-            return result.result
-
-        runtime.method_hub.register(
-            interface.name,
-            generated_tool,
-            capability_names=[GENERATED_TOOL_CAPABILITY],
-            trust_level="generated_validated",
-            metadata={
-                "description": interface.description or "",
-                "parameters_schema": interface.input_schema,
-                "output_schema": interface.output_schema,
-                "source_code": interface.metadata.get("source_code", ""),
-            },
-        )
-        runtime.run_context.record_step(
-            "method_hub_register",
-            inputs={"tool_name": interface.name},
-            outputs={"trust_level": interface.trust_level},
-        )
         arguments = code_spec.get("execution_arguments", {})
         if not isinstance(arguments, dict):
             arguments = {}
+        source_code = str(
+            code_spec.get("source_code")
+            or interface.metadata.get("source_code", "")
+        )
+        serialized_arguments = json.dumps(arguments, default=str)
+        program = (
+            "import json\n"
+            f"{source_code}\n"
+            f"result = {interface.name}("
+            f"**json.loads({json.dumps(serialized_arguments)}))\n"
+        )
         try:
-            result = generated_tool(**arguments)
+            observation = runtime.sandbox.execute_python(
+                program,
+                runtime.run_artifact,
+            )
+            record_sandbox_method_calls(runtime, observation)
+            if not observation.get("success"):
+                raise RuntimeError(
+                    observation.get("stderr") or "Generated tool execution failed."
+                )
+            result = observation.get("result")
             status = "completed_no_data" if not _normalize_rows(result) else "completed"
             runtime.run_context.record_method_call(
                 interface.name,
                 status="completed",
                 inputs=arguments,
-                outputs={"result_summary": self._result_summary(result)},
+                outputs={
+                    "result_summary": self._result_summary(result),
+                    "provider": "sandbox",
+                    "command_id": observation.get("command_id"),
+                },
             )
             return {
                 "schema_version": "1.0",

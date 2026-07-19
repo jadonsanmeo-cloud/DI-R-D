@@ -1,6 +1,9 @@
-import { delDialogue, getDialogueList } from '@/client/api/request';
-import { apiInterceptors } from '@/client/api/tools/interceptors';
-import type { IChatDialogueSchema } from '@/types/chat';
+import type { ResponseHistorySummary } from '@/types/responses';
+import {
+  deleteResponseHistory,
+  getResponseHistorySessionId,
+  listResponseHistory,
+} from '@/utils/responses-history';
 import { DeleteOutlined, MessageOutlined } from '@ant-design/icons';
 import { Skeleton, Tooltip, message } from 'antd';
 import Link from 'next/link';
@@ -9,33 +12,31 @@ import { useTranslation } from 'react-i18next';
 
 function ConversationsPage() {
   const { t } = useTranslation();
-  const [dialogueList, setDialogueList] = useState<IChatDialogueSchema[]>([]);
+  const [historyItems, setHistoryItems] = useState<ResponseHistorySummary[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchDialogueList = useCallback(async () => {
+  const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const [, data] = await apiInterceptors(getDialogueList());
-      if (data && Array.isArray(data)) {
-        setDialogueList(data.filter(item => item.chat_mode === 'backend_qa_flow'));
-      }
+      const sessionId = getResponseHistorySessionId();
+      setHistoryItems(sessionId ? await listResponseHistory(sessionId) : []);
     } catch (e) {
-      console.error('Failed to fetch dialogue list', e);
+      console.error('Failed to fetch response history', e);
     } finally {
       setLoading(false);
     }
   }, []);
 
   const handleDeleteDialogue = useCallback(
-    async (e: React.MouseEvent, convUid: string) => {
+    async (e: React.MouseEvent, responseId: string) => {
       e.stopPropagation();
       e.preventDefault();
       try {
-        const [err] = await apiInterceptors(delDialogue(convUid));
-        if (!err) {
-          setDialogueList(prev => prev.filter(d => d.conv_uid !== convUid));
-          message.success(t('cmp.deleted'));
-        }
+        const sessionId = getResponseHistorySessionId();
+        if (!sessionId) return;
+        await deleteResponseHistory(responseId, sessionId);
+        setHistoryItems(previous => previous.filter(item => item.response_id !== responseId));
+        message.success(t('cmp.deleted'));
       } catch (error) {
         console.error('Failed to delete dialogue', error);
       }
@@ -62,8 +63,8 @@ function ConversationsPage() {
   );
 
   useEffect(() => {
-    fetchDialogueList();
-  }, [fetchDialogueList]);
+    fetchHistory();
+  }, [fetchHistory]);
 
   return (
     <div className='h-full overflow-y-auto bg-white dark:bg-[#232734] px-8 py-6'>
@@ -74,28 +75,26 @@ function ConversationsPage() {
 
         {loading ? (
           <Skeleton active paragraph={{ rows: 8 }} />
-        ) : dialogueList.length > 0 ? (
+        ) : historyItems.length > 0 ? (
           <div className='space-y-2'>
-            {dialogueList.map(conv => (
+            {historyItems.map(item => (
               <Link
-                key={conv.conv_uid}
-                href={`/?id=${conv.conv_uid}`}
+                key={item.response_id}
+                href={`/?response_id=${item.response_id}`}
                 className='flex items-start gap-3 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700 text-sm transition-colors group hover:bg-[#F1F5F9] dark:hover:bg-theme-dark'
               >
                 <MessageOutlined className='text-gray-400 flex-shrink-0 text-sm mt-1' />
                 <div className='flex-1 min-w-0'>
                   <div className='font-medium truncate leading-5 text-gray-700 dark:text-gray-300'>
-                    {typeof conv.user_input === 'string'
-                      ? conv.user_input.slice(0, 80) || 'New Conversation'
-                      : 'New Conversation'}
+                    {item.title.slice(0, 80) || 'New Task'}
                   </div>
-                  {conv.gmt_created && (
-                    <div className='text-xs text-gray-400 mt-1'>{formatRelativeTime(conv.gmt_created)}</div>
+                  {item.updated_at && (
+                    <div className='text-xs text-gray-400 mt-1'>{formatRelativeTime(item.updated_at)}</div>
                   )}
                 </div>
                 <Tooltip title={t('cmp.delete')}>
                   <DeleteOutlined
-                    onClick={e => handleDeleteDialogue(e, conv.conv_uid)}
+                    onClick={e => handleDeleteDialogue(e, item.response_id)}
                     className='text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-1'
                   />
                 </Tooltip>

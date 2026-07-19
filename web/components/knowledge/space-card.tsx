@@ -1,4 +1,4 @@
-import { apiInterceptors, delSpace, newDialogue } from '@/client/api';
+import { apiInterceptors, delSpace } from '@/client/api';
 import { ISpace } from '@/types/knowledge';
 import { ClockCircleOutlined, DeleteFilled, MessageFilled, UserOutlined, WarningOutlined } from '@ant-design/icons';
 import { Badge, ConfigProvider, Modal, Popover } from 'antd';
@@ -41,14 +41,7 @@ export default function SpaceCard(props: IProps) {
   }
 
   const handleChat = async () => {
-    const [_, data] = await apiInterceptors(
-      newDialogue({
-        chat_mode: 'chat_knowledge',
-      }),
-    );
-    if (data?.conv_uid) {
-      router.push(`/chat?scene=chat_knowledge&id=${data?.conv_uid}&db_param=${space.name}`);
-    }
+    await router.push('/');
   };
 
   return (

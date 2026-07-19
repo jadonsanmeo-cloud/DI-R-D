@@ -13,11 +13,25 @@ class DataCorpusPackageRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class RuntimeOptionsRequest(BaseModel):
+    method_hub_enabled: bool | None = None
+
+
+class MethodHubCapabilityResponse(BaseModel):
+    default_enabled: bool
+    available: bool
+
+
+class RuntimeCapabilitiesResponse(BaseModel):
+    method_hub: MethodHubCapabilityResponse
+
+
 class CreateResponseRequest(BaseModel):
     input: str | None = None
     data_corpus_package: DataCorpusPackageRequest
     user_id: str | None = None
     session_id: str | None = None
+    runtime_options: RuntimeOptionsRequest = Field(default_factory=RuntimeOptionsRequest)
 
 
 class CapabilityRequirementRequest(BaseModel):
@@ -73,6 +87,7 @@ class ResponseHistoryDetail(BaseModel):
     status: str
     input: str
     spec: dict[str, Any]
+    runtime_options: RuntimeOptionsRequest = Field(default_factory=RuntimeOptionsRequest)
     output_text: str | None = None
     evidence: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

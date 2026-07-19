@@ -11,6 +11,7 @@ export function prepareResponseSubmission(
   input: string,
   sources: string[],
   sessionId: string,
+  methodHubEnabled?: boolean,
 ): PreparedResponseSubmission | null {
   const normalizedSources = sources.map(source => source.trim()).filter(Boolean);
   const normalizedInput = input.trim();
@@ -22,6 +23,9 @@ export function prepareResponseSubmission(
       ...(normalizedInput ? { input: normalizedInput } : {}),
       data_corpus_package: { sources: normalizedSources, schemas: {}, metadata: {} },
       session_id: sessionId,
+      ...(typeof methodHubEnabled === 'boolean'
+        ? { runtime_options: { method_hub_enabled: methodHubEnabled } }
+        : {}),
     },
   };
 }

@@ -37,10 +37,15 @@ export function useResponsesChat() {
   );
 
   const submit = useCallback(
-    async (input: string, sources: string[]) => {
+    async (input: string, sources: string[], methodHubEnabled?: boolean) => {
       if (controllerRef.current) return false;
 
-      const submission = prepareResponseSubmission(input, sources, sessionIdRef.current);
+      const submission = prepareResponseSubmission(
+        input,
+        sources,
+        sessionIdRef.current,
+        methodHubEnabled,
+      );
       if (!submission) {
         setValidationError('Enter a question or add a server-side data source.');
         return false;

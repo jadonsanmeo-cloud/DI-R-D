@@ -14,6 +14,7 @@ import type {
 import SpecConfirmationCard from '@/new-components/chat/content/SpecConfirmationCard';
 import TaskPlanCard, { TaskItem } from '@/new-components/chat/content/TaskPlanCard';
 import { AttachedConnector, ConnectorInstance } from '@/new-components/connector/types';
+import MethodHubToggle from '@/new-components/responses-chat/MethodHubToggle';
 import FromTaskBanner from '@/new-components/scheduled-task/FromTaskBanner';
 import SaveAsScheduledTaskDrawer from '@/new-components/scheduled-task/SaveAsScheduledTaskDrawer';
 import type { EditableExecutionSpec, ResponseConfirmationState } from '@/types/responses';
@@ -25,6 +26,7 @@ import {
   getResponseHistorySessionId,
   notifyResponseHistoryChanged,
 } from '@/utils/responses-history';
+import { fetchRuntimeCapabilities, initialMethodHubEnabled } from '@/utils/runtime-capabilities';
 import ApiOutlined from '@ant-design/icons/ApiOutlined';
 import ArrowUpOutlined from '@ant-design/icons/ArrowUpOutlined';
 import BookOutlined from '@ant-design/icons/BookOutlined';
@@ -385,6 +387,9 @@ const Playground: NextPage = () => {
   const { model, setModel } = useContext(ChatContext);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [methodHubEnabled, setMethodHubEnabled] = useState(false);
+  const [methodHubAvailable, setMethodHubAvailable] = useState(false);
+  const [runtimeCapabilitiesLoading, setRuntimeCapabilitiesLoading] = useState(true);
 
   // Selection State
   const [isDbModalOpen, setIsDbModalOpen] = useState(false);
@@ -454,12 +459,35 @@ const Playground: NextPage = () => {
 
   // Track step IDs that belong to a terminate action so we can suppress them
   const terminatedStepIdsRef = useRef<Set<string>>(new Set());
+  const methodHubModeRestoredRef = useRef(false);
   const preloadedFilePathRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   // Snapshot of the exact payload last sent to the agent, captured at send
   // time so "保存定时任务" can replay the real execution (file / database /
   // knowledge / skill / connectors) instead of a drifting UI state.
   const lastSentPayloadRef = useRef<ChatReplayPayload | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setRuntimeCapabilitiesLoading(true);
+    fetchRuntimeCapabilities(controller.signal)
+      .then(capabilities => {
+        setMethodHubAvailable(capabilities.method_hub.available);
+        if (!router.query.response_id && !methodHubModeRestoredRef.current) {
+          setMethodHubEnabled(initialMethodHubEnabled(capabilities));
+        }
+      })
+      .catch(error => {
+        if (controller.signal.aborted) return;
+        setMethodHubAvailable(false);
+        setMethodHubEnabled(false);
+        message.error(error instanceof Error ? error.message : t('method_hub_unavailable'));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRuntimeCapabilitiesLoading(false);
+      });
+    return () => controller.abort();
+  }, [router.query.response_id, t]);
 
   useEffect(() => {
     const raw = sessionStorage.getItem(PENDING_RESPONSE_STORAGE_KEY);
@@ -482,6 +510,10 @@ const Playground: NextPage = () => {
         if (payload.status !== 'awaiting_confirmation') {
           sessionStorage.removeItem(PENDING_RESPONSE_STORAGE_KEY);
           return;
+        }
+        if (typeof payload.runtime_options?.method_hub_enabled === 'boolean') {
+          methodHubModeRestoredRef.current = true;
+          setMethodHubEnabled(payload.runtime_options.method_hub_enabled);
         }
         const confirmation: ResponseConfirmationState = {
           responseId: pending.responseId,
@@ -691,11 +723,8 @@ const Playground: NextPage = () => {
   }, [messages]);
 
   useEffect(() => {
-    const convId = router.query.id as string | undefined;
     const historyResponseId = router.query.response_id as string | undefined;
-    if (convId && convId !== conversationId) {
-      loadConversation(convId);
-    } else if (!convId && !historyResponseId && conversationId) {
+    if (!historyResponseId && conversationId) {
       // URL 中 id 消失（如点击 new_task / 探索广场），清空当前会话状态
       setMessages([]);
       setConversationId(null);
@@ -712,8 +741,9 @@ const Playground: NextPage = () => {
       setStreamingSummary('');
       setSummaryComplete(false);
       setTaskPlan([]);
+      methodHubModeRestoredRef.current = false;
     }
-  }, [router.query.id, router.query.response_id]);
+  }, [router.query.response_id]);
 
   useEffect(() => {
     if (!router.isReady) return;
@@ -764,6 +794,8 @@ const Playground: NextPage = () => {
         setActiveViewMsgId(viewId);
         setStreamingSummary(cleanedOutput);
         setSummaryComplete(true);
+        methodHubModeRestoredRef.current = true;
+        setMethodHubEnabled(detail.runtime_options.method_hub_enabled);
       })
       .catch(error => {
         if (active) {
@@ -1749,6 +1781,9 @@ const Playground: NextPage = () => {
             metadata: {},
           },
           session_id: historySessionId,
+          runtime_options: {
+            method_hub_enabled: methodHubEnabled,
+          },
         }),
         signal: controller.signal,
       });
@@ -2346,223 +2381,6 @@ const Playground: NextPage = () => {
     router.push('/', undefined, { shallow: true });
   };
 
-  const restoreFromHistory = (
-    historyMessages: Array<{ role: string; context: string; order?: number; model_name?: string }>,
-  ) => {
-    setExecutionMap({});
-    setActiveMessageId(null);
-    setActiveViewMsgId(null);
-    setArtifacts([]);
-    setStreamingSummary('');
-    setSummaryComplete(false);
-
-    const newMessages: ChatMessage[] = [];
-    const newExecutionMap: typeof executionMap = {};
-    const allArtifacts: Artifact[] = [];
-    const restoredSkillNames: Record<string, string> = {};
-
-    historyMessages.forEach(msg => {
-      if (msg.role === 'human') {
-        newMessages.push({ id: generateUUID(), role: 'human', context: msg.context, order: msg.order });
-      } else if (msg.role === 'view') {
-        const viewId = generateUUID();
-        let payload: any = null;
-        try {
-          payload = JSON.parse(msg.context);
-        } catch {
-          /* ignore parse failure */
-        }
-
-        if (payload && payload.version === 1 && payload.type === 'react-agent') {
-          const steps: ExecutionStep[] = (payload.steps || []).map((s: any, idx: number) => ({
-            id: s.id || `history-step-${idx}`,
-            step: idx + 1,
-            title: s.title || s.action || `Step ${idx + 1}`,
-            detail: s.detail || '',
-            status: (s.status === 'failed' ? 'failed' : 'done') as 'done' | 'failed',
-            action: s.action,
-            actionInput: s.action_input || undefined,
-            todoMeta: s.todo_meta || undefined,
-          }));
-
-          const outputs: Record<string, ExecutionOutput[]> = {};
-          const stepThoughts: Record<string, string> = {};
-
-          (payload.steps || []).forEach((s: any, idx: number) => {
-            const stepId = s.id || `history-step-${idx}`;
-            if (Array.isArray(s.outputs)) {
-              outputs[stepId] = s.outputs.map((o: any) => ({
-                output_type: o.output_type || 'text',
-                content: o.content,
-              }));
-            }
-            if ((s.action === 'code_interpreter' || s.action === 'shell_interpreter') && s.action_input) {
-              const existingOutputs = outputs[stepId] || [];
-              const hasCode = existingOutputs.some((o: ExecutionOutput) => o.output_type === 'code');
-              if (!hasCode) {
-                try {
-                  const input = typeof s.action_input === 'string' ? JSON.parse(s.action_input) : s.action_input;
-                  if (input && input.code) {
-                    outputs[stepId] = [{ output_type: 'code', content: input.code }, ...existingOutputs];
-                  }
-                } catch {
-                  /* ignore */
-                }
-              }
-            }
-            const historyThought = s.action_intention
-              ? s.action_reason
-                ? `${s.action_intention}\n${s.action_reason}`
-                : s.action_intention
-              : s.thought;
-            if (historyThought) {
-              if (typeof historyThought === 'string') {
-                stepThoughts[stepId] = historyThought;
-              } else if (typeof historyThought === 'object') {
-                const todoValue = (historyThought as Record<string, unknown>).TODO;
-                if (typeof todoValue === 'string') {
-                  stepThoughts[stepId] = todoValue;
-                } else {
-                  try {
-                    stepThoughts[stepId] = JSON.stringify(historyThought);
-                  } catch {
-                    stepThoughts[stepId] = String(historyThought);
-                  }
-                }
-              }
-            }
-          });
-
-          newExecutionMap[viewId] = {
-            steps,
-            outputs,
-            activeStepId: steps.length > 0 ? steps[steps.length - 1].id : null,
-            collapsed: false,
-            stepThoughts,
-          };
-
-          const finalContent = cleanFinalContent(payload.final_content || '');
-
-          const restoredArtifacts = buildArtifactsFromExecution(viewId, { steps, outputs }, finalContent, null);
-          allArtifacts.push(...restoredArtifacts);
-
-          // Detect skill creation from restored execution
-          const isSkillPackageStep = (s: ExecutionStep) => {
-            if (s.action !== 'shell_interpreter') return false;
-            const detailHas = s.detail?.includes('package_skill') || s.detail?.includes('init_skill');
-            const inputHas = s.actionInput?.includes('package_skill') || s.actionInput?.includes('init_skill');
-            const outputTexts = (outputs[s.id] || []).map(o => String(o.content)).join(' ');
-            const outputHas =
-              outputTexts.includes('package_skill') ||
-              outputTexts.includes('init_skill') ||
-              outputTexts.includes('Successfully packaged');
-            return detailHas || inputHas || outputHas;
-          };
-          const skillStep = steps.find(isSkillPackageStep);
-          if (skillStep) {
-            const allText = [
-              skillStep.actionInput || '',
-              skillStep.detail || '',
-              ...(outputs[skillStep.id] || []).map(o => String(o.content)),
-            ].join(' ');
-            const skillName = extractCreatedSkillName(allText);
-            if (skillName) {
-              restoredSkillNames[viewId] = skillName;
-            }
-          }
-
-          newMessages.push({
-            id: viewId,
-            role: 'view',
-            context: finalContent,
-            order: msg.order,
-            thinking: false,
-            taskPlan: Array.isArray(payload.task_plan)
-              ? payload.task_plan
-              : Array.isArray(payload.tasks)
-                ? payload.tasks
-                : undefined,
-          });
-        } else {
-          newMessages.push({
-            id: viewId,
-            role: 'view',
-            context: msg.context || '',
-            order: msg.order,
-            thinking: false,
-          });
-        }
-      }
-    });
-
-    setMessages(newMessages);
-    setExecutionMap(newExecutionMap);
-    setArtifacts(allArtifacts);
-    if (Object.keys(restoredSkillNames).length > 0) {
-      setCreatedSkillNames(prev => ({ ...prev, ...restoredSkillNames }));
-    }
-
-    const lastView = [...newMessages].reverse().find(m => m.role === 'view');
-    if (lastView?.id) {
-      setActiveMessageId(lastView.id);
-      setStreamingSummary(lastView.context || '');
-      setSummaryComplete(true);
-    }
-  };
-
-  const loadConversation = async (convUid: string) => {
-    if (historyLoading) return;
-    setHistoryLoading(true);
-    try {
-      const res: any = await axios.get(`/api/v1/chat/dialogue/messages/history?con_uid=${convUid}`);
-      let msgList: any[] | null = null;
-      if (res?.success && Array.isArray(res.data)) {
-        msgList = res.data;
-      } else if (Array.isArray(res?.data?.data)) {
-        msgList = res.data.data;
-      } else if (Array.isArray(res?.data)) {
-        msgList = res.data;
-      } else if (Array.isArray(res)) {
-        msgList = res;
-      }
-      if (msgList && msgList.length > 0) {
-        setConversationId(convUid);
-        restoreFromHistory(
-          msgList.map((m: any) => ({
-            role: m.role,
-            context: m.context,
-            order: m.order,
-            model_name: m.model_name,
-          })),
-        );
-      }
-    } catch (e) {
-      console.error('Failed to load conversation', e);
-      message.error(t('pg.loadHistoryFailed'));
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
-  // Share current conversation — create share link and copy to clipboard
-  const handleShare = async () => {
-    if (!conversationId) {
-      message.warning(t('pg.startConversationBeforeShare'));
-      return;
-    }
-    try {
-      const res: any = await axios.post('/api/v1/chat/share', { conv_uid: conversationId });
-      const shareUrl = res?.data?.share_url;
-      if (!shareUrl) throw new Error('No share URL returned');
-      const fullUrl = `${window.location.origin}${shareUrl}`;
-      await navigator.clipboard.writeText(fullUrl);
-      message.success(t('pg.shareLinkCopied'));
-    } catch (e) {
-      console.error('Failed to create share link', e);
-      message.error(t('pg.createShareLinkFailed'));
-    }
-  };
-
   // Build snapshot of current conversation state for scheduled task creation
   const buildSnapshot = (): ChatReplayPayload => {
     // Prefer the payload actually sent to the agent this session — it carries
@@ -3051,7 +2869,7 @@ const Playground: NextPage = () => {
 
                             {/* Toolbar Row */}
                             <div className='flex items-center justify-between mt-1'>
-                              <div className='flex items-center gap-3'>
+                              <div className='flex flex-wrap items-center gap-3'>
                                 {/* Add Button */}
                                 <Dropdown
                                   menu={{
@@ -3068,17 +2886,23 @@ const Playground: NextPage = () => {
                                   }}
                                   trigger={['click']}
                                 >
-                                  <Tooltip title={t('add_context')}>
-                                    <Button
-                                      data-testid='backend-qa-add-context'
-                                      type='text'
-                                      shape='circle'
-                                      size='small'
-                                      icon={<PlusOutlined />}
-                                      className='flex items-center justify-center text-gray-500 hover:text-violet-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20 transition-all flex-shrink-0'
-                                    />
-                                  </Tooltip>
+                                  <Button
+                                    data-testid='backend-qa-add-context'
+                                    type='text'
+                                    shape='circle'
+                                    size='small'
+                                    icon={<PlusOutlined />}
+                                    className='flex items-center justify-center text-gray-500 hover:text-violet-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20 transition-all flex-shrink-0'
+                                  />
                                 </Dropdown>
+                                <MethodHubToggle
+                                  enabled={methodHubEnabled}
+                                  available={methodHubAvailable}
+                                  loading={runtimeCapabilitiesLoading}
+                                  label={t('method_hub_toggle')}
+                                  unavailableLabel={t('method_hub_unavailable')}
+                                  onChange={setMethodHubEnabled}
+                                />
                               </div>
 
                               <div className='flex items-center gap-2.5'>
@@ -3165,7 +2989,6 @@ const Playground: NextPage = () => {
                         isRunning={isRunning}
                         onCollapse={() => setRightPanelCollapsed(true)}
                         onRerun={router.query.from_task ? undefined : () => {}}
-                        onShare={!loading && !!conversationId ? handleShare : undefined}
                         onSchedule={
                           !loading && !!conversationId && !router.query.from_task
                             ? () => setScheduleOpen(true)
@@ -3295,7 +3118,7 @@ const Playground: NextPage = () => {
 
                         {/* Input Toolbar */}
                         <div className='flex items-center justify-between px-1 mt-1'>
-                          <div className='flex items-center gap-4'>
+                          <div className='flex flex-wrap items-center gap-4'>
                             {/* Add Button with Dropdown Menu */}
                             <Dropdown
                               menu={{
@@ -3310,22 +3133,28 @@ const Playground: NextPage = () => {
                               }}
                               trigger={['click']}
                             >
-                              <Tooltip title={t('add_context')}>
-                                <Button
-                                  data-testid='backend-qa-add-context'
-                                  type='text'
-                                  shape='circle'
-                                  size='small'
-                                  icon={<PlusOutlined />}
-                                  className='flex items-center justify-center text-gray-500 hover:text-violet-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20 transition-all flex-shrink-0'
-                                />
-                              </Tooltip>
+                              <Button
+                                data-testid='backend-qa-add-context'
+                                type='text'
+                                shape='circle'
+                                size='small'
+                                icon={<PlusOutlined />}
+                                className='flex items-center justify-center text-gray-500 hover:text-violet-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20 transition-all flex-shrink-0'
+                              />
                             </Dropdown>
 
                             {/* Model Selector with premium styling */}
                             <div className='model-selector-premium'>
                               <ModelSelector onChange={val => setModel(val)} />
                             </div>
+                            <MethodHubToggle
+                              enabled={methodHubEnabled}
+                              available={methodHubAvailable}
+                              loading={runtimeCapabilitiesLoading}
+                              label={t('method_hub_toggle')}
+                              unavailableLabel={t('method_hub_unavailable')}
+                              onChange={setMethodHubEnabled}
+                            />
                             <style
                               dangerouslySetInnerHTML={{
                                 __html: `

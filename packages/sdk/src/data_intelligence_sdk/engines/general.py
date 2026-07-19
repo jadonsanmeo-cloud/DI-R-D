@@ -24,7 +24,11 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
-from data_intelligence_sdk.tools import create_execute_python_tool
+from data_intelligence_sdk.tools import (
+    create_execute_python_tool,
+    create_mcp_tools,
+    mcp_catalog_prompt,
+)
 
 AgentFactory = Callable[..., object]
 
@@ -131,10 +135,11 @@ class GeneralPurposeEngine:
             },
         )
         execute_python = create_execute_python_tool(runtime)
+        mcp_tools = create_mcp_tools(runtime)
         self._register_minimal_profile()
         agent = self.agent_factory(
             model=self.llm,
-            tools=[execute_python],
+            tools=[*mcp_tools, execute_python],
             system_prompt=self._system_prompt(spec, corpus_package, runtime),
             backend=runtime.sandbox.backend,
             subagents=[],
@@ -151,13 +156,13 @@ class GeneralPurposeEngine:
             }
         )
         answer = _last_message_text(result).strip()
-        execution = _latest_successful_execution(runtime)
-        if not answer or execution is None:
+        grounding = _latest_successful_grounding(runtime)
+        if not answer:
             runtime.run_context.record_step(
                 "deep_agent_retry_started",
                 inputs={
-                    "blank_answer": not bool(answer),
-                    "missing_successful_execution": execution is None,
+                    "blank_answer": True,
+                    "has_successful_grounding": grounding is not None,
                 },
             )
             result = agent.invoke(
@@ -166,27 +171,22 @@ class GeneralPurposeEngine:
                 }
             )
             answer = _last_message_text(result).strip()
-            execution = _latest_successful_execution(runtime)
+            grounding = _latest_successful_grounding(runtime)
             runtime.run_context.record_step(
                 "deep_agent_retry_completed",
                 outputs={
                     "has_answer": bool(answer),
-                    "has_successful_execution": execution is not None,
+                    "has_successful_grounding": grounding is not None,
                 },
             )
-        if execution is None:
-            raise RuntimeError(
-                "GeneralPurposeEngine did not produce a successful "
-                "execute_python result."
-            )
-        if not answer:
+        if not answer and grounding is not None:
             runtime.run_context.record_step(
                 "deep_agent_fallback_synthesis",
                 inputs={"objective": spec.objective},
             )
-            answer = self._synthesize_execution_answer(spec, execution).strip()
+            answer = self._synthesize_execution_answer(spec, grounding).strip()
         if not answer:
-            answer = _render_execution_result(execution).strip()
+            answer = _render_execution_result(grounding).strip()
         if not answer:
             raise RuntimeError("GeneralPurposeEngine produced no usable answer.")
         runtime.run_context.record_step(
@@ -269,17 +269,31 @@ class GeneralPurposeEngine:
             }
             for source in corpus_package.sources
         ]
+        catalog = mcp_catalog_prompt(runtime)
+        method_hub_instructions = (
+            "Method Hub is enabled. For one tool operation, call the matching "
+            "Method Hub tool directly. For multiple tool calls or any "
+            "transformation that combines or modifies tool results, call "
+            "execute_python and import `call_tool` from `axiom_method_hub`; "
+            "assign the final JSON-serializable value to `result`. Never "
+            "attempt HTTP access from generated code.\n\n"
+            f"Method Hub catalog:\n{json.dumps(catalog, indent=2, default=str)}\n\n"
+            if catalog
+            else (
+                "Method Hub is disabled. Use execute_python when the request "
+                "requires data inspection, calculation, or code execution, and "
+                "assign its final JSON-serializable value to `result`. For a "
+                "request that does not need tools, answer directly.\n\n"
+            )
+        )
         return (
-            "You are the only analysis agent for this request. Use the staged data "
-            "to answer the objective.\n\n"
-            "You have exactly one action: execute_python. Pass a complete Python "
-            "analysis program in its code argument. The runtime persists every "
-            "attempt as an artifact before execution. The program must read only "
-            "the staged sandbox paths listed below, perform the analysis, and "
-            "assign its final JSON-serializable value to a top-level variable "
-            "named result. Always call execute_python. If execution fails, use "
-            "stderr to correct the next code attempt. Base the final answer only "
-            "on successful execution output; never invent data.\n\n"
+            "You are the only analysis agent for this request. Use the staged "
+            "data and available tools to answer the objective.\n\n"
+            f"{method_hub_instructions}"
+            "When using tools or staged data, base the final answer only on "
+            "successful tool or sandbox output and never invent data. If an "
+            "execution fails, inspect the structured error and correct the next "
+            "attempt.\n\n"
             f"Objective: {spec.objective}\n"
             f"Constraints: {json.dumps(spec.constraints, default=str)}\n"
             "Staged sources:\n"
@@ -322,26 +336,32 @@ def _retry_messages(result: object, objective: str) -> list[object]:
         {
             "role": "user",
             "content": (
-                "The previous attempt did not produce a usable grounded answer. "
-                "Call execute_python with a complete analysis of the staged data, "
-                "then return a non-empty final answer based only on the successful "
-                "execution result."
+                "The previous attempt did not produce a usable answer. Use a "
+                "direct Method Hub tool or execute_python when the request needs "
+                "tools; otherwise answer directly. Return a non-empty final answer."
             ),
         }
     )
     return messages
 
 
-def _latest_successful_execution(
+def _latest_successful_grounding(
     runtime: EngineRuntimeContext,
 ) -> dict[str, Any] | None:
     for call in reversed(runtime.run_context.trace.method_calls):
-        if (
-            call.method_name == "execute_python"
-            and call.status == "completed"
-            and call.outputs.get("success") is True
-        ):
-            return call.outputs
+        if call.status != "completed":
+            continue
+        if call.method_name == "execute_python":
+            if call.outputs.get("success") is True:
+                return call.outputs
+            continue
+        return {
+            "success": True,
+            "result": call.outputs.get("result", call.outputs),
+            "stdout": "",
+            "stderr": "",
+            "method_name": call.method_name,
+        }
     return None
 
 

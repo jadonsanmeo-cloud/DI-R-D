@@ -9,6 +9,34 @@ from langchain_core.tools import BaseTool, tool
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 
 
+def record_sandbox_method_calls(
+    runtime: EngineRuntimeContext,
+    observation: dict[str, Any],
+) -> None:
+    """Import authoritative Method Hub calls reported by the sandbox broker."""
+
+    for call in observation.get("method_calls", []):
+        status = "completed" if call.get("status") == "completed" else "failed"
+        runtime.run_context.record_method_call(
+            str(call["tool_name"]),
+            status=status,
+            inputs=dict(call.get("arguments", {})),
+            outputs={
+                "result": call.get("result"),
+                "error": call.get("error"),
+                "provider": "sandbox_mcp_broker",
+                "command_id": call.get("command_id"),
+                "started_at": call.get("started_at"),
+                "finished_at": call.get("finished_at"),
+            },
+            log_refs=(
+                [f"sandbox-command://{observation['command_id']}"]
+                if observation.get("command_id")
+                else []
+            ),
+        )
+
+
 def create_execute_python_tool(runtime: EngineRuntimeContext) -> BaseTool:
     """Create a request-scoped Python sandbox execution tool."""
 
@@ -23,6 +51,7 @@ def create_execute_python_tool(runtime: EngineRuntimeContext) -> BaseTool:
                 code,
                 runtime.run_artifact,
             )
+            record_sandbox_method_calls(runtime, observation)
         except ValueError as exc:
             observation = {
                 "success": False,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 from dataclasses import asdict
 from pathlib import Path
@@ -21,12 +22,18 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
-from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     create_example_pipeline,
 )
 
-from data_intelligence_api.domain.workflow import WorkflowInvocation
+from data_intelligence_api.application.runtime_capabilities import (
+    resolve_method_hub,
+    resolve_runtime_options,
+)
+from data_intelligence_api.domain.workflow import (
+    WorkflowInvocation,
+    WorkflowRuntimeOptions,
+)
 from data_intelligence_api.http.schemas.responses import CreateResponseRequest
 
 DEFAULT_QUERY = "Analyze this data corpus."
@@ -66,6 +73,8 @@ def resolve_sources(sources: list[str], data_corpus_root: Path) -> list[str]:
 def build_workflow_invocation(
     request: CreateResponseRequest,
     data_corpus_root: Path,
+    *,
+    method_hub_default_enabled: bool = False,
 ) -> WorkflowInvocation:
     query_text = (request.input or "").strip() or DEFAULT_QUERY
     return WorkflowInvocation(
@@ -84,24 +93,63 @@ def build_workflow_invocation(
         ),
         session_context=SessionContext(session_id=request.session_id),
         user_context=UserContext(user_id=request.user_id),
+        runtime_options=resolve_runtime_options(
+            request.runtime_options,
+            default_enabled=method_hub_default_enabled,
+        ),
     )
 
 
-def default_pipeline_factory(*, logger: RuntimeLogger) -> DataIntelligencePipeline:
+def default_pipeline_factory(
+    *,
+    logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions | None = None,
+) -> DataIntelligencePipeline:
     config_manager = ConfigManager(os.getenv("MODEL_CONFIG_PATH") or None)
     method_hub_settings = config_manager.method_hub_settings()
-    mcp_client = (
-        MCPMethodClient(method_hub_settings.endpoint)
-        if method_hub_settings.enabled
-        else None
+    resolved_options = runtime_options or WorkflowRuntimeOptions(
+        method_hub_enabled=method_hub_settings.enabled
+    )
+    resolved_method_hub = resolve_method_hub(
+        resolved_options,
+        endpoint=method_hub_settings.endpoint,
+    )
+    method_hub_kwargs = (
+        {
+            "mcp_tools": resolved_method_hub.tools,
+            "method_hub_enabled": True,
+        }
+        if resolved_options.method_hub_enabled
+        else {}
     )
     return create_example_pipeline(
         logger=logger,
         config_manager=config_manager,
         use_llm_spec_builder=True,
         intent_service_base_url=os.getenv("INTENT_SERVICE_BASE_URL") or None,
-        mcp_client=mcp_client,
+        mcp_client=resolved_method_hub.client,
+        **method_hub_kwargs,
     )
+
+
+def _create_pipeline(
+    pipeline_factory: PipelineFactory,
+    *,
+    logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions,
+) -> DataIntelligencePipeline:
+    try:
+        parameters = inspect.signature(pipeline_factory).parameters.values()
+    except (TypeError, ValueError):
+        parameters = ()
+    supports_runtime_options = any(
+        parameter.name == "runtime_options"
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    if supports_runtime_options:
+        return pipeline_factory(logger=logger, runtime_options=runtime_options)
+    return pipeline_factory(logger=logger)
 
 
 def execute_workflow(
@@ -109,7 +157,11 @@ def execute_workflow(
     logger: RuntimeLogger,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
 ) -> FinalResponse:
-    pipeline = pipeline_factory(logger=logger)
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=invocation.runtime_options,
+    )
     return pipeline.run(
         invocation.query,
         invocation.corpus_package,
@@ -123,7 +175,11 @@ def prepare_workflow(
     logger: RuntimeLogger,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
 ) -> PreparedExecution:
-    pipeline = pipeline_factory(logger=logger)
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=invocation.runtime_options,
+    )
     return pipeline.prepare_spec(
         invocation.query,
         invocation.corpus_package,
@@ -137,9 +193,14 @@ def revise_workflow(
     previous_spec: ExecutionSpec,
     feedback: str,
     logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
 ) -> ExecutionSpec:
-    pipeline = pipeline_factory(logger=logger)
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=runtime_options,
+    )
     return pipeline.revise_spec(prepared, previous_spec, feedback)
 
 
@@ -147,9 +208,14 @@ def execute_prepared_workflow(
     prepared: PreparedExecution,
     confirmed_spec: ExecutionSpec,
     logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
 ) -> FinalResponse:
-    pipeline = pipeline_factory(logger=logger)
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=runtime_options,
+    )
     return pipeline.execute_confirmed_spec(prepared, confirmed_spec)
 
 

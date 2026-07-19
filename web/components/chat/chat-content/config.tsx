@@ -22,7 +22,6 @@ import type VisPluginType from './vis-plugin';
 import { VisThinking } from './vis-thinking';
 
 const ReferencesContent = dynamic(() => import('./ReferencesContent'), { ssr: false });
-const VisChatLink = dynamic(() => import('./VisChatLink'), { ssr: false });
 const VisResponse = dynamic(() => import('./VisResponse'), { ssr: false });
 const AgentMessages = dynamic(() => import('./agent-messages'), { ssr: false });
 const AgentPlans = dynamic(() => import('./agent-plans'), { ssr: false });
@@ -340,10 +339,6 @@ const basicComponents: MarkdownComponent = {
     );
   },
   button({ children, className, ...restProps }) {
-    if (className === 'chat-link') {
-      const msg = (restProps as any)?.['data-msg'];
-      return <VisChatLink msg={msg}>{children}</VisChatLink>;
-    }
     return (
       <button className={className} {...restProps}>
         {children}

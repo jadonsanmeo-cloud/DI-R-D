@@ -1,5 +1,4 @@
-import { ChatContext } from '@/app/chat-context';
-import { apiInterceptors, delSpace, getSpaceConfig, getSpaceList, newDialogue } from '@/client/api';
+import { apiInterceptors, delSpace, getSpaceConfig, getSpaceList } from '@/client/api';
 import DocPanel from '@/components/knowledge/doc-panel';
 import DocTypeForm from '@/components/knowledge/doc-type-form';
 import DocUploadForm from '@/components/knowledge/doc-upload-form';
@@ -14,11 +13,10 @@ import classNames from 'classnames';
 import { debounce } from 'lodash';
 import moment from 'moment';
 import { useRouter } from 'next/router';
-import { useContext, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const Knowledge = () => {
-  const { setCurrentDialogInfo } = useContext(ChatContext);
   const [spaceList, setSpaceList] = useState<Array<ISpace> | null>([]);
   const [isAddShow, setIsAddShow] = useState<boolean>(false);
   const [isPanelShow, setIsPanelShow] = useState<boolean>(false);
@@ -60,26 +58,8 @@ const Knowledge = () => {
   }, []);
 
   const handleChat = async (space: ISpace) => {
-    const [_, data] = await apiInterceptors(
-      newDialogue({
-        chat_mode: 'chat_knowledge',
-      }),
-    );
-    // 知识库对话都默认私有知识库应用下
-    if (data?.conv_uid) {
-      setCurrentDialogInfo?.({
-        chat_scene: data.chat_mode,
-        app_code: data.chat_mode,
-      });
-      localStorage.setItem(
-        'cur_dialog_info',
-        JSON.stringify({
-          chat_scene: data.chat_mode,
-          app_code: data.chat_mode,
-        }),
-      );
-      router.push(`/chat?scene=chat_knowledge&id=${data?.conv_uid}&knowledge_id=${space.name}`);
-    }
+    void space;
+    await router.push('/');
   };
   const handleStepChange = ({ label, spaceName, docType, files }: StepChangeParams) => {
     if (label === 'finish') {

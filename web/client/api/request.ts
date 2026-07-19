@@ -8,14 +8,7 @@ import {
 } from '@/types/agent';
 import { GetAppInfoParams, IApp } from '@/types/app';
 import {
-  ChatHistoryResponse,
-  DialogueListResponse,
   FeedBack,
-  IChatDialogueSchema,
-  IDB,
-  NewDialogueParam,
-  PaginationResult,
-  SceneResponse,
   UserParam,
   UserParamResponse,
 } from '@/types/chat';
@@ -54,17 +47,6 @@ import { BaseModelParams, IModelData, StartModelParams, SupportModel } from '@/t
 import { AxiosRequestConfig } from 'axios';
 import { DELETE, GET, POST, PUT } from '.';
 
-/** App */
-export const postScenes = () => {
-  return POST<null, Array<SceneResponse>>('/api/v1/chat/dialogue/scenes');
-};
-export const newDialogue = (data: NewDialogueParam) => {
-  return POST<NewDialogueParam, IChatDialogueSchema>(
-    `/api/v1/chat/dialogue/new?chat_mode=${data.chat_mode}&model_name=${data.model}`,
-    data,
-  );
-};
-
 const buildUrl = (baseUrl: string, params: any) => {
   const queryString = Object.keys(params)
     .filter(key => params[key] !== undefined) //
@@ -101,31 +83,8 @@ export const postDbRefresh = (data: PostDbRefreshParams) => {
   return POST<PostDbRefreshParams, boolean>(`/api/v2/serve/datasources/${data.id}/refresh`);
 };
 
-/** Chat Page */
-export const getDialogueList = () => {
-  return GET<null, DialogueListResponse>('/api/v1/chat/dialogue/list');
-};
-export const getDialogueListPaged = (
-  data: { chat_mode?: string; user_name?: string; sys_code?: string },
-  page = 1,
-  page_size = 20,
-) => {
-  return POST<typeof data, PaginationResult<IChatDialogueSchema>>(
-    `/api/v1/chat/dialogue/query_page?page=${page}&page_size=${page_size}`,
-    data,
-  );
-};
 export const getUsableModels = () => {
   return GET<null, Array<string>>('/api/v1/model/types');
-};
-export const postChatModeParamsList = (chatMode: string) => {
-  return POST<null, IDB[]>(`/api/v1/chat/mode/params/list?chat_mode=${chatMode}`);
-};
-export const postChatModeParamsInfoList = (chatMode: string) => {
-  return POST<null, Record<string, string>>(`/api/v1/chat/mode/params/info?chat_mode=${chatMode}`);
-};
-export const getChatHistory = (convId: string) => {
-  return GET<null, ChatHistoryResponse>(`/api/v1/chat/dialogue/messages/history?con_uid=${convId}`);
 };
 export const postChatModeParamsFileLoad = ({
   convUid,
@@ -166,15 +125,6 @@ export const postChatModeParamsFileLoad = ({
     },
     ...config,
   });
-};
-
-export const clearChatHistory = (conUid: string) => {
-  return POST<null, Record<string, string>>(`/api/v1/chat/dialogue/clear?con_uid=${conUid}`);
-};
-
-/** Menu */
-export const delDialogue = (conv_uid: string) => {
-  return POST(`/api/v1/chat/dialogue/delete?con_uid=${conv_uid}`);
 };
 
 /** Editor */
@@ -394,11 +344,6 @@ export const publishApp = (app_code: string) => {
 export const unPublishApp = (app_code: string) => {
   return POST<Record<string, any>, []>('/api/v1/app/unpublish', { app_code });
 };
-export const addOmcDB = (params: Record<string, string>) => {
-  return POST<Record<string, any>, []>('/api/v1/chat/db/add', params);
-  // return POST<Record<string, any>, []>('/api/v2/serve/datasources', params);
-};
-
 export const getAppInfo = (data: GetAppInfoParams) => {
   return GET<GetAppInfoParams, IApp>('/api/v1/app/info', data);
 };

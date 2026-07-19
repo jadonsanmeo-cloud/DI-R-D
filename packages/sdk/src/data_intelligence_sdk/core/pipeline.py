@@ -19,7 +19,7 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.deep_agent_sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.method_hub import MethodHub
-from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
+from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 from data_intelligence_sdk.spec.default_confirmation import SpecConfirmationDecision
@@ -43,6 +43,7 @@ class DataIntelligencePipeline:
         synthesizer: object,
         method_hub: object | None = None,
         mcp_client: MCPMethodClient | None = None,
+        mcp_tools: tuple[MCPToolDefinition, ...] = (),
         interface_registry: object | None = None,
         interface_builder: object | None = None,
         sandbox_executor: object | None = None,
@@ -62,6 +63,7 @@ class DataIntelligencePipeline:
         self.synthesizer = synthesizer
         self.method_hub = method_hub
         self.mcp_client = mcp_client
+        self.mcp_tools = mcp_tools
         self.interface_registry = interface_registry
         self.interface_builder = interface_builder
         self.sandbox_executor = sandbox_executor
@@ -311,6 +313,7 @@ class DataIntelligencePipeline:
                         )
                     ),
                     mcp_client=self.mcp_client,
+                    mcp_tools=self.mcp_tools,
                     method_hub=self.method_hub or MethodHub(),
                     interface_registry=self.interface_registry,
                     interface_builder=self.interface_builder,

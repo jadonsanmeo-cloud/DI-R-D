@@ -1,10 +1,8 @@
-import { ChatContext } from '@/app/chat-context';
 import {
   apiInterceptors,
   delApp,
   getAppAdmins,
   getAppList,
-  newDialogue,
   publishApp,
   unPublishApp,
   updateAppAdmins,
@@ -12,13 +10,12 @@ import {
 import BlurredCard, { ChatButton, InnerDropdown } from '@/new-components/common/blurredCard';
 import ConstructLayout from '@/new-components/layout/Construct';
 import { IApp } from '@/types/app';
-import { BulbOutlined, DingdingOutlined, PlusOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons';
 import { useDebounceFn, useRequest } from 'ahooks';
-import { App, Button, Input, Modal, Pagination, Popover, Segmented, SegmentedProps, Select, Spin, Tag } from 'antd';
-import copy from 'copy-to-clipboard';
+import { App, Button, Input, Modal, Pagination, Segmented, SegmentedProps, Select, Spin, Tag } from 'antd';
 import moment from 'moment';
 import { useRouter } from 'next/router';
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import CreateAppModal from './components/create-app-modal';
 
@@ -32,7 +29,6 @@ export default function AppContent() {
   const [activeKey, setActiveKey] = useState<TabKey>('all');
   const [apps, setApps] = useState<IApp[]>([]);
   const [modalType, setModalType] = useState<ModalType>('add');
-  const { model, setAgent: setAgentToChat, setCurrentDialogInfo } = useContext(ChatContext);
   const router = useRouter();
   const { openModal = '' } = router.query;
   const [filterValue, setFilterValue] = useState('');
@@ -45,9 +41,6 @@ export default function AppContent() {
     total_count: number;
     total_page: number;
   }>();
-  // 区分是单击还是双击
-  const [clickTimeout, setClickTimeout] = useState(null);
-
   const { message } = App.useApp();
 
   const handleCreate = () => {
@@ -150,44 +143,8 @@ export default function AppContent() {
     en: t('English'),
     zh: t('Chinese'),
   };
-  const handleChat = async (app: IApp) => {
-    // 原生应用跳转
-    if (app.team_mode === 'native_app') {
-      const { chat_scene = '' } = app.team_context;
-      const [, res] = await apiInterceptors(newDialogue({ chat_mode: chat_scene }));
-      if (res) {
-        setCurrentDialogInfo?.({
-          chat_scene: res.chat_mode,
-          app_code: app.app_code,
-        });
-        localStorage.setItem(
-          'cur_dialog_info',
-          JSON.stringify({
-            chat_scene: res.chat_mode,
-            app_code: app.app_code,
-          }),
-        );
-        router.push(`/chat?scene=${chat_scene}&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-      }
-    } else {
-      // 自定义应用
-      const [, res] = await apiInterceptors(newDialogue({ chat_mode: 'chat_agent' }));
-      if (res) {
-        setCurrentDialogInfo?.({
-          chat_scene: res.chat_mode,
-          app_code: app.app_code,
-        });
-        localStorage.setItem(
-          'cur_dialog_info',
-          JSON.stringify({
-            chat_scene: res.chat_mode,
-            app_code: app.app_code,
-          }),
-        );
-        setAgentToChat?.(app.app_code);
-        router.push(`/chat/?scene=chat_agent&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-      }
-    }
+  const handleChat = async (_app: IApp) => {
+    await router.push('/');
   };
   const items: SegmentedProps['options'] = [
     {
@@ -254,37 +211,6 @@ export default function AppContent() {
     getListFiltered();
   }, [getListFiltered]);
 
-  // 单击复制分享钉钉链接
-  const shareDingding = (item: IApp) => {
-    if (clickTimeout) {
-      clearTimeout(clickTimeout);
-      setClickTimeout(null);
-    }
-    const timeoutId = setTimeout(() => {
-      const mobileUrl = `${location.origin}/mobile/chat/?chat_scene=${item?.team_context?.chat_scene || 'chat_agent'}&app_code=${item.app_code}`;
-      const dingDingUrl = `dingtalk://dingtalkclient/page/link?url=${encodeURIComponent(mobileUrl)}&pc_slide=true`;
-      const result = copy(dingDingUrl);
-      if (result) {
-        message.success(t('cst.copySuccess'));
-      } else {
-        message.error(t('cst.copyFailed'));
-      }
-      setClickTimeout(null);
-    }, 300); // 双击时间间隔
-    setClickTimeout(timeoutId as any);
-  };
-
-  // 双击直接打开钉钉
-  const openDingding = (item: IApp) => {
-    if (clickTimeout) {
-      clearTimeout(clickTimeout);
-      setClickTimeout(null);
-    }
-    const mobileUrl = `${location.origin}/mobile/chat/?chat_scene=${item?.team_context?.chat_scene || 'chat_agent'}&app_code=${item.app_code}`;
-    const dingDingUrl = `dingtalk://dingtalkclient/page/link?url=${encodeURIComponent(mobileUrl)}&pc_slide=true`;
-    window.open(dingDingUrl);
-  };
-
   return (
     <ConstructLayout>
       <Spin spinning={spinning}>
@@ -327,36 +253,6 @@ export default function AppContent() {
                   description={item.app_describe}
                   RightTop={
                     <div className='flex items-center gap-2'>
-                      <Popover
-                        content={
-                          <div className='flex flex-col gap-2'>
-                            <div className='flex items-center gap-2'>
-                              <BulbOutlined
-                                style={{
-                                  color: 'rgb(252,204,96)',
-                                  fontSize: 12,
-                                }}
-                              />
-                              <span className='text-sm text-gray-500'>{t('copy_url')}</span>
-                            </div>
-                            <div className='flex items-center gap-2'>
-                              <BulbOutlined
-                                style={{
-                                  color: 'rgb(252,204,96)',
-                                  fontSize: 12,
-                                }}
-                              />
-                              <span className='text-sm text-gray-500'>{t('double_click_open')}</span>
-                            </div>
-                          </div>
-                        }
-                      >
-                        <DingdingOutlined
-                          className='cursor-pointer text-[#0069fe] hover:bg-white hover:dark:bg-black p-2 rounded-md'
-                          onClick={() => shareDingding(item)}
-                          onDoubleClick={() => openDingding(item)}
-                        />
-                      </Popover>
                       <InnerDropdown
                         menu={{
                           items: [

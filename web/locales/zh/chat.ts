@@ -130,6 +130,8 @@ export const ChatZh: Resources['translation'] = {
   added: '已添加',
   add: '添加',
   add_context: '添加上下文（文件、数据库、知识库）',
+  method_hub_toggle: 'Method Hub',
+  method_hub_unavailable: 'Method Hub 当前不可用，请关闭后使用纯代码模式。',
   select_skill: '选择技能',
   skill_selected: '技能：{{name}}',
   select_database: '选择数据库',

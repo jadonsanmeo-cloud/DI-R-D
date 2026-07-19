@@ -1,10 +1,9 @@
-import { ChatContext } from '@/app/chat-context';
-import { apiInterceptors, collectApp, delApp, newDialogue, publishApp, unCollectApp, unPublishApp } from '@/client/api';
+import { apiInterceptors, collectApp, delApp, publishApp, unCollectApp, unPublishApp } from '@/client/api';
 import { IApp } from '@/types/app';
 import { DeleteFilled, MessageFilled, StarFilled, WarningOutlined } from '@ant-design/icons';
 import { Modal, Popconfirm, Tooltip, message } from 'antd';
 import { useRouter } from 'next/router';
-import React, { useContext, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import IconFont from '@/new-components/common/Icon';
@@ -22,10 +21,7 @@ const { confirm } = Modal;
 
 export default function AppCard(props: IProps) {
   const { updateApps, app, handleEdit, activeKey } = props;
-  const { model } = useContext(ChatContext);
   const router = useRouter();
-
-  const { setAgent: setAgentToChat } = useContext(ChatContext);
 
   const { t } = useTranslation();
 
@@ -68,17 +64,7 @@ export default function AppCard(props: IProps) {
   };
 
   const handleChat = async () => {
-    const [, res] = await apiInterceptors(newDialogue({ chat_mode: 'chat_agent' }));
-    if (res) {
-      // 原生应用跳转
-      if (app.team_mode === 'native_app') {
-        const { chat_scene = '' } = app.team_context;
-        router.push(`/chat?scene=${chat_scene}&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-      } else {
-        setAgentToChat?.(app.app_code);
-        router.push(`/chat/?scene=chat_agent&id=${res.conv_uid}${model ? `&model=${model}` : ''}`);
-      }
-    }
+    await router.push('/');
   };
 
   // 发布或取消发布应用
