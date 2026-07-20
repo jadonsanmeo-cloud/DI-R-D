@@ -28,6 +28,7 @@ docs/superpowers/
 !.env.example
 .next/
 node_modules/
+*.tsbuildinfo
 .agents/
 .codex/
 logs/
