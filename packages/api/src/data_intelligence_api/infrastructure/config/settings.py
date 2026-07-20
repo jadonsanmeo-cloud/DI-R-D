@@ -24,6 +24,7 @@ class ApiSettings:
     max_spec_revision_rounds: int = 5
     max_upload_bytes: int = 50 * 1024 * 1024
     model_config_path: Path | None = None
+    artifact_root: Path = Path("artifacts")
     method_hub_default_enabled: bool = False
     method_hub_endpoint: str = "http://localhost:8000/mcp"
 
@@ -72,6 +73,7 @@ class ApiSettings:
             max_spec_revision_rounds=max_revisions,
             max_upload_bytes=max_upload_bytes,
             model_config_path=model_config_path,
+            artifact_root=Path(config_manager.artifact_settings().root).resolve(),
             method_hub_default_enabled=method_hub.enabled,
             method_hub_endpoint=method_hub.endpoint,
         )

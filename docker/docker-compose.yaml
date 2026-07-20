@@ -24,7 +24,7 @@ services:
       - ../configs/proxy-openrouter.toml:/app/configs/proxy-openrouter.toml:ro
       - api_data:/app/data
       - api_state:/app/.data
-      - api_artifacts:/app/artifacts
+      - ../artifacts:/app/artifacts
     stop_grace_period: 30s
 
   db:
@@ -48,5 +48,4 @@ services:
 volumes:
   api_data:
   api_state:
-  api_artifacts:
   postgres_data:

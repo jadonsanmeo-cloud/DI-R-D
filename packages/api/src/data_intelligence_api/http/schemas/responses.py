@@ -95,6 +95,7 @@ class ResponseHistoryDetail(BaseModel):
     output_text: str | None = None
     evidence: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(default_factory=list)
     error: dict[str, str] | None = None
     created_at: str | None = None
     updated_at: str | None = None

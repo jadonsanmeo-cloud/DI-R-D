@@ -6253,7 +6253,11 @@ class ReportEngine:
                 "error_logs": state.get("error_logs"),
                 "validation_feedback": state.get("validation_feedback"),
             },
-            outputs={"tool_name": code_spec.get("tool_name")},
+            outputs={
+                "tool_name": code_spec.get("tool_name"),
+                "language": "python",
+                "source_code": code_spec.get("source_code", ""),
+            },
         )
         return {"attempt": attempt, "code_spec": code_spec}
 

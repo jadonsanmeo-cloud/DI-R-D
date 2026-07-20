@@ -19,6 +19,7 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.deep_agent_sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
+from data_intelligence_sdk.runtime.event_payload import runtime_event_payload
 from data_intelligence_sdk.runtime.report_sandbox_executor import (
     RequestSandboxExecutor,
 )
@@ -95,6 +96,39 @@ class DataIntelligencePipeline:
                 status=status,
                 payload=payload,
             )
+
+    def _record_runtime_event(
+        self,
+        run_artifact: RunArtifactSession | None,
+        *,
+        phase: str,
+        event_type: str,
+        status: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        event = (
+            run_artifact.record_event(
+                phase=phase,
+                event_type=event_type,
+                status=status,
+                payload=payload,
+            )
+            if run_artifact is not None
+            else {
+                "event_id": None,
+                "run_id": None,
+                "sequence": None,
+                "phase": phase,
+                "event_type": event_type,
+                "status": status,
+                "payload": payload,
+            }
+        )
+        self._log(
+            "pipeline.runtime_event",
+            runtime_event_payload(event),
+        )
+        return event
 
     def run(
         self,
@@ -307,13 +341,13 @@ class DataIntelligencePipeline:
                 sandbox_executor = self.sandbox_executor
                 if sandbox_executor is None and sandbox is not None:
                     sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
+
+                def record_runtime_event(**event: Any) -> dict[str, Any]:
+                    return self._record_runtime_event(run_artifact, **event)
+
                 runtime = EngineRuntimeContext(
                     run_context=EngineRunContext(
-                        event_recorder=(
-                            run_artifact.record_event
-                            if run_artifact is not None
-                            else None
-                        )
+                        event_recorder=record_runtime_event,
                     ),
                     mcp_client=self.mcp_client,
                     mcp_tools=self.mcp_tools,

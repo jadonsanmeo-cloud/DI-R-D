@@ -26,7 +26,7 @@ import {
   getResponseHistorySessionId,
   notifyResponseHistoryChanged,
 } from '@/utils/responses-history';
-import { getPipelineStageLabel, getPipelineStageOutput } from '@/utils/responses-sse';
+import { getPipelineExecutionStep, getPipelineStageOutput } from '@/utils/responses-sse';
 import { fetchRuntimeCapabilities, initialMethodHubEnabled } from '@/utils/runtime-capabilities';
 import ApiOutlined from '@ant-design/icons/ApiOutlined';
 import ArrowUpOutlined from '@ant-design/icons/ArrowUpOutlined';
@@ -177,6 +177,52 @@ const withPipelineStageOutput = (
   output: ExecutionOutput | null,
 ): Record<string, ExecutionOutput[]> => (output ? { ...outputs, [eventType]: [output] } : outputs);
 
+const withPipelineEventStep = (steps: ExecutionStep[], payload: Record<string, unknown>): ExecutionStep[] => {
+  const eventStep = getPipelineExecutionStep(payload);
+  const nextSteps = steps.map(step =>
+    step.status === 'running' && step.id !== eventStep.id ? { ...step, status: 'done' as const } : step,
+  );
+  const existingIndex = nextSteps.findIndex(step => step.id === eventStep.id);
+  if (existingIndex >= 0) {
+    nextSteps[existingIndex] = {
+      ...nextSteps[existingIndex],
+      title: eventStep.title,
+      detail: eventStep.detail,
+      status: eventStep.status,
+    };
+    return nextSteps;
+  }
+  return [
+    ...nextSteps,
+    {
+      ...eventStep,
+      step: nextSteps.length + 1,
+    },
+  ];
+};
+
+const executionFromPipelineEvents = (events: Array<Record<string, unknown>>, spec: EditableExecutionSpec) => {
+  let steps: ExecutionStep[] = [];
+  let outputs: Record<string, ExecutionOutput[]> = {};
+  let activeStepId: string | null = null;
+
+  events.forEach(payload => {
+    const eventStep = getPipelineExecutionStep(payload);
+    const stageOutput = getPipelineStageOutput(payload, spec);
+    steps = withPipelineEventStep(steps, payload);
+    outputs = withPipelineStageOutput(outputs, eventStep.id, stageOutput);
+    if (stageOutput) activeStepId = eventStep.id;
+  });
+
+  return {
+    steps: steps.map(step => ({ ...step, status: step.status === 'failed' ? 'failed' : ('done' as const) })),
+    outputs,
+    activeStepId,
+    collapsed: false,
+    stepThoughts: {},
+  };
+};
+
 interface FilePreview {
   kind: 'table' | 'text';
   file_name?: string;
@@ -233,37 +279,101 @@ const isHtmlDocument = (content: unknown): content is string => {
   return normalized.startsWith('<!doctype html') || normalized.startsWith('<html');
 };
 
-const reportArtifactFromResponse = (payload: any, messageId: string): Artifact | null => {
+const reportArtifactsFromResponse = (payload: any, messageId: string): Artifact[] => {
   const renderedReports = Array.isArray(payload?.metadata?.rendered_reports) ? payload.metadata.rendered_reports : [];
-  const renderedHtml = renderedReports.find(
-    (item: any) => item?.format === 'html' && typeof item?.content === 'string',
-  );
-  const responseHtml = payload?.response?.output_text;
-  const content = renderedHtml?.content || (isHtmlDocument(responseHtml) ? responseHtml : null);
-  if (!content) return null;
-
   const reportTitle = payload?.metadata?.structured_report?.title;
   const safeTitle =
     typeof reportTitle === 'string' && reportTitle.trim()
       ? reportTitle.trim().replace(/[\\/:*?"<>|]+/g, '-')
       : 'Data intelligence report';
-  return {
-    id: `${messageId}-report-html`,
-    type: 'html',
-    name: `${safeTitle}.html`,
-    content,
-    createdAt: Date.now(),
-    messageId,
-    downloadable: true,
-    mimeType: renderedHtml?.media_type || 'text/html',
-    size: new Blob([content]).size,
+  const extensionByFormat: Record<string, string> = {
+    css: 'css',
+    html: 'html',
+    javascript: 'js',
+    markdown: 'md',
   };
+  const typeByFormat: Record<string, ArtifactType> = {
+    css: 'code',
+    html: 'html',
+    javascript: 'code',
+    markdown: 'markdown',
+  };
+  const artifacts = renderedReports.flatMap((item: any) => {
+    const format = String(item?.format || '').toLowerCase();
+    if (!format || typeof item?.content !== 'string') return [];
+    const extension = extensionByFormat[format] || format;
+    return [
+      {
+        id: `${messageId}-report-${format}`,
+        type: typeByFormat[format] || 'file',
+        name: `${safeTitle}.${extension}`,
+        content: item.content,
+        createdAt: Date.now(),
+        messageId,
+        downloadable: true,
+        mimeType: item.media_type,
+        size: new Blob([item.content]).size,
+      } satisfies Artifact,
+    ];
+  });
+
+  if (artifacts.some((artifact: Artifact) => artifact.type === 'html')) return artifacts;
+  const responseHtml = payload?.response?.output_text;
+  if (!isHtmlDocument(responseHtml)) return artifacts;
+  return [
+    ...artifacts,
+    {
+      id: `${messageId}-report-html`,
+      type: 'html',
+      name: `${safeTitle}.html`,
+      content: responseHtml,
+      createdAt: Date.now(),
+      messageId,
+      downloadable: true,
+      mimeType: 'text/html',
+      size: new Blob([responseHtml]).size,
+    },
+  ];
 };
 
 const reportSummaryFromResponse = (payload: any): string | null => {
   const summary = payload?.metadata?.structured_report?.summary;
   return typeof summary === 'string' && summary.trim() ? summary.trim() : null;
 };
+
+const generatedCodeArtifactFromEvent = (
+  payload: Record<string, unknown>,
+  messageId: string,
+  stepId: string,
+): Artifact | null => {
+  const rawCode =
+    payload.code && typeof payload.code === 'object' && !Array.isArray(payload.code)
+      ? (payload.code as Record<string, unknown>)
+      : null;
+  if (!rawCode || typeof rawCode.content !== 'string' || !rawCode.content.trim()) return null;
+  const eventIdentity = String(payload.event_id || payload.sequence || stepId);
+  const name = String(rawCode.name || 'generated-code.py');
+  return {
+    id: `${messageId}-generated-code-${eventIdentity}`,
+    type: 'code',
+    name,
+    content: rawCode.content,
+    createdAt: Date.now(),
+    messageId,
+    stepId,
+    downloadable: true,
+    mimeType: 'text/x-python',
+    size: new Blob([rawCode.content]).size,
+    filePath: rawCode.artifact_ref ? String(rawCode.artifact_ref) : undefined,
+  };
+};
+
+const generatedCodeArtifactsFromEvents = (events: Array<Record<string, unknown>>, messageId: string): Artifact[] =>
+  events.flatMap(payload => {
+    const eventStep = getPipelineExecutionStep(payload);
+    const artifact = generatedCodeArtifactFromEvent(payload, messageId, eventStep.id);
+    return artifact ? [artifact] : [];
+  });
 
 // Convert execution data to Manus panel format
 const convertToManusFormat = (
@@ -803,19 +913,25 @@ const Playground: NextPage = () => {
       .then(detail => {
         if (!active) return;
         const viewId = `history-view-${detail.response_id}`;
-        const restoredTasks: TaskItem[] = [
-          ...(detail.spec.objective
-            ? [{ content: detail.spec.objective, status: 'completed' as const, priority: 'high' as const }]
-            : []),
-          ...detail.spec.capability_requirements.map(requirement => ({
-            content: requirement.description || requirement.name,
-            status: 'completed' as const,
-            priority: 'medium' as const,
-          })),
+        const historyEvents = Array.isArray(detail.events) ? detail.events : [];
+        const restoredExecution = executionFromPipelineEvents(historyEvents, detail.spec);
+        const responsePayload = {
+          metadata: detail.metadata,
+          response: { output_text: detail.output_text },
+        };
+        const restoredArtifacts = [
+          ...generatedCodeArtifactsFromEvents(historyEvents, viewId),
+          ...reportArtifactsFromResponse(responsePayload, viewId),
         ];
+        const htmlArtifact = restoredArtifacts.find(artifact => artifact.type === 'html');
+        const reportSummary = reportSummaryFromResponse(responsePayload);
         const restoredOutput =
           detail.output_text || detail.error?.message || 'Completed output was not persisted for this earlier task.';
-        const cleanedOutput = cleanFinalContent(restoredOutput);
+        const cleanedOutput =
+          reportSummary ||
+          (isHtmlDocument(restoredOutput)
+            ? 'Report completed. Open the generated report to view it.'
+            : cleanFinalContent(restoredOutput));
         setMessages([
           {
             id: `history-human-${detail.response_id}`,
@@ -827,18 +943,32 @@ const Playground: NextPage = () => {
             role: 'view',
             context: cleanedOutput,
             thinking: false,
-            taskPlan: restoredTasks,
             evidence: detail.evidence,
             responseMetadata: detail.metadata,
           },
         ]);
         setConversationId(detail.response_id);
-        setTaskPlan(restoredTasks);
-        setExecutionMap({});
+        setTaskPlan([]);
+        setExecutionMap({ [viewId]: restoredExecution });
         setActiveMessageId(viewId);
         setActiveViewMsgId(viewId);
         setStreamingSummary(cleanedOutput);
         setSummaryComplete(true);
+        setUploadedFiles([]);
+        setUploadedFilePath(null);
+        setBackendQaUploadActive(false);
+        setFilePreview(null);
+        setFilePreviewError(null);
+        setChartPreview(null);
+        setArtifacts(restoredArtifacts);
+        if (htmlArtifact) {
+          setPreviewArtifact(htmlArtifact);
+          setRightPanelView('html-preview');
+          setRightPanelCollapsed(false);
+        } else {
+          setPreviewArtifact(null);
+          setRightPanelView('execution');
+        }
         methodHubModeRestoredRef.current = true;
         setMethodHubEnabled(detail.runtime_options.method_hub_enabled);
       })
@@ -1507,28 +1637,21 @@ const Playground: NextPage = () => {
         const payload = JSON.parse(line.slice(5).trim());
         if (payload.type?.startsWith('pipeline.')) {
           const stageOutput = getPipelineStageOutput(payload, spec);
+          const eventStep = getPipelineExecutionStep(payload);
+          const codeArtifact = generatedCodeArtifactFromEvent(payload, messageId, eventStep.id);
+          if (codeArtifact) {
+            setArtifacts(current => [...current.filter(item => item.id !== codeArtifact.id), codeArtifact]);
+          }
           setExecutionMap(current => {
             const execution = current[messageId];
             if (!execution) return current;
-            const steps = execution.steps.map(step =>
-              step.status === 'running' ? { ...step, status: 'done' as const } : step,
-            );
-            if (!steps.some(step => step.id === payload.type)) {
-              steps.push({
-                id: payload.type,
-                step: steps.length + 1,
-                title: getPipelineStageLabel(payload.type),
-                detail: '',
-                status: 'running',
-              });
-            }
             return {
               ...current,
               [messageId]: {
                 ...execution,
-                steps,
-                outputs: withPipelineStageOutput(execution.outputs, payload.type, stageOutput),
-                activeStepId: payload.type,
+                steps: withPipelineEventStep(execution.steps, payload),
+                outputs: withPipelineStageOutput(execution.outputs, eventStep.id, stageOutput),
+                activeStepId: eventStep.id,
               },
             };
           });
@@ -1602,20 +1725,24 @@ const Playground: NextPage = () => {
             ),
           );
         } else if (payload.type === 'response.completed') {
-          const reportArtifact = reportArtifactFromResponse(payload, messageId);
-          if (reportArtifact) {
-            setArtifacts(current => [...current.filter(item => item.id !== reportArtifact.id), reportArtifact]);
-            setPreviewArtifact(reportArtifact);
+          const reportArtifacts = reportArtifactsFromResponse(payload, messageId);
+          const reportArtifactIds = new Set(reportArtifacts.map(artifact => artifact.id));
+          const htmlArtifact = reportArtifacts.find(artifact => artifact.type === 'html');
+          if (reportArtifacts.length) {
+            setArtifacts(current => [...current.filter(item => !reportArtifactIds.has(item.id)), ...reportArtifacts]);
+          }
+          if (htmlArtifact) {
+            setPreviewArtifact(htmlArtifact);
             setRightPanelView('html-preview');
             setRightPanelCollapsed(false);
-            const reportSummary = reportSummaryFromResponse(payload);
-            if (reportSummary) {
-              setMessages(current =>
-                current.map(item =>
-                  item.id === messageId ? { ...item, context: reportSummary, thinking: false } : item,
-                ),
-              );
-            }
+          }
+          const reportSummary = reportSummaryFromResponse(payload);
+          if (reportSummary) {
+            setMessages(current =>
+              current.map(item =>
+                item.id === messageId ? { ...item, context: reportSummary, thinking: false } : item,
+              ),
+            );
           }
           sessionStorage.removeItem(PENDING_RESPONSE_STORAGE_KEY);
           notifyResponseHistoryChanged();
@@ -1829,6 +1956,8 @@ const Playground: NextPage = () => {
       },
     ]);
 
+    setUploadedFiles([]);
+    if (uploadInputRef.current) uploadInputRef.current.value = '';
     setLoading(true);
     setQuery(''); // Clear input
     setStreamingSummary('');
@@ -1979,29 +2108,21 @@ const Playground: NextPage = () => {
         }
         if (payload.type?.startsWith('pipeline.')) {
           const stageOutput = getPipelineStageOutput(payload);
+          const eventStep = getPipelineExecutionStep(payload);
+          const codeArtifact = generatedCodeArtifactFromEvent(payload, responseId, eventStep.id);
+          if (codeArtifact) {
+            setArtifacts(current => [...current.filter(item => item.id !== codeArtifact.id), codeArtifact]);
+          }
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
-            const existing = current.steps.some(step => step.id === payload.type);
-            const steps = current.steps.map(step =>
-              step.status === 'running' ? { ...step, status: 'done' as const } : step,
-            );
-            if (!existing) {
-              steps.push({
-                id: payload.type,
-                step: steps.length + 1,
-                title: getPipelineStageLabel(payload.type),
-                detail: '',
-                status: 'running',
-              });
-            }
             return {
               ...prev,
               [responseId]: {
                 ...current,
-                steps,
-                outputs: withPipelineStageOutput(current.outputs, payload.type, stageOutput),
-                activeStepId: payload.type,
+                steps: withPipelineEventStep(current.steps, payload),
+                outputs: withPipelineStageOutput(current.outputs, eventStep.id, stageOutput),
+                activeStepId: eventStep.id,
               },
             };
           });
@@ -2023,20 +2144,24 @@ const Playground: NextPage = () => {
             content: isHtmlDocument(payload.text) ? 'HTML report generated.' : payload.text || '',
           };
         } else if (payload.type === 'response.completed') {
-          const reportArtifact = reportArtifactFromResponse(payload, responseId);
-          if (reportArtifact) {
-            setArtifacts(current => [...current.filter(item => item.id !== reportArtifact.id), reportArtifact]);
-            setPreviewArtifact(reportArtifact);
+          const reportArtifacts = reportArtifactsFromResponse(payload, responseId);
+          const reportArtifactIds = new Set(reportArtifacts.map(artifact => artifact.id));
+          const htmlArtifact = reportArtifacts.find(artifact => artifact.type === 'html');
+          if (reportArtifacts.length) {
+            setArtifacts(current => [...current.filter(item => !reportArtifactIds.has(item.id)), ...reportArtifacts]);
+          }
+          if (htmlArtifact) {
+            setPreviewArtifact(htmlArtifact);
             setRightPanelView('html-preview');
             setRightPanelCollapsed(false);
-            const reportSummary = reportSummaryFromResponse(payload);
-            if (reportSummary) {
-              setMessages(current =>
-                current.map(item =>
-                  item.id === responseId ? { ...item, context: reportSummary, thinking: false } : item,
-                ),
-              );
-            }
+          }
+          const reportSummary = reportSummaryFromResponse(payload);
+          if (reportSummary) {
+            setMessages(current =>
+              current.map(item =>
+                item.id === responseId ? { ...item, context: reportSummary, thinking: false } : item,
+              ),
+            );
           }
           setLoading(false);
           notifyResponseHistoryChanged();
@@ -2846,6 +2971,8 @@ const Playground: NextPage = () => {
                               } else if (artifact.type === 'image') {
                                 setPreviewArtifact(artifact as Artifact);
                                 setRightPanelView('image-preview');
+                              } else if (['code', 'markdown', 'summary'].includes(artifact.type)) {
+                                downloadArtifact(artifact as Artifact);
                               }
                             }}
                             onArtifactDownload={artifact => downloadArtifact(artifact as Artifact)}
@@ -3154,11 +3281,15 @@ const Playground: NextPage = () => {
                               setPreviewArtifact(artifact as Artifact);
                               setRightPanelView('image-preview');
                               setRightPanelCollapsed(false);
+                            } else {
+                              downloadArtifact(artifact as Artifact);
                             }
                           } else if (artifact.type === 'image') {
                             setPreviewArtifact(artifact as Artifact);
                             setRightPanelView('image-preview');
                             setRightPanelCollapsed(false);
+                          } else if (['code', 'markdown', 'summary'].includes(artifact.type)) {
+                            downloadArtifact(artifact as Artifact);
                           }
                         }}
                         panelView={rightPanelView}
