@@ -28,6 +28,7 @@ services:
       - api_state:/app/.data
       - ../artifacts:/app/artifacts
     stop_grace_period: 30s
+    mem_limit: 512m
 
   db:
     image: postgres:17-alpine
@@ -46,6 +47,7 @@ services:
       retries: 10
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    mem_limit: 512m
 
 volumes:
   api_data:
