@@ -15,6 +15,7 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
+from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.deep_agent_sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
@@ -183,15 +184,28 @@ class DataIntelligencePipeline:
                     ),
                 },
             )
-            intent = self.intent_analyzer.analyze(
-                query, corpus_package, session_context, user_context
+            analyze_details = getattr(self.intent_analyzer, "analyze_details", None)
+            analyzed_intent = (
+                analyze_details(
+                    query, corpus_package, session_context, user_context
+                )
+                if callable(analyze_details)
+                else self.intent_analyzer.analyze(
+                    query, corpus_package, session_context, user_context
+                )
             )
-            self._log("pipeline.intent_analyzed", {"intent": intent})
+            if isinstance(analyzed_intent, IntentAnalysis):
+                intent = analyzed_intent.intent
+                intent_payload = analyzed_intent.event_payload()
+            else:
+                intent = analyzed_intent
+                intent_payload = {"intent": intent, "source": "local"}
+            self._log("pipeline.intent_analyzed", intent_payload)
             self._record_artifact_event(
                 run_artifact,
                 phase="intent",
                 event_type="intent.analyzed",
-                payload={"intent": intent},
+                payload=intent_payload,
             )
             spec = self.spec_builder.build(
                 query, intent, corpus_package, session_context, user_context

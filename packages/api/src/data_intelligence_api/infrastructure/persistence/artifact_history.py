@@ -55,7 +55,15 @@ class ArtifactHistoryReader:
                 payload = event.get("payload")
                 if isinstance(payload, dict):
                     if stage_type == "pipeline.intent_analyzed":
-                        stage_event["intent"] = payload.get("intent")
+                        for key in (
+                            "intent",
+                            "catalog_intent",
+                            "confidence",
+                            "score",
+                            "source",
+                        ):
+                            if payload.get(key) is not None:
+                                stage_event[key] = payload[key]
                     elif stage_type == "pipeline.engine_selected":
                         stage_event["engine_name"] = payload.get("engine_name")
                 if stage_type == "pipeline.start":

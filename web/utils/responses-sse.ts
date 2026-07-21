@@ -205,9 +205,23 @@ export function getPipelineStageOutput(
     };
   }
   if (event.type === 'pipeline.intent_analyzed') {
+    const catalogIntent =
+      typeof event.catalog_intent === 'string' && event.catalog_intent.trim() ? event.catalog_intent.trim() : null;
+    const source = typeof event.source === 'string' && event.source.trim() ? event.source.trim() : null;
+    const confidence = typeof event.confidence === 'number' ? event.confidence : null;
+    const score = typeof event.score === 'number' ? event.score : null;
+    const lines = [
+      '# Intent',
+      '',
+      ...(catalogIntent ? [`**Intent:** \`${catalogIntent}\``] : []),
+      `**Classification:** \`${intentValue(event, spec)}\``,
+      ...(source ? [`**Source:** ${source === 'axiom_intent_service' ? 'AXIOM Intent Service' : source}`] : []),
+      ...(confidence !== null ? [`**Confidence:** ${(confidence * 100).toFixed(1)}%`] : []),
+      ...(score !== null ? [`**Match score:** ${score.toFixed(4)}`] : []),
+    ];
     return {
       output_type: 'markdown',
-      content: `# Intent\n\n**Classification:** \`${intentValue(event, spec)}\``,
+      content: lines.join('\n'),
     };
   }
   if (event.type === 'pipeline.spec_built' || event.type === 'pipeline.spec_revised') {

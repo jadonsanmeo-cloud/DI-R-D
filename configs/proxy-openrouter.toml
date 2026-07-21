@@ -21,6 +21,10 @@ token = "${env:SANDBOX_TOKEN}"
 enabled = true
 endpoint = "http://host.docker.internal:8000/mcp"
 
+[intent_service]
+enabled = true
+endpoint = "http://host.docker.internal:8005"
+
 [artifacts]
 root = "/app/artifacts"
 
