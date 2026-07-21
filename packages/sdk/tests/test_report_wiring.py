@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
@@ -232,6 +233,23 @@ class _AlwaysPassValidator:
 
 
 class ReportWiringTests(unittest.TestCase):
+    def test_report_graph_uses_report_langsmith_run_name(self):
+        engine = object.__new__(ReportEngine)
+        engine.llm = None
+        engine.max_data_concurrency = 1
+        engine.max_chart_concurrency = 1
+        engine._graph = Mock()
+        engine._graph.invoke.return_value = {"final_result": "report"}
+
+        engine.run(
+            ExecutionSpec(intent="report", objective="Create a report"),
+            DataCorpusPackage(),
+            EngineRuntimeContext(),
+        )
+
+        config = engine._graph.invoke.call_args.kwargs["config"]
+        self.assertEqual(config["run_name"], "report")
+
     def test_router_prefers_builtin_spreadsheet_materializer(self):
         source = r"G:\uploads\scores.xls"
         route = RouterAgent(None).run(

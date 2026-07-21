@@ -154,7 +154,10 @@ class LLMSpecBuilder:
     ) -> ExecutionSpec:
         current_messages = list(messages)
         for attempt in range(self.max_validation_retries + 1):
-            payload = self.llm_client.complete_json(current_messages)
+            payload = self.llm_client.complete_json(
+                current_messages,
+                stage="spec-builder",
+            )
             try:
                 spec = self._payload_to_spec(payload, intent, selected_data_context)
                 if self.default_missing_requirements and available_sources:

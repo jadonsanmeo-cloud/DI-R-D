@@ -64,12 +64,17 @@ class TracingLLMClient:
         self.inner = inner
         self.call_count = 0
 
-    def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> dict[str, Any]:
         self.call_count += 1
-        _print_section(f"LLM Call {self.call_count} Input")
+        _print_section(f"LLM Call {self.call_count} ({stage}) Input")
         _print_json({"messages": messages})
-        result = self.inner.complete_json(messages)
-        _print_section(f"LLM Call {self.call_count} Output")
+        result = self.inner.complete_json(messages, stage=stage)
+        _print_section(f"LLM Call {self.call_count} ({stage}) Output")
         _print_json(result)
         return result
 

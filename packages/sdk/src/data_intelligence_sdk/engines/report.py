@@ -5388,6 +5388,7 @@ class ReportEngine:
         state = self._graph.invoke(
             initial,
             config={
+                "run_name": "report",
                 "recursion_limit": 100,
                 "max_concurrency": max(
                     self.max_data_concurrency, self.max_chart_concurrency

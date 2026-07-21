@@ -151,7 +151,8 @@ class LLMClusterSpecSelector:
                 user_context=user_context,
                 previous_spec=previous_spec,
                 user_feedback=user_feedback,
-            )
+            ),
+            stage="cluster-spec-selector",
         )
         cluster_id = payload.get("cluster_id")
         if not isinstance(cluster_id, str) or cluster_id not in specs_by_id:

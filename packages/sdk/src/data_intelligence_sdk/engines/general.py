@@ -143,7 +143,7 @@ class GeneralPurposeEngine:
             system_prompt=self._system_prompt(spec, corpus_package, runtime),
             backend=runtime.sandbox.backend,
             subagents=[],
-            name="axiom-general-analysis",
+            name="general-purpose",
         )
         result = agent.invoke(
             {

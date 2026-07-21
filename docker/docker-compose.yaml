@@ -16,6 +16,7 @@ services:
       DATA_CORPUS_ROOT: /app/data
       DATABASE_URL: postgresql://${POSTGRES_USER:-data_intelligence}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-data_intelligence}
       MODEL_CONFIG_PATH: /app/configs/proxy-openrouter.toml
+      PYTHONPATH: /workspace/Data-Intelligence-SDK/packages/api/src:/workspace/Data-Intelligence-SDK/packages/sdk/src
       PYTHONUNBUFFERED: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -23,10 +24,24 @@ services:
       db:
         condition: service_healthy
     volumes:
+      - ../packages/api/src:/workspace/Data-Intelligence-SDK/packages/api/src:ro
+      - ../packages/sdk/src:/workspace/Data-Intelligence-SDK/packages/sdk/src:ro
       - ../configs/proxy-openrouter.toml:/app/configs/proxy-openrouter.toml:ro
       - api_data:/app/data
       - api_state:/app/.data
       - ../artifacts:/app/artifacts
+    command:
+      - uvicorn
+      - data_intelligence_api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /workspace/Data-Intelligence-SDK/packages/api/src
+      - --reload-dir
+      - /workspace/Data-Intelligence-SDK/packages/sdk/src
     stop_grace_period: 30s
     mem_limit: 512m
 

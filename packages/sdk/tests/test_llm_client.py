@@ -37,6 +37,27 @@ api_key = "configured-key"
         self.assertEqual(client.api_key, "configured-key")
         self.assertEqual(client.model, "configured-model")
 
+    def test_uses_exact_stage_name_for_langsmith_trace(self) -> None:
+        trace_names: list[str] = []
+
+        def trace_call(function, *, name: str):
+            trace_names.append(name)
+            return function
+
+        with patch(
+            "data_intelligence_sdk.runtime.llm_client.traceable_llm_call",
+            side_effect=trace_call,
+        ):
+            client = OpenAICompatibleLLMClient(
+                base_url="https://models.example/v1",
+                api_key="secret",
+                model="example-model",
+                transport=lambda *args: {"choices": [{"message": {"content": "{}"}}]},
+            )
+            client.complete_json([], stage="engine_selector")
+
+        self.assertEqual(trace_names, ["engine_selector"])
+
 
 if __name__ == "__main__":
     unittest.main()

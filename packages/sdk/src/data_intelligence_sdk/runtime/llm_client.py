@@ -16,10 +16,20 @@ from data_intelligence_sdk.runtime.tracing import traceable_llm_call
 class LLMClient(Protocol):
     """Completion boundary used by SDK components."""
 
-    def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> dict[str, Any]:
         """Return a JSON object produced from chat messages."""
 
-    def complete_text(self, messages: list[dict[str, str]]) -> str:
+    def complete_text(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> str:
         """Return raw model text produced from chat messages."""
 
 
@@ -68,20 +78,45 @@ class OpenAICompatibleLLMClient:
         if not self.model:
             raise ValueError("model is required for OpenAICompatibleLLMClient.")
 
-        self._complete_json_traced = traceable_llm_call(
-            self._complete_json_impl,
-            name="openai_compatible.complete_json",
-        )
-        self._complete_text_traced = traceable_llm_call(
-            self._complete_text_impl,
-            name="openai_compatible.complete_text",
-        )
+        self._complete_json_traced: dict[str, Callable[..., dict[str, Any]]] = {}
+        self._complete_text_traced: dict[str, Callable[..., str]] = {}
 
-    def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        return self._complete_json_traced(messages)
+    def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> dict[str, Any]:
+        trace_name = self._validate_stage(stage)
+        traced_call = self._complete_json_traced.get(trace_name)
+        if traced_call is None:
+            traced_call = traceable_llm_call(
+                self._complete_json_impl,
+                name=trace_name,
+            )
+            self._complete_json_traced[trace_name] = traced_call
+        return traced_call(messages)
 
-    def complete_text(self, messages: list[dict[str, str]]) -> str:
-        return self._complete_text_traced(messages)
+    def complete_text(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> str:
+        trace_name = self._validate_stage(stage)
+        traced_call = self._complete_text_traced.get(trace_name)
+        if traced_call is None:
+            traced_call = traceable_llm_call(
+                self._complete_text_impl,
+                name=trace_name,
+            )
+            self._complete_text_traced[trace_name] = traced_call
+        return traced_call(messages)
+
+    def _validate_stage(self, stage: str) -> str:
+        if not stage.strip():
+            raise ValueError("stage must be a non-empty LangSmith trace name.")
+        return stage
 
     def _complete_json_impl(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         payload = {
