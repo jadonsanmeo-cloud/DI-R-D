@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from data_intelligence_sdk.runtime.config import get_config_manager
 from data_intelligence_sdk.runtime.tracing import traceable_llm_call
 
 
@@ -37,15 +38,25 @@ class OpenAICompatibleLLMClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        config_path: str | Path | None = None,
         temperature: float = 0,
         timeout: int = 60,
         transport: Transport | None = None,
     ) -> None:
-        self.base_url = (
-            base_url or os.environ.get("OPENAI_COMPATIBLE_BASE_URL") or ""
-        ).rstrip("/")
-        self.api_key = api_key or os.environ.get("OPENAI_COMPATIBLE_API_KEY") or ""
-        self.model = model or os.environ.get("OPENAI_COMPATIBLE_MODEL") or ""
+        configured_base_url = ""
+        configured_api_key = ""
+        configured_model = ""
+        if not base_url or not api_key or not model:
+            settings = get_config_manager(
+                str(config_path) if config_path is not None else None
+            ).openrouter_settings()
+            configured_base_url = settings.base_url
+            configured_api_key = settings.api_key or ""
+            configured_model = settings.model or ""
+
+        self.base_url = (base_url or configured_base_url).rstrip("/")
+        self.api_key = api_key or configured_api_key
+        self.model = model or configured_model
         self.temperature = temperature
         self.timeout = timeout
         self._transport = transport or self._default_transport

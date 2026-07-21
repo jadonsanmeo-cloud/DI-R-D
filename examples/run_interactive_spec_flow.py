@@ -39,9 +39,9 @@ from data_intelligence_sdk.datahub import LLMDataHubClusterer  # noqa: E402
 from data_intelligence_sdk.registry.engine_registry import (  # noqa: E402
     InMemoryEngineRegistry,
 )
-from data_intelligence_sdk.runtime.engine_runtime import (
+from data_intelligence_sdk.runtime.engine_runtime import (  # noqa: E402
     EngineRuntimeContext,
-)  # noqa: E402
+)
 from data_intelligence_sdk.runtime.llm_client import (  # noqa: E402
     OpenAICompatibleLLMClient,
 )
@@ -453,17 +453,17 @@ def main() -> None:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="OpenAI-compatible base URL. Defaults to OPENAI_COMPATIBLE_BASE_URL.",
+        help="Override the base URL from the configured OpenRouter model.",
     )
     parser.add_argument(
         "--api-key",
         default=None,
-        help="OpenAI-compatible API key. Defaults to OPENAI_COMPATIBLE_API_KEY.",
+        help="Override the API key from the configured OpenRouter model.",
     )
     parser.add_argument(
         "--model",
         default=None,
-        help="OpenAI-compatible model. Defaults to OPENAI_COMPATIBLE_MODEL.",
+        help="Override the configured OpenRouter model name.",
     )
     args = parser.parse_args()
 
