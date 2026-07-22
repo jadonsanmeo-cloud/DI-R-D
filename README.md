@@ -22,9 +22,8 @@ data/samples/          # small checked-in fixtures
 configs/               # model configuration
 docs/                  # architecture and flow documents
 docker/
-  sandbox.Dockerfile   # isolated runtime for generated Python code
   Dockerfile           # API image
-  docker-compose.yaml  # API + PostgreSQL stack (see note below)
+  docker-compose.yaml  # API + PostgreSQL stack
 ```
 
 SDK và API là hai Python workspace package riêng. API chịu trách nhiệm ghép model,
@@ -115,21 +114,21 @@ Model IDs, provider endpoints, CORS, timeout và upload limits được cấu h�
 Các cấu hình local quan trọng đã có sẵn trong `docker/.env.example`:
 
 ```env
-SANDBOX_BACKEND=docker
-SANDBOX_DOCKER_IMAGE=data-intelligence-sandbox:local
+SANDBOX_TOKEN=<sandbox-service-client-token>
 REPORT_FORCE_CODE_AGENT=false
 ```
 
 Ý nghĩa:
 
-- `SANDBOX_BACKEND=docker`: generated Python code chạy trong container cô lập.
+- `SANDBOX_TOKEN`: credential để API gọi AXIOM Sandbox Service qua gateway.
 - `REPORT_FORCE_CODE_AGENT=false`: Router ưu tiên method deterministic có sẵn trong
   Method Hub, bao gồm reader `.xls`/`.xlsx`. Chỉ đổi thành `true` khi cần kiểm thử
   riêng nhánh sinh code.
 - `DATA_CORPUS_ROOT=.`: file upload được lưu dưới `.uploads/` trong repository.
 
 Đặt `[sandbox].enabled = true` trong `configs/proxy-openrouter.toml` để bật
-sandbox. Các giới hạn và endpoint chung vẫn nằm trong file TOML đó.
+sandbox. AXIOM Sandbox Service quản lý container, network và resource limits; SDK
+chỉ giữ endpoint, workspace ID và client token cần cho luồng QA.
 
 Không commit `docker/.env`. File `docker/.env.example` chỉ chứa tên biến và được
 phép commit.
@@ -152,21 +151,11 @@ Kiểm tra import:
 uv run python -c "import data_intelligence_sdk, data_intelligence_api; print('Python packages: OK')"
 ```
 
-### 5. Build Docker sandbox
+### 5. Kiểm tra AXIOM Sandbox Service
 
-```powershell
-docker build -f docker/sandbox.Dockerfile -t data-intelligence-sandbox:local .
-docker image inspect data-intelligence-sandbox:local
-```
-
-Mỗi report request dùng nhánh Code Agent sẽ:
-
-1. Tạo container từ image trên.
-2. Mount workspace tạm và stage file input.
-3. Tắt network trong sandbox.
-4. Áp giới hạn CPU, RAM và process.
-5. Chạy generated function.
-6. Thu kết quả và xóa container.
+Khởi động Sandbox Service từ AXIOM platform và bảo đảm endpoint trong
+`configs/proxy-openrouter.toml` truy cập được từ API. Mỗi QA request sẽ yêu cầu
+service tạo một request-scoped sandbox, stage input, chạy code và dọn runtime.
 
 Image này chỉ tồn tại trên máy đã build. Người khác pull source từ GitHub vẫn phải
 chạy lại lệnh `docker build`.
@@ -257,7 +246,7 @@ npm run build
 Một lần test end-to-end tối thiểu nên xác nhận:
 
 - API `/health` trả `ok`.
-- Docker image `data-intelligence-sandbox:local` tồn tại.
+- AXIOM Sandbox Service trả trạng thái ready.
 - Upload trả về source reference.
 - Response chuyển từ trạng thái đang chạy sang hoàn tất.
 - Report có narrative, evidence, KPI phù hợp và chart chỉ xuất hiện khi đủ dữ liệu.
@@ -315,14 +304,9 @@ DATABASE_URL=postgresql://data_intelligence:data_intelligence@localhost:5432/dat
 
 ## Lưu Ý Về Docker Compose
 
-`docker/docker-compose.yaml` cung cấp API container và PostgreSQL cho môi trường
-container hóa. Tuy nhiên API container hiện chưa được mount Docker socket và chưa
-có Docker CLI để tạo request-scoped Docker sandbox trên host.
-
-Vì vậy, với `SANDBOX_BACKEND=docker`, hãy dùng quickstart ở trên: chạy API trên
-host và chỉ chạy sandbox trong Docker. Không dùng toàn bộ Compose stack cho nhánh
-Code Agent cho tới khi deployment có một sandbox service riêng hoặc cấu hình Docker
-socket với policy bảo mật phù hợp.
+`docker/docker-compose.yaml` chỉ cung cấp API container và PostgreSQL. Sandbox
+runtime thuộc AXIOM Sandbox Service; hãy cấu hình endpoint để API container truy
+cập được service đó, ví dụ qua shared Docker network hoặc gateway nội bộ.
 
 ## Troubleshooting
 
@@ -343,20 +327,11 @@ Chạy lại từ repository root:
 uv pip install -e packages/sdk -e packages/api
 ```
 
-### Docker daemon không kết nối được
+### Không kết nối được Sandbox Service
 
-Mở Docker Desktop, chờ Engine chạy rồi kiểm tra:
-
-```powershell
-docker version
-docker ps
-```
-
-### Không tìm thấy sandbox image
-
-```powershell
-docker build -f docker/sandbox.Dockerfile -t data-intelligence-sandbox:local .
-```
+Kiểm tra `[sandbox].endpoint`, `workspace_id`, `SANDBOX_TOKEN` và network route từ
+API tới AXIOM Sandbox Service. Resource limits phải được cấu hình ở Sandbox
+Service, không đặt trong SDK/API.
 
 ### LLM trả 401, 403 hoặc model not found
 
@@ -518,29 +493,10 @@ token = "${env:SANDBOX_TOKEN}"
 
 The CLI example discovers the sibling client source directly for local
 development. Production applications should install `axiom-sandbox-client`.
-The general engine requires `[sandbox].enabled = true`. The AXIOM backend also
-requires a workspace ID.
+The general engine requires `[sandbox].enabled = true` and a workspace ID.
+AXIOM Sandbox Service owns sandbox lifecycle, isolation, and resource limits;
+the SDK/API only supplies the endpoint and client credentials.
 
-For local development without the private AXIOM service, build the bundled
-Docker sandbox image:
-
-```bash
-docker build -f docker/sandbox.Dockerfile -t data-intelligence-sandbox:local .
-```
-
-Then configure the API process:
-
-```env
-SANDBOX_BACKEND=docker
-SANDBOX_DOCKER_IMAGE=data-intelligence-sandbox:local
-REPORT_FORCE_CODE_AGENT=false
-```
-
-The Docker backend creates one network-disabled container per request, stages
-the uploaded sources under `/workspace/input`, applies CPU, memory, and process
-limits, and removes the container after the workflow completes. Optional local
-limits are `SANDBOX_DOCKER_MEMORY`, `SANDBOX_DOCKER_CPUS`,
-`SANDBOX_DOCKER_PIDS_LIMIT`, and `SANDBOX_DOCKER_WORKSPACE_SIZE`.
 The API defaults `REPORT_FORCE_CODE_AGENT` to `false` so deterministic Method Hub
 tools are preferred when their contracts match. Set it to `true` only to exercise
 the generated-code route even when a matching tool exists.

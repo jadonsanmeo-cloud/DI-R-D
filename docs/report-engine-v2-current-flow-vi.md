@@ -544,13 +544,11 @@ Sandbox container bị xóa sau request, nhưng artifact bundle được giữ �
 | File | Thay đổi chính |
 | --- | --- |
 | `packages/sdk/src/data_intelligence_sdk/engines/report.py` | Hoàn thiện graph Plan/Template, scheduler, Router, code retry loop, DataScience Processor, chart pipeline, report synthesis và renderer HTML/CSS/JS. |
-| `packages/api/src/data_intelligence_api/infrastructure/workflow/pipeline_factory.py` | Wire Report Engine vào API, chọn sandbox backend và hỗ trợ `REPORT_FORCE_CODE_AGENT`. |
-| `packages/api/src/data_intelligence_api/infrastructure/workflow/docker_sandbox.py` | Tạo request-scoped Docker sandbox với resource limit và network bị tắt. |
+| `packages/api/src/data_intelligence_api/infrastructure/workflow/pipeline_factory.py` | Wire Report Engine vào API, kết nối AXIOM Sandbox Service và hỗ trợ `REPORT_FORCE_CODE_AGENT`. |
 | `packages/sdk/src/data_intelligence_sdk/runtime/report_sandbox_executor.py` | Chuẩn hóa generated function, stage input, chạy và đọc kết quả từ sandbox. |
 | `packages/sdk/src/data_intelligence_sdk/sandbox/artifacts.py` | Lưu code attempt, execution result, data output và các định dạng report đã render. |
 | `packages/sdk/src/data_intelligence_sdk/methods/local_data.py` | Bổ sung method đọc/profile source local để Router có thể dùng khi phù hợp. |
 | `packages/sdk/src/data_intelligence_sdk/templates/pool/*.json` | Bổ sung document/data-profile template, binding, KPI và chart requirement. |
-| `docker/sandbox.Dockerfile` | Image Python tối thiểu chứa thư viện xử lý dữ liệu phổ biến cho generated code. |
 | `web/pages/index.tsx` | Nhận và hiển thị HTML report thay vì chỉ coi final answer là Markdown. |
 
 Flow điều phối không hardcode riêng cho PDF. PDF chỉ là một source type có adapter và

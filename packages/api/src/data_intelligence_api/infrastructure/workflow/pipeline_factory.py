@@ -49,11 +49,6 @@ from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
 from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
 
-from data_intelligence_api.infrastructure.workflow.docker_sandbox import (
-    docker_provider_from_env,
-)
-
-
 def _env_flag(name: str, *, default: bool) -> bool:
     raw_value = os.environ.get(name)
     if raw_value is None:
@@ -293,18 +288,11 @@ def _configure_request_sandbox_provider(
     config_manager: object,
     method_hub_enabled: bool,
 ) -> SandboxSessionProvider:
-    """Select the configured request-scoped sandbox implementation."""
+    """Build the AXIOM-managed request sandbox used by QA workflows."""
 
-    backend = os.environ.get("SANDBOX_BACKEND", "axiom").strip().lower()
-    if backend == "axiom":
-        return _configure_axiom_sandbox_provider(
-            config_manager=config_manager,
-            method_hub_enabled=method_hub_enabled,
-        )
-    if backend == "docker":
-        return docker_provider_from_env()
-    raise ValueError(
-        "SANDBOX_BACKEND must be either 'axiom' or 'docker', " f"not {backend!r}."
+    return _configure_axiom_sandbox_provider(
+        config_manager=config_manager,
+        method_hub_enabled=method_hub_enabled,
     )
 
 
