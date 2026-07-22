@@ -92,11 +92,16 @@ class AxiomIntentServiceAnalyzer:
         if not catalog_intent:
             raise RuntimeError("Intent Service catalog match has no intent id.")
         score = top_match.get("score")
+        raw_processing_steps = definition.get("processing_steps")
+        processing_steps = (
+            dict(raw_processing_steps) if isinstance(raw_processing_steps, dict) else {}
+        )
         return IntentAnalysis(
             intent=_map_catalog_intent(catalog_intent),
             source="axiom_intent_service",
             catalog_intent=catalog_intent or None,
             score=float(score) if isinstance(score, (int, float)) else None,
+            processing_steps=processing_steps,
         )
 
     def _search_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:

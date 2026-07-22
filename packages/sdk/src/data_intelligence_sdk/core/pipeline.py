@@ -17,7 +17,7 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
-from data_intelligence_sdk.runtime.deep_agent_sandbox import SandboxSessionProvider
+from data_intelligence_sdk.runtime.sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
 from data_intelligence_sdk.runtime.event_payload import runtime_event_payload
@@ -196,9 +196,11 @@ class DataIntelligencePipeline:
             )
             if isinstance(analyzed_intent, IntentAnalysis):
                 intent = analyzed_intent.intent
+                intent_analysis = analyzed_intent
                 intent_payload = analyzed_intent.event_payload()
             else:
                 intent = analyzed_intent
+                intent_analysis = None
                 intent_payload = {"intent": intent, "source": "local"}
             self._log("pipeline.intent_analyzed", intent_payload)
             self._record_artifact_event(
@@ -207,9 +209,23 @@ class DataIntelligencePipeline:
                 event_type="intent.analyzed",
                 payload=intent_payload,
             )
-            spec = self.spec_builder.build(
-                query, intent, corpus_package, session_context, user_context
+            build_with_intent_analysis = getattr(
+                self.spec_builder,
+                "build_with_intent_analysis",
+                None,
             )
+            if intent_analysis is not None and callable(build_with_intent_analysis):
+                spec = build_with_intent_analysis(
+                    query,
+                    intent_analysis,
+                    corpus_package,
+                    session_context,
+                    user_context,
+                )
+            else:
+                spec = self.spec_builder.build(
+                    query, intent, corpus_package, session_context, user_context
+                )
             self._log(
                 "pipeline.spec_built",
                 {
@@ -240,6 +256,7 @@ class DataIntelligencePipeline:
             spec=spec,
             session_context=session_context,
             user_context=user_context,
+            intent_analysis=intent_analysis,
             run_artifact=run_artifact,
             run_artifact_id=(run_artifact.run_id if run_artifact is not None else None),
         )
@@ -264,6 +281,11 @@ class DataIntelligencePipeline:
                 "previous_spec": asdict(previous_spec),
             },
         )
+        revise_with_intent_analysis = getattr(
+            self.spec_builder,
+            "revise_with_intent_analysis",
+            None,
+        )
         revise = getattr(self.spec_builder, "revise", None)
         if revise is None:
             raise TypeError(
@@ -273,15 +295,28 @@ class DataIntelligencePipeline:
             "pipeline.spec_revision_started",
             {"intent": prepared.intent, "feedback": feedback},
         )
-        revised = revise(
-            previous_spec=previous_spec,
-            user_feedback=feedback,
-            query=prepared.query,
-            intent=prepared.intent,
-            corpus_package=prepared.corpus_package,
-            session_context=prepared.session_context,
-            user_context=prepared.user_context,
-        )
+        if prepared.intent_analysis is not None and callable(
+            revise_with_intent_analysis
+        ):
+            revised = revise_with_intent_analysis(
+                previous_spec=previous_spec,
+                user_feedback=feedback,
+                query=prepared.query,
+                intent_analysis=prepared.intent_analysis,
+                corpus_package=prepared.corpus_package,
+                session_context=prepared.session_context,
+                user_context=prepared.user_context,
+            )
+        else:
+            revised = revise(
+                previous_spec=previous_spec,
+                user_feedback=feedback,
+                query=prepared.query,
+                intent=prepared.intent,
+                corpus_package=prepared.corpus_package,
+                session_context=prepared.session_context,
+                user_context=prepared.user_context,
+            )
         self._log(
             "pipeline.spec_revised",
             {

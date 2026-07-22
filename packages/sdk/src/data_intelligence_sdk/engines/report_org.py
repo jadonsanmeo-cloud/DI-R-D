@@ -29,7 +29,6 @@ from data_intelligence_sdk.core.types import (
 from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
-from data_intelligence_sdk.tools import create_mcp_tools
 
 PLAN_AGENT_PROMPT = """
 You are the Data Planning Agent. Build a validated, data-aware DAG for a report.
@@ -117,20 +116,20 @@ You are the Routing Agent. Choose how to execute one validated PlanStep.
 
 # INPUT
 1. `step_request`: The current PlanStep.
-2. `available_sources`: Sources permitted by the confirmed execution spec.
-3. MCP tools are supplied through native tool binding.
+2. `method_hub`: Trusted and generated methods with schemas and capabilities.
+3. `available_sources`: Sources permitted by the confirmed execution spec.
 
 # RULES
-1. Call exactly one bound MCP tool only when its contract satisfies the step.
-2. Map arguments to the bound tool parameter schema.
-3. Never invent a tool name or arguments outside its schema.
-4. If no bound MCP tool satisfies the step, request generated code.
+1. Choose an existing tool only when its contract satisfies the step.
+2. Map arguments to the tool parameter schema.
+3. Otherwise request generated code.
+4. Never invoke a tool yourself.
 
-# OUTPUT WHEN NO MCP TOOL APPLIES
-Return only JSON without making a tool call:
+# OUTPUT
+Return only JSON:
 {
-  "route": "generate_tool | unsupported",
-  "tool_name": null,
+  "route": "existing_tool | generate_tool | unsupported",
+  "tool_name": "tool_name_or_null",
   "arguments": {},
   "reason": "short explanation"
 }
@@ -2257,11 +2256,14 @@ class RouterAgent(_PromptAgent):
     def run(
         self,
         step_request: dict[str, Any],
-        runtime: EngineRuntimeContext,
+        method_hub: list[dict[str, Any]],
         sources: list[str],
     ) -> dict[str, Any]:
-        method_hub = _method_hub_payload(runtime)
-        payload = self._invoke_native_route(step_request, runtime, sources)
+        payload = self._invoke_json(
+            step_request=step_request,
+            method_hub=method_hub,
+            available_sources=sources,
+        )
         if isinstance(payload, dict):
             if "use_existing_tool" in payload:
                 payload["route"] = (
@@ -2283,62 +2285,6 @@ class RouterAgent(_PromptAgent):
                     sources,
                 )
         return self._fallback_route(step_request, method_hub, sources)
-
-    def _invoke_native_route(
-        self,
-        step_request: dict[str, Any],
-        runtime: EngineRuntimeContext,
-        sources: list[str],
-    ) -> dict[str, Any] | None:
-        if self.llm is None or not hasattr(self.llm, "bind_tools"):
-            return None
-        tools = create_mcp_tools(runtime)
-        if not tools:
-            return None
-        try:
-            prompt = ChatPromptTemplate.from_messages(
-                [
-                    SystemMessage(content=self.system_prompt),
-                    (
-                        "user",
-                        "step_request:\n{step_request}\n\n"
-                        "available_sources:\n{available_sources}",
-                    ),
-                ]
-            )
-            response = self.llm.bind_tools(tools).invoke(
-                prompt.invoke(
-                    {
-                        "step_request": _json_dumps(step_request),
-                        "available_sources": _json_dumps(sources),
-                    }
-                )
-            )
-        except Exception:
-            return None
-
-        tool_calls = getattr(response, "tool_calls", None) or []
-        if tool_calls:
-            tool_call = tool_calls[0]
-            if isinstance(tool_call, dict):
-                tool_name = tool_call.get("name")
-                arguments = tool_call.get("args", {})
-            else:
-                tool_name = getattr(tool_call, "name", None)
-                arguments = getattr(tool_call, "args", {})
-            return {
-                "route": "existing_tool",
-                "tool_name": str(tool_name or ""),
-                "arguments": arguments if isinstance(arguments, dict) else {},
-                "reason": "Selected through native MCP tool calling.",
-            }
-
-        text = _extract_message_content(response)
-        try:
-            payload = _parse_json_payload(text)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return None
-        return payload if isinstance(payload, dict) else None
 
     def _normalize_route(
         self,
@@ -6198,11 +6144,7 @@ class ReportEngine:
                 ),
             }
         else:
-            route = self.router_agent.run(
-                state["step"],
-                runtime=state["runtime"],
-                sources=scope["sources"],
-            )
+            route = self.router_agent.run(state["step"], inventory, scope["sources"])
         if route.get("route") == "existing_tool":
             tool = next(
                 (

@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 
 from data_intelligence_sdk.runtime.interfaces import InterfaceBuilder, InterfaceRegistry
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
-from data_intelligence_sdk.runtime.deep_agent_sandbox import DeepAgentSandboxSession
+from data_intelligence_sdk.runtime.sandbox import (
+    EngineSandboxSession,
+    SandboxEnvironment,
+)
 from data_intelligence_sdk.runtime.resource_manager import ResourceManager
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
 from data_intelligence_sdk.sandbox.artifacts import ArtifactStore, RunArtifactSession
@@ -27,5 +30,11 @@ class EngineRuntimeContext:
     artifact_store: ArtifactStore | None = None
     log_store: LogStore | None = None
     resource_manager: ResourceManager | None = None
-    sandbox: DeepAgentSandboxSession | None = None
+    sandbox: EngineSandboxSession | None = None
     run_artifact: RunArtifactSession | None = None
+
+    @property
+    def sandbox_environment(self) -> SandboxEnvironment | None:
+        """Return capabilities for the active request sandbox, when provisioned."""
+
+        return self.sandbox.environment if self.sandbox is not None else None

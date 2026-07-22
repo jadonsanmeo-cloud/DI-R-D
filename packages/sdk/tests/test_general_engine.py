@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 from data_intelligence_sdk.core.types import DataCorpusPackage, ExecutionSpec
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
-from data_intelligence_sdk.runtime.deep_agent_sandbox import DeepAgentSandboxSession
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
+from data_intelligence_sdk.runtime.sandbox import EngineSandboxSession
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 
 
@@ -64,7 +64,7 @@ def make_corpus() -> DataCorpusPackage:
 
 
 def make_runtime() -> EngineRuntimeContext:
-    sandbox = DeepAgentSandboxSession(
+    sandbox = EngineSandboxSession(
         sandbox=object(),
         source_paths={"document.md": "/workspace/input/document.md"},
     )

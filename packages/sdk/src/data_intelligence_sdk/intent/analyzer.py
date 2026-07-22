@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
@@ -23,6 +23,7 @@ class IntentAnalysis:
     catalog_intent: str | None = None
     confidence: float | None = None
     score: float | None = None
+    processing_steps: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def event_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -35,6 +36,8 @@ class IntentAnalysis:
             payload["confidence"] = self.confidence
         if self.score is not None:
             payload["score"] = self.score
+        if self.processing_steps:
+            payload["processing_steps"] = self.processing_steps
         return payload
 
 

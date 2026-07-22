@@ -15,8 +15,30 @@ from data_intelligence_api.infrastructure.intent.axiom_intent_service import (
 
 
 class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
-    def test_analyze_posts_query_and_session_history_without_datahub(self) -> None:
+    def test_analyze_details_keeps_processing_steps_from_top_catalog_intent(
+        self,
+    ) -> None:
         captured: dict[str, object] = {}
+        processing_steps = {
+            "inspect_schema": {
+                "order": 1,
+                "step_type": "understand",
+                "description": "Inspect the available schema.",
+                "capability": "inspect_data",
+                "required": True,
+                "depends_on": [],
+                "follow_up_prompt": None,
+            },
+            "answer_query": {
+                "order": 2,
+                "step_type": "analyze",
+                "description": "Answer the data question.",
+                "capability": "query_structured_data",
+                "required": True,
+                "depends_on": ["inspect_schema"],
+                "follow_up_prompt": None,
+            },
+        }
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured["url"] = str(request.url)
@@ -24,11 +46,20 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
             return httpx.Response(
                 200,
                 json={
-                    "primary_intent": "data_query",
-                    "secondary_intents": [],
-                    "confidence": 0.92,
-                    "language": "en",
-                    "reasoning": "The user asks for data retrieval.",
+                    "count": 1,
+                    "results": [
+                        {
+                            "intent": {
+                                "intent_id": "data_query",
+                                "intent_name": "Data query",
+                                "intent_description": "Answer a structured data query.",
+                                "processing_steps": processing_steps,
+                                "routing_target": "data_intelligence",
+                            },
+                            "score": 0.92,
+                            "matched_by": ["hybrid"],
+                        }
+                    ],
                 },
             )
 
@@ -38,7 +69,7 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
             client=client,
         )
 
-        intent = analyzer.analyze(
+        analysis = analyzer.analyze_details(
             UserQuery(text="How many orders do we have?"),
             DataCorpusPackage(
                 sources=["orders.csv"],
@@ -54,20 +85,20 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(intent, "reason")
+        self.assertEqual(analysis.intent, "reason")
+        self.assertEqual(analysis.catalog_intent, "data_query")
+        self.assertEqual(analysis.processing_steps, processing_steps)
+        self.assertEqual(analysis.score, 0.92)
         self.assertEqual(
             captured["url"],
-            "http://intent-service.local/api/v1/intent-predictions",
+            "http://intent-service.local/api/v1/intent-search",
         )
         self.assertEqual(
             captured["payload"],
             {
                 "query": "How many orders do we have?",
-                "history": [
-                    {"role": "user", "text": "I care about orders."},
-                    {"role": "assistant", "text": "Okay."},
-                    {"role": "system", "text": "Use concise answers."},
-                ],
+                "search_type": "hybrid",
+                "limit": 1,
             },
         )
 
@@ -77,11 +108,20 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
                 lambda request: httpx.Response(
                     200,
                     json={
-                        "primary_intent": "data_description",
-                        "secondary_intents": [],
-                        "confidence": 0.87,
-                        "language": "en",
-                        "reasoning": "The user asks for a narrative report.",
+                        "count": 1,
+                        "results": [
+                            {
+                                "intent": {
+                                    "intent_id": "data_description",
+                                    "intent_name": "Data description",
+                                    "intent_description": "Describe a dataset.",
+                                    "processing_steps": {},
+                                    "routing_target": "data_intelligence",
+                                },
+                                "score": 0.87,
+                                "matched_by": ["hybrid"],
+                            }
+                        ],
                     },
                 )
             )

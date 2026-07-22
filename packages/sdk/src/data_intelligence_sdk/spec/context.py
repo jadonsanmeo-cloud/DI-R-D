@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
@@ -12,6 +12,9 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
+
+if TYPE_CHECKING:
+    from data_intelligence_sdk.intent import IntentAnalysis
 
 
 @dataclass(slots=True)
@@ -66,6 +69,7 @@ class SpecBuildContext:
     query: UserQuery
     intent: Intent
     corpus_summary: CorpusSummary
+    intent_analysis: IntentAnalysis | None = None
     session_brief: SessionBrief = field(default_factory=SessionBrief)
     user_brief: UserBrief = field(default_factory=UserBrief)
     task_hints: TaskHints = field(default_factory=TaskHints)
@@ -87,6 +91,7 @@ class SpecContextBuilder:
         corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
+        intent_analysis: IntentAnalysis | None = None,
     ) -> SpecBuildContext:
         corpus_summary = build_corpus_summary(corpus_package)
         session_brief = self._build_session_brief(session_context)
@@ -96,6 +101,7 @@ class SpecContextBuilder:
             query=query,
             intent=intent,
             corpus_summary=corpus_summary,
+            intent_analysis=intent_analysis,
             session_brief=session_brief,
             user_brief=user_brief,
             task_hints=task_hints,
