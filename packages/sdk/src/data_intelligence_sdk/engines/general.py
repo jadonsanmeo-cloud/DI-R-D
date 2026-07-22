@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from builtins import BaseExceptionGroup
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,7 +15,8 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents._models import get_model_identifier, get_model_provider
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.agents.middleware import wrap_tool_call
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
@@ -25,6 +27,7 @@ from data_intelligence_sdk.core.types import (
 from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
 from data_intelligence_sdk.runtime.deep_agent_backend import DeepAgentSandboxBackend
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
+from data_intelligence_sdk.runtime.mcp_client import MCPToolError
 from data_intelligence_sdk.tools import (
     create_execute_python_tool,
     create_mcp_tools,
@@ -46,6 +49,52 @@ _HIDDEN_DEEP_AGENT_TOOLS = frozenset(
         "write_file",
     }
 )
+
+
+@wrap_tool_call(name="RecoverToolErrorsMiddleware")
+def _recover_tool_errors(
+    request: Any,
+    handler: Callable[[Any], Any],
+) -> Any:
+    try:
+        return handler(request)
+    except Exception as exc:
+        primary_error = _primary_tool_error(exc)
+        tool_call = request.tool_call
+        payload = {
+            "success": False,
+            "tool": tool_call.get("name", "unknown"),
+            "error_type": type(primary_error).__name__,
+            "error": str(primary_error),
+            "instruction": (
+                "Do not repeat the identical failing call. Correct its arguments, "
+                "choose another tool, or continue with the available evidence."
+            ),
+        }
+        return ToolMessage(
+            content=json.dumps(payload, ensure_ascii=False),
+            tool_call_id=str(tool_call.get("id", "unknown")),
+            name=tool_call.get("name"),
+            status="error",
+        )
+
+
+def _primary_tool_error(exc: BaseException) -> BaseException:
+    leaves = _exception_leaves(exc)
+    return next(
+        (error for error in leaves if isinstance(error, MCPToolError)),
+        leaves[0],
+    )
+
+
+def _exception_leaves(exc: BaseException) -> list[BaseException]:
+    if isinstance(exc, BaseExceptionGroup):
+        return [
+            leaf
+            for nested in exc.exceptions
+            for leaf in _exception_leaves(nested)
+        ]
+    return [exc]
 
 
 class GeneralPurposeEngine:
@@ -141,6 +190,7 @@ class GeneralPurposeEngine:
         agent = self.agent_factory(
             model=self.llm,
             tools=[*mcp_tools, execute_python],
+            middleware=[_recover_tool_errors],
             system_prompt=self._system_prompt(spec, corpus_package, runtime),
             backend=DeepAgentSandboxBackend(runtime.sandbox),
             subagents=[],
@@ -277,8 +327,12 @@ class GeneralPurposeEngine:
             "transformation that combines or modifies tool results, call "
             "execute_python and import `call_tool` from `axiom_method_hub`; "
             "assign the final JSON-serializable value to `result`. Never "
-            "attempt HTTP access from generated code.\n\n"
-            f"Method Hub catalog:\n{json.dumps(catalog, indent=2, default=str)}\n\n"
+            "attempt HTTP access from generated code. For question answering "
+            "over a specific document, prefer `document_retrieve_context` and "
+            "answer from its returned chunks. For question answering across the "
+            "indexed corpus, prefer `corpus_retrieve_context` and answer from "
+            "its returned chunks. Use retrieval tools instead of previewing an "
+            "entire dataset when only relevant context is needed.\n\n"
             if catalog
             else (
                 "Method Hub is disabled. Use execute_python when the request "

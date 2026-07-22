@@ -34,7 +34,7 @@ cors_origins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ]
-pipeline_timeout_seconds = 300
+pipeline_timeout_seconds = 1200
 spec_confirmation_ttl_seconds = 86400
 max_spec_revision_rounds = 5
 max_upload_bytes = 52428800
