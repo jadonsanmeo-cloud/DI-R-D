@@ -49,7 +49,7 @@ class DockerSandbox:
         memory: str = "1g",
         cpus: str = "1.0",
         pids_limit: int = 128,
-        workspace_size: str = "512m",
+        workspace_size: str = "256m",
         command_runner: CommandRunner = subprocess.run,
     ) -> None:
         self.image = image
@@ -265,7 +265,7 @@ class DockerSandboxProvider:
         memory: str = "1g",
         cpus: str = "1.0",
         pids_limit: int = 128,
-        workspace_size: str = "512m",
+        workspace_size: str = "256m",
         sandbox_factory: Callable[[], DockerSandbox] | None = None,
     ) -> None:
         self.image = image
@@ -321,7 +321,7 @@ def docker_provider_from_env() -> DockerSandboxProvider:
         memory=os.environ.get("SANDBOX_DOCKER_MEMORY", "1g"),
         cpus=os.environ.get("SANDBOX_DOCKER_CPUS", "1.0"),
         pids_limit=pids_limit,
-        workspace_size=os.environ.get("SANDBOX_DOCKER_WORKSPACE_SIZE", "512m"),
+        workspace_size=os.environ.get("SANDBOX_DOCKER_WORKSPACE_SIZE", "256m"),
     )
 
 

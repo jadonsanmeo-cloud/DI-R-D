@@ -43,7 +43,7 @@ services:
       - --reload-dir
       - /workspace/Data-Intelligence-SDK/packages/sdk/src
     stop_grace_period: 30s
-    mem_limit: 512m
+    mem_limit: 256m
 
   db:
     image: postgres:17-alpine
@@ -62,7 +62,7 @@ services:
       retries: 10
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    mem_limit: 512m
+    mem_limit: 256m
 
 volumes:
   api_data:
