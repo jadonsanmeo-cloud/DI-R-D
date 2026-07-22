@@ -65,7 +65,8 @@ class LLMEngineSelector:
                         sort_keys=True,
                     ),
                 },
-            ]
+            ],
+            stage="engine-selector",
         )
         engine_name = payload.get("engine_name")
         if not isinstance(engine_name, str) or not engine_name.strip():

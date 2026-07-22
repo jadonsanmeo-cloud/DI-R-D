@@ -150,6 +150,7 @@ export interface ResponseHistoryDetail {
   output_text?: string | null;
   evidence?: unknown;
   metadata: Record<string, unknown>;
+  events: Array<Record<string, unknown>>;
   error?: { code: string; message: string } | null;
   created_at?: string | null;
   updated_at?: string | null;

@@ -23,7 +23,6 @@ import {
   FilePptOutlined,
   FileSearchOutlined,
   FileTextOutlined,
-  FolderOpenOutlined,
   LoadingOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -833,13 +832,6 @@ const SectionBlock: React.FC<{
         {/* Section title */}
         <span className='text-sm font-medium text-gray-800 dark:text-gray-200 flex-1'>{section.title}</span>
 
-        {/* Progress indicator */}
-        {totalCount > 0 && (
-          <span className='text-[10px] text-gray-400'>
-            {completedCount}/{totalCount}
-          </span>
-        )}
-
         {/* Expand/collapse icon */}
         <span className='text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors'>
           {isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
@@ -959,9 +951,6 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
                     <div className='text-sm font-medium text-gray-800 dark:text-gray-200 truncate'>
                       {attachedFile.name}
                     </div>
-                    <div className='text-[11px] text-gray-400 dark:text-gray-500'>
-                      {getFileTypeLabel(attachedFile.name, t, attachedFile.type)} · {formatFileSize(attachedFile.size)}
-                    </div>
                   </div>
                 </div>
               )}
@@ -973,9 +962,6 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
                   <div className='min-w-0 flex-1'>
                     <div className='text-sm font-medium text-gray-800 dark:text-gray-200 truncate'>
                       {attachedKnowledge.name}
-                    </div>
-                    <div className='text-[11px] text-gray-400 dark:text-gray-500'>
-                      {attachedKnowledge.desc || attachedKnowledge.vector_type}
                     </div>
                   </div>
                 </div>
@@ -1093,41 +1079,6 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
               onClick={() => onSkillCardClick?.(createdSkillName)}
               onDownload={() => onSkillDownload?.(createdSkillName)}
             />
-          </div>
-        )}
-
-        {artifacts && artifacts.length > 0 && (
-          <div className='mt-5 px-1 pb-8'>
-            <div className='flex flex-wrap gap-3'>
-              {artifacts
-                .filter(a => a.type === 'file' || a.type === 'html')
-                .slice(0, 3)
-                .map(artifact => (
-                  <ArtifactCard
-                    key={artifact.id}
-                    artifact={artifact}
-                    onClick={() => onArtifactClick?.(artifact)}
-                    onDownload={() => onArtifactDownload?.(artifact)}
-                  />
-                ))}
-
-              {onViewAllFiles && (
-                <div
-                  onClick={onViewAllFiles}
-                  className='flex items-center gap-2 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700/60 bg-white dark:bg-[#1a1b1e] cursor-pointer hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm transition-all duration-200 min-w-[200px]'
-                >
-                  <div className='w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-50 dark:bg-gray-800'>
-                    <FolderOpenOutlined className='text-gray-500 text-base' />
-                  </div>
-                  <span className='text-sm text-gray-600 dark:text-gray-300'>{t('view_all_task_files')}</span>
-                </div>
-              )}
-            </div>
-
-            <div className='flex items-center gap-1.5 mt-5'>
-              <CheckOutlined className='text-xs text-emerald-500' />
-              <span className='text-sm text-emerald-600 dark:text-emerald-400 font-medium'>{t('task_completed')}</span>
-            </div>
           </div>
         )}
       </div>

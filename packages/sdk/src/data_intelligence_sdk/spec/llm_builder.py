@@ -17,6 +17,7 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.runtime.llm_client import LLMClient
 from data_intelligence_sdk.datahub import DataHubClusterer
+from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.spec.cluster_specs import (
     ClusterSpecBuilder,
     ClusterSpecSelector,
@@ -63,6 +64,43 @@ class LLMSpecBuilder:
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
+        return self._build(
+            query=query,
+            intent=intent,
+            corpus_package=corpus_package,
+            session_context=session_context,
+            user_context=user_context,
+        )
+
+    def build_with_intent_analysis(
+        self,
+        query: UserQuery,
+        intent_analysis: IntentAnalysis,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        """Build a spec using governed guidance from the selected intent."""
+
+        return self._build(
+            query=query,
+            intent=intent_analysis.intent,
+            corpus_package=corpus_package,
+            session_context=session_context,
+            user_context=user_context,
+            intent_analysis=intent_analysis,
+        )
+
+    def _build(
+        self,
+        *,
+        query: UserQuery,
+        intent: Intent,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None,
+        user_context: UserContext | None,
+        intent_analysis: IntentAnalysis | None = None,
+    ) -> ExecutionSpec:
         if self._uses_cluster_flow():
             return self._build_from_selected_cluster_spec(
                 query=query,
@@ -78,6 +116,7 @@ class LLMSpecBuilder:
             corpus_package,
             session_context,
             user_context,
+            intent_analysis,
         )
         selected_data_context = self._select_data(spec_build_context)
         messages = self.prompt.build_messages(
@@ -105,6 +144,52 @@ class LLMSpecBuilder:
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
+        return self._revise(
+            previous_spec=previous_spec,
+            user_feedback=user_feedback,
+            query=query,
+            intent=intent,
+            corpus_package=corpus_package,
+            session_context=session_context,
+            user_context=user_context,
+        )
+
+    def revise_with_intent_analysis(
+        self,
+        *,
+        previous_spec: ExecutionSpec,
+        user_feedback: str,
+        query: UserQuery,
+        intent_analysis: IntentAnalysis,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        """Revise a spec while preserving the original intent guidance."""
+
+        return self._revise(
+            previous_spec=previous_spec,
+            user_feedback=user_feedback,
+            query=query,
+            intent=intent_analysis.intent,
+            corpus_package=corpus_package,
+            session_context=session_context,
+            user_context=user_context,
+            intent_analysis=intent_analysis,
+        )
+
+    def _revise(
+        self,
+        *,
+        previous_spec: ExecutionSpec,
+        user_feedback: str,
+        query: UserQuery,
+        intent: Intent,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None,
+        user_context: UserContext | None,
+        intent_analysis: IntentAnalysis | None = None,
+    ) -> ExecutionSpec:
         if self._uses_cluster_flow():
             return self._build_from_selected_cluster_spec(
                 query=query,
@@ -122,6 +207,7 @@ class LLMSpecBuilder:
             corpus_package,
             session_context,
             user_context,
+            intent_analysis,
         )
         selected_data_context = self._select_data(
             spec_build_context,
@@ -154,7 +240,10 @@ class LLMSpecBuilder:
     ) -> ExecutionSpec:
         current_messages = list(messages)
         for attempt in range(self.max_validation_retries + 1):
-            payload = self.llm_client.complete_json(current_messages)
+            payload = self.llm_client.complete_json(
+                current_messages,
+                stage="spec-builder",
+            )
             try:
                 spec = self._payload_to_spec(payload, intent, selected_data_context)
                 if self.default_missing_requirements and available_sources:

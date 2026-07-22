@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext, suppress
+from contextlib import nullcontext
 from dataclasses import asdict
 from typing import Any
 
@@ -15,11 +15,12 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
+from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
-from data_intelligence_sdk.runtime.deep_agent_sandbox import SandboxSessionProvider
+from data_intelligence_sdk.runtime.sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
-from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
+from data_intelligence_sdk.runtime.event_payload import runtime_event_payload
 from data_intelligence_sdk.runtime.report_sandbox_executor import (
     RequestSandboxExecutor,
 )
@@ -44,7 +45,6 @@ class DataIntelligencePipeline:
         engine_registry: object,
         evidence_collector: object,
         synthesizer: object,
-        method_hub: object | None = None,
         mcp_client: MCPMethodClient | None = None,
         mcp_tools: tuple[MCPToolDefinition, ...] = (),
         interface_registry: object | None = None,
@@ -64,7 +64,6 @@ class DataIntelligencePipeline:
         self.engine_registry = engine_registry
         self.evidence_collector = evidence_collector
         self.synthesizer = synthesizer
-        self.method_hub = method_hub
         self.mcp_client = mcp_client
         self.mcp_tools = mcp_tools
         self.interface_registry = interface_registry
@@ -98,6 +97,39 @@ class DataIntelligencePipeline:
                 status=status,
                 payload=payload,
             )
+
+    def _record_runtime_event(
+        self,
+        run_artifact: RunArtifactSession | None,
+        *,
+        phase: str,
+        event_type: str,
+        status: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        event = (
+            run_artifact.record_event(
+                phase=phase,
+                event_type=event_type,
+                status=status,
+                payload=payload,
+            )
+            if run_artifact is not None
+            else {
+                "event_id": None,
+                "run_id": None,
+                "sequence": None,
+                "phase": phase,
+                "event_type": event_type,
+                "status": status,
+                "payload": payload,
+            }
+        )
+        self._log(
+            "pipeline.runtime_event",
+            runtime_event_payload(event),
+        )
+        return event
 
     def run(
         self,
@@ -152,19 +184,48 @@ class DataIntelligencePipeline:
                     ),
                 },
             )
-            intent = self.intent_analyzer.analyze(
-                query, corpus_package, session_context, user_context
+            analyze_details = getattr(self.intent_analyzer, "analyze_details", None)
+            analyzed_intent = (
+                analyze_details(
+                    query, corpus_package, session_context, user_context
+                )
+                if callable(analyze_details)
+                else self.intent_analyzer.analyze(
+                    query, corpus_package, session_context, user_context
+                )
             )
-            self._log("pipeline.intent_analyzed", {"intent": intent})
+            if isinstance(analyzed_intent, IntentAnalysis):
+                intent = analyzed_intent.intent
+                intent_analysis = analyzed_intent
+                intent_payload = analyzed_intent.event_payload()
+            else:
+                intent = analyzed_intent
+                intent_analysis = None
+                intent_payload = {"intent": intent, "source": "local"}
+            self._log("pipeline.intent_analyzed", intent_payload)
             self._record_artifact_event(
                 run_artifact,
                 phase="intent",
                 event_type="intent.analyzed",
-                payload={"intent": intent},
+                payload=intent_payload,
             )
-            spec = self.spec_builder.build(
-                query, intent, corpus_package, session_context, user_context
+            build_with_intent_analysis = getattr(
+                self.spec_builder,
+                "build_with_intent_analysis",
+                None,
             )
+            if intent_analysis is not None and callable(build_with_intent_analysis):
+                spec = build_with_intent_analysis(
+                    query,
+                    intent_analysis,
+                    corpus_package,
+                    session_context,
+                    user_context,
+                )
+            else:
+                spec = self.spec_builder.build(
+                    query, intent, corpus_package, session_context, user_context
+                )
             self._log(
                 "pipeline.spec_built",
                 {
@@ -195,6 +256,7 @@ class DataIntelligencePipeline:
             spec=spec,
             session_context=session_context,
             user_context=user_context,
+            intent_analysis=intent_analysis,
             run_artifact=run_artifact,
             run_artifact_id=(run_artifact.run_id if run_artifact is not None else None),
         )
@@ -219,6 +281,11 @@ class DataIntelligencePipeline:
                 "previous_spec": asdict(previous_spec),
             },
         )
+        revise_with_intent_analysis = getattr(
+            self.spec_builder,
+            "revise_with_intent_analysis",
+            None,
+        )
         revise = getattr(self.spec_builder, "revise", None)
         if revise is None:
             raise TypeError(
@@ -228,15 +295,28 @@ class DataIntelligencePipeline:
             "pipeline.spec_revision_started",
             {"intent": prepared.intent, "feedback": feedback},
         )
-        revised = revise(
-            previous_spec=previous_spec,
-            user_feedback=feedback,
-            query=prepared.query,
-            intent=prepared.intent,
-            corpus_package=prepared.corpus_package,
-            session_context=prepared.session_context,
-            user_context=prepared.user_context,
-        )
+        if prepared.intent_analysis is not None and callable(
+            revise_with_intent_analysis
+        ):
+            revised = revise_with_intent_analysis(
+                previous_spec=previous_spec,
+                user_feedback=feedback,
+                query=prepared.query,
+                intent_analysis=prepared.intent_analysis,
+                corpus_package=prepared.corpus_package,
+                session_context=prepared.session_context,
+                user_context=prepared.user_context,
+            )
+        else:
+            revised = revise(
+                previous_spec=previous_spec,
+                user_feedback=feedback,
+                query=prepared.query,
+                intent=prepared.intent,
+                corpus_package=prepared.corpus_package,
+                session_context=prepared.session_context,
+                user_context=prepared.user_context,
+            )
         self._log(
             "pipeline.spec_revised",
             {
@@ -310,17 +390,16 @@ class DataIntelligencePipeline:
                 sandbox_executor = self.sandbox_executor
                 if sandbox_executor is None and sandbox is not None:
                     sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
+
+                def record_runtime_event(**event: Any) -> dict[str, Any]:
+                    return self._record_runtime_event(run_artifact, **event)
+
                 runtime = EngineRuntimeContext(
                     run_context=EngineRunContext(
-                        event_recorder=(
-                            run_artifact.record_event
-                            if run_artifact is not None
-                            else None
-                        )
+                        event_recorder=record_runtime_event,
                     ),
                     mcp_client=self.mcp_client,
                     mcp_tools=self.mcp_tools,
-                    method_hub=self.method_hub or MethodHub(),
                     interface_registry=self.interface_registry,
                     interface_builder=self.interface_builder,
                     sandbox_executor=sandbox_executor,
@@ -330,15 +409,12 @@ class DataIntelligencePipeline:
                     sandbox=sandbox,
                     run_artifact=run_artifact,
                 )
-                try:
-                    output = engine.run(
-                        confirmed_spec,
-                        prepared.corpus_package,
-                        runtime,
-                        prepared.user_context,
-                    )
-                finally:
-                    self._cleanup_request_methods(runtime)
+                output = engine.run(
+                    confirmed_spec,
+                    prepared.corpus_package,
+                    runtime,
+                    prepared.user_context,
+                )
         except Exception as exc:
             if run_artifact is not None:
                 run_artifact.finalize(
@@ -418,13 +494,6 @@ class DataIntelligencePipeline:
             },
         )
         return response
-
-    @staticmethod
-    def _cleanup_request_methods(runtime: EngineRuntimeContext) -> None:
-        for method_name in reversed(runtime.request_method_names):
-            with suppress(Exception):
-                runtime.method_hub.remove(method_name)
-        runtime.request_method_names.clear()
 
     def _resolve_run_artifact(
         self,

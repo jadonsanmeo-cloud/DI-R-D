@@ -14,7 +14,7 @@ phân tích dữ liệu, tạo report có cấu trúc, KPI, chart và xuất HTM
 
 ```text
 packages/
-  sdk/                 # Report Engine, agent, Method Hub, sandbox contracts
+  sdk/                 # Report Engine, agents, MCP client, sandbox contracts
   api/                 # FastAPI application
 web/                   # Next.js frontend
 examples/              # CLI examples and sample corpus packages
@@ -402,7 +402,6 @@ Supporting layers:
 - `sandbox`: one isolated AXIOM environment per request with staged input data and direct source execution.
 - `artifacts`: one persistent filesystem bundle per pipeline invocation, containing every generated-code attempt and execution observation.
 - `context`: user and session context placeholders.
-- `docs/method_hub.md`: Method Hub contract, manifest schema, catalog generation, and proposal/export workflow.
 
 ## Base Design Notes
 
@@ -419,7 +418,7 @@ Supporting layers:
 
 ## Base Query-to-Answer Workflow
 
-The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, Method Hub, and AXIOM sandbox-service. `GeneralPurposeEngine` uses `deepagents==0.6.12` to select direct MCP tools or generate, execute, observe, and correct sandboxed Python analysis.
+The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, the AXIOM Method Hub MCP server, and AXIOM sandbox-service. `GeneralPurposeEngine` uses `deepagents==0.6.12` to select direct MCP tools or generate, execute, observe, and correct sandboxed Python analysis. The SDK contains no local Method Hub registry or concrete Method Hub implementations.
 
 ```python
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
@@ -620,26 +619,6 @@ LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 
 These variables can be placed in `.env` for local development. The SDK
 does not send traces when `LANGCHAIN_TRACING_V2` is unset or false.
-
-### Explicit Method Hub membership
-
-The default Method Hub membership is defined by `DEFAULT_METHODS` in
-`packages/sdk/src/data_intelligence_sdk/runtime/method_profile.py`. It contains
-concrete executable method names only; high-level capability labels such as
-`answer_question` are resolved by the engine and do not belong in this list.
-Optionally provide a TOML profile or override the complete list with:
-
-```text
-METHOD_HUB_CONFIG_PATH=/absolute/path/to/method-hub.toml
-METHOD_HUB_METHODS=inspect_data_folder,search_text_files,scan_csv
-```
-
-Vector search methods are disabled by default while local-file workflows are
-being used. Re-enable all vector methods with:
-
-```text
-ENABLE_VECTOR_METHODS=true
-```
 
 ## FastAPI Responses Backend
 

@@ -32,6 +32,14 @@ class MethodHubSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class IntentServiceSettings:
+    """Connection settings for the AXIOM Intent Service."""
+
+    endpoint: str = "http://localhost:8005"
+    enabled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxSettings:
     """Connection settings for an external sandbox execution service."""
 
@@ -156,6 +164,23 @@ class ConfigManager:
                 if token or os.environ.get("SANDBOX_TOKEN")
                 else None
             ),
+        )
+
+    def intent_service_settings(self) -> IntentServiceSettings:
+        """Resolve the required AXIOM Intent Service endpoint."""
+
+        payload = self.load().get("intent_service", {})
+        endpoint = _resolve_env_value(payload.get("endpoint"))
+        raw_enabled = payload.get("enabled", False)
+        enabled = str(_resolve_env_value(raw_enabled)).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        return IntentServiceSettings(
+            endpoint=str(endpoint or "http://localhost:8005"),
+            enabled=enabled,
         )
 
     def artifact_settings(self) -> ArtifactSettings:

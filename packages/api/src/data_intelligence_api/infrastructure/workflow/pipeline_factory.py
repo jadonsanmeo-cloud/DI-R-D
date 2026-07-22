@@ -27,19 +27,15 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.engines.report import ReportEngine
-from data_intelligence_sdk.methods import (
-    register_csv_methods,
-    register_local_data_methods,
-    register_spreadsheet_methods,
-)
+from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.registry.engine_selector import (
     EngineSelector,
     LLMEngineSelector,
 )
 from data_intelligence_sdk.runtime.config import ConfigManager
-from data_intelligence_sdk.runtime.deep_agent_sandbox import (
-    DeepAgentSandboxSession,
+from data_intelligence_sdk.runtime.sandbox import (
+    EngineSandboxSession,
     SandboxSessionProvider,
 )
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
@@ -48,7 +44,6 @@ from data_intelligence_sdk.runtime.llm_client import (
     OpenAICompatibleLLMClient,
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
-from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
@@ -97,6 +92,37 @@ class _ReportDefaultsSpecBuilder:
         )
         return self._apply(spec)
 
+    def build_with_intent_analysis(
+        self,
+        query: UserQuery,
+        intent_analysis: IntentAnalysis,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        build_with_intent_analysis = getattr(
+            self.delegate,
+            "build_with_intent_analysis",
+            None,
+        )
+        if callable(build_with_intent_analysis):
+            spec = build_with_intent_analysis(
+                query,
+                intent_analysis,
+                corpus_package,
+                session_context,
+                user_context,
+            )
+        else:
+            spec = self.delegate.build(
+                query,
+                intent_analysis.intent,
+                corpus_package,
+                session_context,
+                user_context,
+            )
+        return self._apply(spec)
+
     def revise(
         self,
         *,
@@ -119,6 +145,44 @@ class _ReportDefaultsSpecBuilder:
         )
         return self._apply(spec)
 
+    def revise_with_intent_analysis(
+        self,
+        *,
+        previous_spec: ExecutionSpec,
+        user_feedback: str,
+        query: UserQuery,
+        intent_analysis: IntentAnalysis,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        revise_with_intent_analysis = getattr(
+            self.delegate,
+            "revise_with_intent_analysis",
+            None,
+        )
+        if callable(revise_with_intent_analysis):
+            spec = revise_with_intent_analysis(
+                previous_spec=previous_spec,
+                user_feedback=user_feedback,
+                query=query,
+                intent_analysis=intent_analysis,
+                corpus_package=corpus_package,
+                session_context=session_context,
+                user_context=user_context,
+            )
+        else:
+            spec = self.delegate.revise(
+                previous_spec=previous_spec,
+                user_feedback=user_feedback,
+                query=query,
+                intent=intent_analysis.intent,
+                corpus_package=corpus_package,
+                session_context=session_context,
+                user_context=user_context,
+            )
+        return self._apply(spec)
+
     @staticmethod
     def _apply(spec: ExecutionSpec) -> ExecutionSpec:
         if spec.intent != "report":
@@ -127,14 +191,6 @@ class _ReportDefaultsSpecBuilder:
         spec.constraints = dict(spec.constraints)
         spec.constraints.setdefault("output_format", "html")
         return spec
-
-
-def _default_method_hub() -> MethodHub:
-    method_hub = MethodHub()
-    register_csv_methods(method_hub)
-    register_local_data_methods(method_hub)
-    register_spreadsheet_methods(method_hub)
-    return method_hub
 
 
 class _AxiomSandboxProvider:
@@ -162,7 +218,7 @@ class _AxiomSandboxProvider:
         try:
             sandbox.wait_until_ready()
             source_paths = self._stage_sources(sandbox, corpus_package)
-            yield DeepAgentSandboxSession(
+            yield EngineSandboxSession(
                 sandbox=sandbox,
                 source_paths=source_paths,
             )
@@ -248,8 +304,7 @@ def _configure_request_sandbox_provider(
     if backend == "docker":
         return docker_provider_from_env()
     raise ValueError(
-        "SANDBOX_BACKEND must be either 'axiom' or 'docker', "
-        f"not {backend!r}."
+        "SANDBOX_BACKEND must be either 'axiom' or 'docker', " f"not {backend!r}."
     )
 
 
@@ -412,7 +467,6 @@ def create_example_pipeline(
     use_llm_spec_builder: bool = False,
     allow_method_generation: bool = True,
     force_report_code_agent: bool | None = None,
-    method_hub: MethodHub | None = None,
     mcp_client: MCPMethodClient | None = None,
     mcp_tools: tuple[MCPToolDefinition, ...] = (),
     method_hub_enabled: bool | None = None,
@@ -426,9 +480,7 @@ def create_example_pipeline(
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
     resolved_method_hub_enabled = (
-        mcp_client is not None
-        if method_hub_enabled is None
-        else method_hub_enabled
+        mcp_client is not None if method_hub_enabled is None else method_hub_enabled
     )
     resolved_mcp_tools = mcp_tools
     if method_hub_enabled is None and mcp_client is not None and not resolved_mcp_tools:
@@ -519,7 +571,6 @@ def create_example_pipeline(
         engine_registry=registry,
         evidence_collector=ExampleEvidenceCollector(),
         synthesizer=ExampleSynthesizer(),
-        method_hub=method_hub,
         mcp_client=mcp_client,
         mcp_tools=resolved_mcp_tools,
         interface_registry=interface_registry,
@@ -534,7 +585,6 @@ def create_example_pipeline(
 
 def create_report_pipeline(
     *,
-    method_hub: MethodHub | None = None,
     mcp_client: MCPMethodClient | None = None,
     interface_registry: object | None = None,
     logger: RuntimeLogger | None = None,
@@ -548,7 +598,6 @@ def create_report_pipeline(
                 default=False,
             )
         ),
-        method_hub=method_hub,
         mcp_client=mcp_client,
         interface_registry=interface_registry,
         logger=logger,

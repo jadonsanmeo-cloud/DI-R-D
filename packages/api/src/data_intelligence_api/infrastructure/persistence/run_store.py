@@ -420,9 +420,11 @@ class PostgresRunRepository:
                 """,
                 (
                     output_text,
-                    psycopg.types.json.Jsonb(evidence)
-                    if evidence is not None
-                    else None,
+                    (
+                        psycopg.types.json.Jsonb(evidence)
+                        if evidence is not None
+                        else None
+                    ),
                     psycopg.types.json.Jsonb(response_metadata),
                     response_id,
                 ),

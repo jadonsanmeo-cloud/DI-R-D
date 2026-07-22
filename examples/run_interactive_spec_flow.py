@@ -39,9 +39,9 @@ from data_intelligence_sdk.datahub import LLMDataHubClusterer  # noqa: E402
 from data_intelligence_sdk.registry.engine_registry import (  # noqa: E402
     InMemoryEngineRegistry,
 )
-from data_intelligence_sdk.runtime.engine_runtime import (
+from data_intelligence_sdk.runtime.engine_runtime import (  # noqa: E402
     EngineRuntimeContext,
-)  # noqa: E402
+)
 from data_intelligence_sdk.runtime.llm_client import (  # noqa: E402
     OpenAICompatibleLLMClient,
 )
@@ -64,12 +64,17 @@ class TracingLLMClient:
         self.inner = inner
         self.call_count = 0
 
-    def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> dict[str, Any]:
         self.call_count += 1
-        _print_section(f"LLM Call {self.call_count} Input")
+        _print_section(f"LLM Call {self.call_count} ({stage}) Input")
         _print_json({"messages": messages})
-        result = self.inner.complete_json(messages)
-        _print_section(f"LLM Call {self.call_count} Output")
+        result = self.inner.complete_json(messages, stage=stage)
+        _print_section(f"LLM Call {self.call_count} ({stage}) Output")
         _print_json(result)
         return result
 
@@ -453,17 +458,17 @@ def main() -> None:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="OpenAI-compatible base URL. Defaults to OPENAI_COMPATIBLE_BASE_URL.",
+        help="Override the base URL from the configured OpenRouter model.",
     )
     parser.add_argument(
         "--api-key",
         default=None,
-        help="OpenAI-compatible API key. Defaults to OPENAI_COMPATIBLE_API_KEY.",
+        help="Override the API key from the configured OpenRouter model.",
     )
     parser.add_argument(
         "--model",
         default=None,
-        help="OpenAI-compatible model. Defaults to OPENAI_COMPATIBLE_MODEL.",
+        help="Override the configured OpenRouter model name.",
     )
     args = parser.parse_args()
 

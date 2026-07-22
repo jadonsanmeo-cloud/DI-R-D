@@ -16,7 +16,7 @@ export function CodePreview({ code, language, customStyle }: Props) {
   const { t } = useTranslation();
 
   return (
-    <div className='relative'>
+    <div className='relative min-w-0 max-w-full'>
       <Button
         className='absolute right-3 top-2 text-gray-300 hover:!text-gray-200 bg-gray-700'
         type='text'
@@ -27,8 +27,8 @@ export function CodePreview({ code, language, customStyle }: Props) {
         }}
       />
       <pre
-        className='rounded-lg bg-slate-950 p-4 text-slate-100'
-        style={{ ...customStyle, maxHeight: '400px', overflow: 'auto' }}
+        className='m-0 w-full max-w-full overscroll-contain rounded-lg bg-slate-950 p-4 text-slate-100'
+        style={{ ...customStyle, maxHeight: '400px', overflowX: 'auto', overflowY: 'auto' }}
       >
         <code data-language={language} className='block whitespace-pre font-mono text-xs leading-5'>
           {code}

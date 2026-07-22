@@ -17,7 +17,7 @@ engine. The contract has three goals:
 The contract covers:
 
 - engine request data;
-- Method Hub access;
+- Method Hub MCP access;
 - request-scoped AXIOM sandbox access;
 - realtime event emission;
 - execution plans and steps;
@@ -179,7 +179,8 @@ from uuid import UUID
 
 @dataclass(slots=True)
 class EngineRuntimeServices:
-    method_hub: MethodHub | None
+    mcp_client: MCPMethodClient | None
+    mcp_tools: tuple[MCPToolDefinition, ...]
 
     sandbox_client: SandboxClient
     sandbox_workspace_id: UUID
@@ -197,14 +198,15 @@ class EngineRuntimeServices:
 
 ### 6.1 Method Hub
 
-`method_hub` is the single optional boundary for discovering and invoking
-engine-accessible methods. Its implementation may use local registration,
-remote MCP transport, or another platform adapter without exposing transport
-details to the engine. Calls must be represented as structured
-`EngineMethodCall` records and events.
+Method Hub is exposed to engines only through the AXIOM MCP server. `mcp_tools`
+is the request-scoped catalog discovered before execution, and `mcp_client`
+invokes those tools. The SDK does not register or execute local Method Hub
+implementations. Calls must be represented as structured `EngineMethodCall`
+records and events.
 
-When `method_hub` is `None`, the engine must either execute without Method Hub
-capabilities or fail a required capability with a structured validation error.
+When `mcp_client` is `None`, the engine must execute without Method Hub
+capabilities. If Method Hub was explicitly requested, the pipeline must fail
+before engine execution when discovery or connectivity is unavailable.
 
 Method Hub credentials, transport headers, and access tokens are owned by the
 client. They must never be included in events, logs, outputs, or engine metadata.
@@ -629,7 +631,7 @@ Code rules:
 class EngineMethodCall:
     call_id: str
     method_name: str
-    provider: Literal["local", "mcp"]
+    provider: Literal["mcp"]
     status: EngineExecutionStatus
 
     step_id: str | None = None
@@ -1123,7 +1125,8 @@ The current `EngineRuntimeContext` maps into `EngineRuntimeServices` as follows:
 | Current field            | Target field                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------- |
 | `run_context`            | `events` plus aggregate trace construction                                   |
-| `method_hub`             | `method_hub`                                                                 |
+| `mcp_client`             | `mcp_client`                                                                 |
+| `mcp_tools`              | `mcp_tools`                                                                  |
 | `sandbox`                | Replaced by `sandbox_client` plus `sandbox_workspace_id`                     |
 | `run_artifact`           | `artifacts`                                                                  |
 | `resource_manager`       | `resource_manager`                                                           |

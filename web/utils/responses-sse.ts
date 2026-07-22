@@ -13,13 +13,117 @@ const PIPELINE_STAGE_DEFINITIONS = [
   ['pipeline.completed', 'Finalizing response'],
 ] as const;
 
-export interface PipelineStageOutput {
-  output_type: 'markdown';
-  content: string;
+export interface RuntimeEventOutputContent {
+  eventType: string;
+  phase: string;
+  status: string;
+  name: string;
+  summary: string;
+  description?: string;
+  details: Record<string, unknown>;
+  artifactRefs: string[];
+  code?: {
+    name: string;
+    language: string;
+    content: string;
+    truncated: boolean;
+    artifactRef?: string | null;
+  };
+}
+
+export type PipelineStageOutput =
+  | { output_type: 'markdown'; content: string }
+  | { output_type: 'event'; content: RuntimeEventOutputContent };
+
+export interface PipelineExecutionStep {
+  id: string;
+  title: string;
+  detail: string;
+  status: 'running' | 'done' | 'failed';
+}
+
+function humanizeEventName(value: unknown): string {
+  const normalized = String(value || '')
+    .replace(/[._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Execution event';
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function runtimeEventSummary(event: Record<string, unknown>): string {
+  const description = typeof event.description === 'string' ? event.description.trim() : '';
+  if (description) return description;
+
+  const name = String(event.name || event.event_type || 'step');
+  const details = asRecord(event.details);
+  const outputs = asRecord(details.outputs);
+  const validation = asRecord(outputs.validation);
+  const validationStatus = validation.status;
+  if (validationStatus) return `Validation ${String(validationStatus).toLowerCase()}.`;
+
+  if (name === 'datascience_agent') {
+    const inputs = asRecord(details.inputs);
+    const profile = asRecord(inputs.profile);
+    const rowCount = Number(profile.row_count || 0);
+    const metricCount = Number(outputs.metric_count || 0);
+    const chartCount = Number(outputs.chart_dataset_count || 0);
+    const parts = [
+      rowCount ? `${rowCount.toLocaleString()} rows profiled` : '',
+      metricCount ? `${metricCount} metrics` : '',
+      chartCount ? `${chartCount} chart dataset${chartCount === 1 ? '' : 's'}` : '',
+    ].filter(Boolean);
+    if (parts.length) return parts.join(' · ');
+  }
+
+  if (name === 'renderer') {
+    const formats = Array.isArray(outputs.rendered_formats) ? outputs.rendered_formats.map(String) : [];
+    if (formats.length) return `Created ${formats.length} report formats: ${formats.join(', ')}.`;
+  }
+
+  if (name === 'chart_agent' && outputs.selected_type) {
+    return `Prepared a ${humanizeEventName(outputs.selected_type).toLowerCase()} chart.`;
+  }
+
+  if (name === 'report_agent' && outputs.report_format) {
+    return `Built the ${humanizeEventName(outputs.report_format).toLowerCase()}.`;
+  }
+
+  const status = String(event.status || 'completed').toLowerCase();
+  return `${humanizeEventName(name)} ${status}.`;
 }
 
 export function getPipelineStageLabel(eventType: string): string {
   return PIPELINE_STAGE_DEFINITIONS.find(([id]) => id === eventType)?.[1] || eventType;
+}
+
+export function getPipelineExecutionStep(event: Record<string, unknown>): PipelineExecutionStep {
+  const eventType = String(event.type || 'pipeline.unknown');
+  if (eventType === 'pipeline.runtime_event') {
+    const runtimeStatus = String(event.status || 'completed');
+    const status = ['failed', 'cancelled'].includes(runtimeStatus)
+      ? 'failed'
+      : ['pending', 'running'].includes(runtimeStatus)
+        ? 'running'
+        : 'done';
+    const runtimeEventType = humanizeEventName(event.event_type);
+    const phase = humanizeEventName(event.phase);
+    return {
+      id: `${eventType}:${String(event.event_id || event.sequence || event.name || event.event_type || 'event')}`,
+      title: humanizeEventName(event.name || event.event_type),
+      detail: runtimeEventSummary(event) || `${runtimeEventType} · ${phase}`,
+      status,
+    };
+  }
+  return {
+    id: eventType,
+    title: getPipelineStageLabel(eventType),
+    detail: '',
+    status: 'running',
+  };
 }
 
 function intentValue(event: Record<string, unknown>, spec?: EditableExecutionSpec): string {
@@ -64,10 +168,60 @@ export function getPipelineStageOutput(
   event: Record<string, unknown>,
   spec?: EditableExecutionSpec,
 ): PipelineStageOutput | null {
-  if (event.type === 'pipeline.intent_analyzed') {
+  if (event.type === 'pipeline.runtime_event') {
+    const artifactRefs = Array.isArray(event.artifact_refs) ? event.artifact_refs.map(String) : [];
+    const rawCode = asRecord(event.code);
+    const code =
+      typeof rawCode.content === 'string' && rawCode.content.trim()
+        ? {
+            name: String(rawCode.name || 'generated-code.py'),
+            language: String(rawCode.language || 'python'),
+            content: rawCode.content,
+            truncated: Boolean(rawCode.truncated),
+            artifactRef: rawCode.artifact_ref ? String(rawCode.artifact_ref) : null,
+          }
+        : undefined;
+    return {
+      output_type: 'event',
+      content: {
+        eventType: String(event.event_type || 'runtime.event'),
+        phase: String(event.phase || 'engine'),
+        status: String(event.status || 'completed'),
+        name: String(event.name || event.event_type || 'Execution event'),
+        summary: runtimeEventSummary(event),
+        ...(typeof event.description === 'string' && event.description.trim()
+          ? { description: event.description.trim() }
+          : {}),
+        details: asRecord(event.details),
+        artifactRefs,
+        ...(code ? { code } : {}),
+      },
+    };
+  }
+  if (event.type === 'pipeline.start' && event.artifact_ref) {
     return {
       output_type: 'markdown',
-      content: `# Intent\n\n**Classification:** \`${intentValue(event, spec)}\``,
+      content: `**Artifact bundle:** \`${String(event.artifact_ref)}\``,
+    };
+  }
+  if (event.type === 'pipeline.intent_analyzed') {
+    const catalogIntent =
+      typeof event.catalog_intent === 'string' && event.catalog_intent.trim() ? event.catalog_intent.trim() : null;
+    const source = typeof event.source === 'string' && event.source.trim() ? event.source.trim() : null;
+    const confidence = typeof event.confidence === 'number' ? event.confidence : null;
+    const score = typeof event.score === 'number' ? event.score : null;
+    const lines = [
+      '# Intent',
+      '',
+      ...(catalogIntent ? [`**Intent:** \`${catalogIntent}\``] : []),
+      `**Classification:** \`${intentValue(event, spec)}\``,
+      ...(source ? [`**Source:** ${source === 'axiom_intent_service' ? 'AXIOM Intent Service' : source}`] : []),
+      ...(confidence !== null ? [`**Confidence:** ${(confidence * 100).toFixed(1)}%`] : []),
+      ...(score !== null ? [`**Match score:** ${score.toFixed(4)}`] : []),
+    ];
+    return {
+      output_type: 'markdown',
+      content: lines.join('\n'),
     };
   }
   if (event.type === 'pipeline.spec_built' || event.type === 'pipeline.spec_revised') {
@@ -93,6 +247,7 @@ const RESPONSE_EVENT_TYPES = new Set([
   'response.completed',
   'response.requires_confirmation',
   'response.failed',
+  'pipeline.runtime_event',
   ...PIPELINE_STAGE_DEFINITIONS.map(([id]) => id),
 ]);
 

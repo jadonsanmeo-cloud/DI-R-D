@@ -48,13 +48,25 @@ class RecordingLLMClient:
     def __init__(self, response: dict[str, object]) -> None:
         self.response = response
         self.messages: list[dict[str, str]] = []
+        self.stage: str | None = None
 
-    def complete_json(self, messages: list[dict[str, str]]) -> dict[str, object]:
+    def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> dict[str, object]:
         self.messages = messages
+        self.stage = stage
         return self.response
 
-    def complete_text(self, messages: list[dict[str, str]]) -> str:
-        del messages
+    def complete_text(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+    ) -> str:
+        del messages, stage
         raise AssertionError("Engine selection must use JSON completion.")
 
 
@@ -147,6 +159,7 @@ class EngineRegistryTests(unittest.TestCase):
         )
 
         self.assertEqual(selected, "report")
+        self.assertEqual(client.stage, "engine_selector")
         request_payload = json.loads(client.messages[-1]["content"])
         self.assertNotIn("engine_hint", request_payload["spec"])
         self.assertEqual(

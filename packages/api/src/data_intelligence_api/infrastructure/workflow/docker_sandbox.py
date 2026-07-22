@@ -11,7 +11,7 @@ from typing import Callable, Sequence
 from uuid import uuid4
 
 from data_intelligence_sdk.core.types import DataCorpusPackage
-from data_intelligence_sdk.runtime.deep_agent_sandbox import DeepAgentSandboxSession
+from data_intelligence_sdk.runtime.sandbox import EngineSandboxSession
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[bytes]]
 
@@ -282,7 +282,7 @@ class DockerSandboxProvider:
         try:
             sandbox.wait_until_ready()
             source_paths = _stage_sources(sandbox, corpus_package)
-            yield DeepAgentSandboxSession(
+            yield EngineSandboxSession(
                 sandbox=sandbox,
                 source_paths=source_paths,
             )
@@ -336,8 +336,7 @@ def _stage_sources(
         host_path = Path(source_text)
         if not host_path.is_file():
             raise ValueError(
-                "The Docker sandbox requires local source files: "
-                f"{source_text}"
+                "The Docker sandbox requires local source files: " f"{source_text}"
             )
         filename = host_path.name
         if filename in used_names:

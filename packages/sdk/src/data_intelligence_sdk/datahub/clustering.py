@@ -60,7 +60,8 @@ class LLMDataHubClusterer:
 
     def cluster(self, corpus_package: DataCorpusPackage) -> DataHubClusteringResult:
         payload = self.llm_client.complete_json(
-            self.prompt.cluster_messages(corpus_package)
+            self.prompt.cluster_messages(corpus_package),
+            stage="datahub-clusterer",
         )
         return self._payload_to_result(payload)
 

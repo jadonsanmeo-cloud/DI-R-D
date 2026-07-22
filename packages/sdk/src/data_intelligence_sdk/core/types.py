@@ -8,7 +8,10 @@ early.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from data_intelligence_sdk.intent import IntentAnalysis
 
 Intent = Literal["reason", "report", "general", "unknown"]
 SUPPORTED_INTENTS: tuple[Intent, ...] = (
@@ -79,6 +82,7 @@ class PreparedExecution:
     spec: "ExecutionSpec"
     session_context: SessionContext | None = None
     user_context: UserContext | None = None
+    intent_analysis: IntentAnalysis | None = None
     run_artifact: Any | None = None
     run_artifact_id: str | None = None
 

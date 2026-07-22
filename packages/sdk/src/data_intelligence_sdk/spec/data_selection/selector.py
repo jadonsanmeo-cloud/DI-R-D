@@ -43,7 +43,8 @@ class LLMDataSelector:
                 spec_build_context,
                 previous_spec=previous_spec,
                 user_feedback=user_feedback,
-            )
+            ),
+            stage="data-selector",
         )
         return self._payload_to_selected_context(payload)
 

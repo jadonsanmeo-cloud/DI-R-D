@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
@@ -169,8 +170,7 @@ class _ConstantCodeAgent(_SumCodeAgent):
             },
             "execution_arguments": {},
             "source_code": (
-                "def produce_total() -> list[dict]:\n"
-                "    return [{'total': 5}]\n"
+                "def produce_total() -> list[dict]:\n" "    return [{'total': 5}]\n"
             ),
         }
 
@@ -233,6 +233,23 @@ class _AlwaysPassValidator:
 
 
 class ReportWiringTests(unittest.TestCase):
+    def test_report_graph_uses_report_langsmith_run_name(self):
+        engine = object.__new__(ReportEngine)
+        engine.llm = None
+        engine.max_data_concurrency = 1
+        engine.max_chart_concurrency = 1
+        engine._graph = Mock()
+        engine._graph.invoke.return_value = {"final_result": "report"}
+
+        engine.run(
+            ExecutionSpec(intent="report", objective="Create a report"),
+            DataCorpusPackage(),
+            EngineRuntimeContext(),
+        )
+
+        config = engine._graph.invoke.call_args.kwargs["config"]
+        self.assertEqual(config["run_name"], "report")
+
     def test_router_prefers_builtin_spreadsheet_materializer(self):
         source = r"G:\uploads\scores.xls"
         route = RouterAgent(None).run(
@@ -370,7 +387,7 @@ def load_rows(path: str) -> list[dict]:
                         "operation": "inspect",
                         "outputs": "sales-profile",
                     }
-                ]
+                ],
             },
             spec,
             DataCorpusPackage(),
@@ -540,9 +557,7 @@ def load_rows(path: str) -> list[dict]:
             {
                 "route": "existing_tool",
                 "tool_name": "scan_csv",
-                "arguments": {
-                    "path": "G:\\\\repo\\\\.uploads\\\\hyperactivated.csv"
-                },
+                "arguments": {"path": "G:\\\\repo\\\\.uploads\\\\hyperactivated.csv"},
             },
             {"description": "Read CSV"},
             [
@@ -616,10 +631,7 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(route["arguments"]["path"], source)
 
     def test_generated_source_repairs_double_escaped_newlines(self):
-        source = (
-            'def load_pdf(path: str):\\n'
-            '    return [{\\"path\\": path}]\\n'
-        )
+        source = "def load_pdf(path: str):\\n" '    return [{\\"path\\": path}]\\n'
 
         repaired = _normalize_generated_source(source)
 
@@ -752,10 +764,7 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(decision["warnings"], [])
 
     def test_analysis_sample_is_stratified_and_bounded(self):
-        rows = [
-            {"position": index, "text": "x" * 20}
-            for index in range(20)
-        ]
+        rows = [{"position": index, "text": "x" * 20} for index in range(20)]
 
         sample = DataScienceProcessor._analysis_sample(
             rows,
@@ -926,8 +935,12 @@ def load_rows(path: str) -> list[dict]:
             self.assertEqual(warnings, [])
             self.assertEqual(missing, [])
             self.assertTrue(persisted.exists())
-            self.assertEqual(descriptors[0]["artifact_ref"].split("/")[-1], "loaded-rows.json")
-            self.assertIn("intermediate/load-data/loaded-rows.json", sandbox.sandbox.files)
+            self.assertEqual(
+                descriptors[0]["artifact_ref"].split("/")[-1], "loaded-rows.json"
+            )
+            self.assertIn(
+                "intermediate/load-data/loaded-rows.json", sandbox.sandbox.files
+            )
             self.assertEqual(
                 arguments["rows_path"],
                 "/workspace/intermediate/load-data/loaded-rows.json",
@@ -1021,9 +1034,7 @@ def load_rows(path: str) -> list[dict]:
             "bindings": [
                 {
                     "status": "resolved",
-                    "plan_output_refs": [
-                        "step-output://derive/evidence"
-                    ],
+                    "plan_output_refs": ["step-output://derive/evidence"],
                 }
             ]
         }
@@ -1104,9 +1115,7 @@ def load_rows(path: str) -> list[dict]:
                 "runtime": runtime,
                 "output_registry": registry,
                 "template_requirements": [],
-                "upstream_step_results": [
-                    {"step_id": "load", "status": "completed"}
-                ],
+                "upstream_step_results": [{"step_id": "load", "status": "completed"}],
                 "attempt": 0,
             },
             config={"recursion_limit": 30},
@@ -1118,20 +1127,7 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(result["lineage"]["upstream_step_refs"], ["load"])
         self.assertEqual(sandbox.validate_calls, 1)
         self.assertEqual(sandbox.run_calls, 0)
-        self.assertEqual(
-            state["execution_result"]["registered_method_name"],
-            "sum_rows",
-        )
-        self.assertEqual(runtime.request_method_names, ["sum_rows"])
-        registered = runtime.method_hub.list_methods()
-        self.assertEqual([method.name for method in registered], ["sum_rows"])
-        self.assertEqual(registered[0].trust_level, "generated_validated")
-        self.assertTrue(registered[0].metadata["request_scoped"])
-
-        DataIntelligencePipeline._cleanup_request_methods(runtime)
-
-        self.assertEqual(runtime.request_method_names, [])
-        self.assertEqual(runtime.method_hub.list_methods(), [])
+        self.assertNotIn("registered_method_name", state["execution_result"])
 
     def test_generated_runtime_failure_retries_code_agent_then_reuses_result(self):
         engine = ReportEngine(llm=object(), max_generation_attempts=2)

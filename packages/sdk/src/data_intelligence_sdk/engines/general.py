@@ -23,6 +23,7 @@ from data_intelligence_sdk.core.types import (
     UserContext,
 )
 from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
+from data_intelligence_sdk.runtime.deep_agent_backend import DeepAgentSandboxBackend
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.tools import (
     create_execute_python_tool,
@@ -141,9 +142,9 @@ class GeneralPurposeEngine:
             model=self.llm,
             tools=[*mcp_tools, execute_python],
             system_prompt=self._system_prompt(spec, corpus_package, runtime),
-            backend=runtime.sandbox.backend,
+            backend=DeepAgentSandboxBackend(runtime.sandbox),
             subagents=[],
-            name="axiom-general-analysis",
+            name="general-purpose",
         )
         result = agent.invoke(
             {

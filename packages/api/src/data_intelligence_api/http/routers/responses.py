@@ -16,6 +16,9 @@ from fastapi import APIRouter, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
+from data_intelligence_api.infrastructure.persistence.artifact_history import (
+    ArtifactHistoryReader,
+)
 from data_intelligence_api.application.runtime_capabilities import (
     MethodHubUnavailableError,
 )
@@ -85,9 +88,7 @@ def _run_worker(
         messages.put(
             WorkflowFailedMessage(
                 code="method_hub_unavailable",
-                message=(
-                    "Method Hub is enabled for this request but is unavailable."
-                ),
+                message=("Method Hub is enabled for this request but is unavailable."),
             )
         )
     except Exception:
@@ -202,7 +203,10 @@ def _history_summary(run) -> ResponseHistorySummary:
     )
 
 
-def _history_detail(run) -> ResponseHistoryDetail:
+def _history_detail(
+    run,
+    artifact_history: ArtifactHistoryReader,
+) -> ResponseHistoryDetail:
     spec_payload = dict(run.spec_payload)
     if run.status == "completed":
         spec_payload["confirmed"] = True
@@ -210,6 +214,7 @@ def _history_detail(run) -> ResponseHistoryDetail:
     method_hub_value = run.request_payload.get("runtime_options", {}).get(
         "method_hub_enabled"
     )
+    metadata = run.response_metadata or {}
     return ResponseHistoryDetail(
         response_id=run.response_id,
         status=run.status,
@@ -222,7 +227,11 @@ def _history_detail(run) -> ResponseHistoryDetail:
         ),
         output_text=run.output_text,
         evidence=run.evidence,
-        metadata=run.response_metadata or {},
+        metadata=metadata,
+        events=artifact_history.read_pipeline_events(
+            metadata.get("artifact_ref"),
+            evidence_present=run.evidence is not None,
+        ),
         error=(
             {
                 "code": run.error_code or "response_failed",
@@ -260,6 +269,7 @@ def create_responses_router(
             "run_repository is required for resumable Responses workflows."
         )
     router = APIRouter()
+    artifact_history = ArtifactHistoryReader(settings.artifact_root)
 
     @router.post("/api/v1/responses")
     async def create_response(payload: CreateResponseRequest) -> StreamingResponse:
@@ -358,7 +368,9 @@ def create_responses_router(
             run = run_repository.get_for_session(response_id, session_id)
         except Exception as error:
             _raise_store_error(error)
-        return JSONResponse(_history_detail(run).model_dump(mode="json"))
+        return JSONResponse(
+            _history_detail(run, artifact_history).model_dump(mode="json")
+        )
 
     @router.delete("/api/v1/responses/{response_id}", status_code=204)
     async def delete_response_history(

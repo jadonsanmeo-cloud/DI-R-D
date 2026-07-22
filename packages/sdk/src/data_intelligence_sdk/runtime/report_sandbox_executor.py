@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from data_intelligence_sdk.core.types import InterfaceDefinition
-from data_intelligence_sdk.runtime.deep_agent_sandbox import DeepAgentSandboxSession
+from data_intelligence_sdk.runtime.sandbox import EngineSandboxSession
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 
@@ -19,7 +19,7 @@ class RequestSandboxExecutor:
 
     def __init__(
         self,
-        session: DeepAgentSandboxSession,
+        session: EngineSandboxSession,
         run_artifact: RunArtifactSession | None,
     ) -> None:
         self.session = session
@@ -66,9 +66,7 @@ class RequestSandboxExecutor:
             )
 
         source_code = str(
-            interface.metadata.get("source_code")
-            or interface.implementation_ref
-            or ""
+            interface.metadata.get("source_code") or interface.implementation_ref or ""
         )
         if not source_code.strip():
             return SandboxRunResult(

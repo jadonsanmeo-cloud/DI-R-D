@@ -107,6 +107,11 @@ def default_pipeline_factory(
 ) -> DataIntelligencePipeline:
     config_manager = ConfigManager(os.getenv("MODEL_CONFIG_PATH") or None)
     method_hub_settings = config_manager.method_hub_settings()
+    intent_service_settings = config_manager.intent_service_settings()
+    if not intent_service_settings.enabled:
+        raise RuntimeError(
+            "AXIOM Intent Service must be enabled in [intent_service]."
+        )
     resolved_options = runtime_options or WorkflowRuntimeOptions(
         method_hub_enabled=method_hub_settings.enabled
     )
@@ -126,7 +131,7 @@ def default_pipeline_factory(
         logger=logger,
         config_manager=config_manager,
         use_llm_spec_builder=True,
-        intent_service_base_url=os.getenv("INTENT_SERVICE_BASE_URL") or None,
+        intent_service_base_url=intent_service_settings.endpoint,
         mcp_client=resolved_method_hub.client,
         **method_hub_kwargs,
     )

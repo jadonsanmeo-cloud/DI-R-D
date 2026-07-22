@@ -38,6 +38,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { useTranslation } from 'react-i18next';
 import LightweightMarkdown from './LightweightMarkdown';
 import type { ArtifactItem, StepStatus, StepType } from './ManusLeftPanel';
+import RuntimeEventDetail from './RuntimeEventDetail';
 
 const CodePreview = dynamic(
   () => import('@/components/chat/chat-content/code-preview').then(module => module.CodePreview),
@@ -92,7 +93,18 @@ const resolveHtmlImageUrls = (html: string): string => {
 };
 
 export interface ExecutionOutput {
-  output_type: 'code' | 'text' | 'markdown' | 'table' | 'chart' | 'json' | 'error' | 'thought' | 'html' | 'image';
+  output_type:
+    | 'code'
+    | 'text'
+    | 'markdown'
+    | 'table'
+    | 'chart'
+    | 'json'
+    | 'error'
+    | 'thought'
+    | 'html'
+    | 'image'
+    | 'event';
   content: any;
   timestamp?: number;
 }
@@ -423,6 +435,8 @@ const OutputRenderer: React.FC<{ output: ExecutionOutput; index: number }> = mem
           <LightweightMarkdown>{String(content)}</LightweightMarkdown>
         </div>
       )}
+
+      {output.output_type === 'event' && <RuntimeEventDetail content={content} />}
 
       {output.output_type === 'table' && (
         <Table
@@ -1536,6 +1550,7 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
     }
   }, [controlledPanelView]);
   const visibleOutputs = useMemo(() => outputs.filter(o => o.output_type !== 'thought'), [outputs]);
+  const hasRuntimeEventOutput = visibleOutputs.some(output => output.output_type === 'event');
 
   const filteredArtifacts = useMemo(() => {
     if (!artifacts) return [];
@@ -1869,8 +1884,13 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
             ) : (
               <>
                 <div
-                  className='flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-[#1f2025] transition-colors'
-                  onClick={() => setInputCollapsed(prev => !prev)}
+                  className={classNames(
+                    'flex items-center justify-between px-4 py-3 select-none transition-colors',
+                    !hasRuntimeEventOutput && 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#1f2025]',
+                  )}
+                  onClick={() => {
+                    if (!hasRuntimeEventOutput) setInputCollapsed(prev => !prev);
+                  }}
                 >
                   <div className='flex items-center gap-3 min-w-0 flex-1'>
                     <div
@@ -1893,14 +1913,16 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
                   </div>
                   <div className='flex items-center gap-2 flex-shrink-0'>
                     <StatusBadge status={activeStep.status} />
-                    <span className='text-gray-400 text-xs transition-transform duration-200'>
-                      {inputCollapsed ? <DownOutlined /> : <UpOutlined />}
-                    </span>
+                    {!hasRuntimeEventOutput && (
+                      <span className='text-gray-400 text-xs transition-transform duration-200'>
+                        {inputCollapsed ? <DownOutlined /> : <UpOutlined />}
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 {/* Expanded detail */}
-                {!inputCollapsed && activeStep.detail && (
+                {!inputCollapsed && activeStep.detail && !hasRuntimeEventOutput && (
                   <div
                     className={
                       activeStep.detail.includes('Action: execute_skill_script_file')
@@ -2194,20 +2216,6 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
             <span className='text-xs text-gray-500'>{t('chatc.selectStepHint')}</span>
           </div>
         )}
-      </div>
-
-      {/* Footer Status Bar */}
-      <div className='px-5 py-2 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111217]'>
-        <div className='flex items-center justify-between text-[10px] text-gray-400'>
-          <div className='flex items-center gap-4'>
-            <span className='flex items-center gap-1'>
-              <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500'}`} />
-              {isRunning ? t('chatc.running') : t('chatc.ready')}
-            </span>
-            {visibleOutputs.length > 0 && <span>{t('chatc.outputsCount', { count: visibleOutputs.length })}</span>}
-          </div>
-          {activeStep && <span>Step ID: {activeStep.id}</span>}
-        </div>
       </div>
     </div>
   );

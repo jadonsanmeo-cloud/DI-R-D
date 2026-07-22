@@ -31,7 +31,9 @@ class CreateResponseRequest(BaseModel):
     data_corpus_package: DataCorpusPackageRequest
     user_id: str | None = None
     session_id: str | None = None
-    runtime_options: RuntimeOptionsRequest = Field(default_factory=RuntimeOptionsRequest)
+    runtime_options: RuntimeOptionsRequest = Field(
+        default_factory=RuntimeOptionsRequest
+    )
 
 
 class CapabilityRequirementRequest(BaseModel):
@@ -87,10 +89,13 @@ class ResponseHistoryDetail(BaseModel):
     status: str
     input: str
     spec: dict[str, Any]
-    runtime_options: RuntimeOptionsRequest = Field(default_factory=RuntimeOptionsRequest)
+    runtime_options: RuntimeOptionsRequest = Field(
+        default_factory=RuntimeOptionsRequest
+    )
     output_text: str | None = None
     evidence: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(default_factory=list)
     error: dict[str, str] | None = None
     created_at: str | None = None
     updated_at: str | None = None

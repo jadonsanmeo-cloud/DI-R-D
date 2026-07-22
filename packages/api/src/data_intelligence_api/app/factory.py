@@ -41,6 +41,7 @@ def create_app(
         if resolved_settings.database_url
         else InMemoryRunRepository()
     )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if resolved_settings.database_url:
