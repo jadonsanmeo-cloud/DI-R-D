@@ -9,6 +9,7 @@ from data_intelligence_sdk.core.types import (
     EngineOutput,
     EngineStep,
     EngineTrace,
+    EvidenceBundle,
     MethodCall,
     TraceStatus,
 )
@@ -120,12 +121,16 @@ class EngineRunContext:
         self,
         *,
         engine_name: str,
+        answer: str | None = None,
         result: Any = None,
+        evidence: EvidenceBundle | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> EngineOutput:
         return EngineOutput(
             engine_name=engine_name,
+            answer=answer,
             result=result,
+            evidence=evidence,
             trace=self.trace,
             metadata=metadata or {},
         )

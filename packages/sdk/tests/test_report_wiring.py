@@ -8,6 +8,7 @@ from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     EngineOutput,
     EngineTrace,
+    EvidenceBundle,
     ExecutionSpec,
     InterfaceDefinition,
     PreparedExecution,
@@ -39,7 +40,9 @@ class _FakeEngine:
         del spec, corpus_package, runtime, user_context
         return EngineOutput(
             engine_name=self.name,
+            answer="<html><body>Report</body></html>",
             result="<html><body>Report</body></html>",
+            evidence=EvidenceBundle(sources=["sales.csv"]),
             trace=EngineTrace(),
             metadata={
                 "report_format": "html",
@@ -314,8 +317,6 @@ def load_rows(path: str) -> list[dict]:
             spec_builder=object(),
             spec_confirmation=object(),
             engine_registry=_FakeRegistry(engine),
-            evidence_collector=object(),
-            synthesizer=object(),
             include_evidence=False,
         )
         query = UserQuery(text="Create a report")
@@ -342,6 +343,36 @@ def load_rows(path: str) -> list[dict]:
             response.metadata["rendered_reports"][0]["format"],
             "html",
         )
+
+    def test_pipeline_uses_engine_artifact_as_final_response_with_evidence(self):
+        engine = _FakeEngine()
+        pipeline = DataIntelligencePipeline(
+            intent_analyzer=object(),
+            spec_builder=object(),
+            spec_confirmation=object(),
+            engine_registry=_FakeRegistry(engine),
+        )
+        query = UserQuery(text="Create a report")
+        corpus = DataCorpusPackage(sources=["sales.csv"])
+        spec = ExecutionSpec(
+            intent="report",
+            objective=query.text,
+            confirmed=True,
+            engine_hint="report",
+        )
+        prepared = PreparedExecution(
+            query=query,
+            intent="report",
+            corpus_package=corpus,
+            spec=spec,
+        )
+
+        response = pipeline.execute_confirmed_spec(prepared, spec)
+
+        self.assertEqual(response.answer, "<html><body>Report</body></html>")
+        self.assertEqual(response.evidence, EvidenceBundle(sources=["sales.csv"]))
+        self.assertEqual(response.metadata["engine_name"], "report")
+        self.assertEqual(response.metadata["report_format"], "html")
 
     def test_request_sandbox_executor_calls_generated_function_with_staged_path(self):
         session = _FakeSandboxSession()

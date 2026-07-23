@@ -98,8 +98,6 @@ class IntentGuidedSpecBuilderTests(unittest.TestCase):
             spec_builder=spec_builder,
             spec_confirmation=object(),
             engine_registry=object(),
-            evidence_collector=object(),
-            synthesizer=object(),
         )
 
         prepared = pipeline.prepare_spec(

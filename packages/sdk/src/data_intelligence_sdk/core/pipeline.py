@@ -8,6 +8,7 @@ from typing import Any
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
+    EngineOutput,
     ExecutionSpec,
     FinalResponse,
     PreparedExecution,
@@ -43,8 +44,6 @@ class DataIntelligencePipeline:
         spec_builder: object,
         spec_confirmation: object,
         engine_registry: object,
-        evidence_collector: object,
-        synthesizer: object,
         mcp_client: MCPMethodClient | None = None,
         mcp_tools: tuple[MCPToolDefinition, ...] = (),
         interface_registry: object | None = None,
@@ -62,8 +61,6 @@ class DataIntelligencePipeline:
         self.spec_builder = spec_builder
         self.spec_confirmation = spec_confirmation
         self.engine_registry = engine_registry
-        self.evidence_collector = evidence_collector
-        self.synthesizer = synthesizer
         self.mcp_client = mcp_client
         self.mcp_tools = mcp_tools
         self.interface_registry = interface_registry
@@ -436,40 +433,10 @@ class DataIntelligencePipeline:
                 "method_call_count": len(output.trace.method_calls),
             },
         )
-        try:
-            if not self.include_evidence:
-                response = FinalResponse(
-                    answer=str(output.result),
-                    evidence=None,
-                    metadata={
-                        **dict(output.metadata),
-                        "engine_name": output.engine_name,
-                    },
-                )
-            else:
-                evidence = self.evidence_collector.collect(confirmed_spec, output)
-                self._log(
-                    "pipeline.evidence_collected",
-                    {
-                        "source_count": len(evidence.sources),
-                        "step_count": len(evidence.steps),
-                        "method_call_count": len(evidence.method_calls),
-                    },
-                )
-                response = self.synthesizer.synthesize(
-                    confirmed_spec,
-                    output,
-                    evidence,
-                )
-        except Exception as exc:
-            if run_artifact is not None:
-                run_artifact.finalize(
-                    status="failed",
-                    engine_name=output.engine_name,
-                    failure_phase="response_synthesis",
-                    error=_artifact_error(exc),
-                )
-            raise
+        response = _final_response_from_engine_output(
+            output,
+            include_evidence=self.include_evidence,
+        )
 
         artifact_ref = run_artifact.artifact_ref if run_artifact is not None else None
         if artifact_ref is not None:
@@ -545,3 +512,19 @@ def _artifact_error(exc: BaseException) -> str:
     """Persist only the exception type so runtime secrets are never serialized."""
 
     return f"{type(exc).__name__}: runtime phase failed"
+
+
+def _final_response_from_engine_output(
+    output: EngineOutput,
+    *,
+    include_evidence: bool,
+) -> FinalResponse:
+    answer = output.answer if output.answer is not None else output.result
+    return FinalResponse(
+        answer=str(answer),
+        evidence=output.evidence if include_evidence else None,
+        metadata={
+            **dict(output.metadata),
+            "engine_name": output.engine_name,
+        },
+    )

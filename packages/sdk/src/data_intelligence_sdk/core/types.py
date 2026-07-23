@@ -163,17 +163,19 @@ class EngineTrace:
 
 @dataclass(slots=True)
 class EngineOutput:
-    """Raw engine result plus the structured trace recorded during execution."""
+    """Engine-owned result artifact plus trace and response support material."""
 
     engine_name: str
+    answer: str | None = None
     result: Any = None
+    evidence: EvidenceBundle | None = None
     trace: EngineTrace = field(default_factory=EngineTrace)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class EvidenceBundle:
-    """Evidence and trace material synthesized around an engine run."""
+    """Evidence and trace material collected around an engine run."""
 
     sources: list[str] = field(default_factory=list)
     observations: list[dict[str, Any]] = field(default_factory=list)
