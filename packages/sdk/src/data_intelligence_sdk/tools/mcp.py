@@ -54,15 +54,3 @@ def _create_mcp_tool(
 
 def create_mcp_tools(runtime: EngineRuntimeContext) -> list[BaseTool]:
     return [_create_mcp_tool(runtime, definition) for definition in runtime.mcp_tools]
-
-
-def mcp_catalog_prompt(runtime: EngineRuntimeContext) -> list[dict[str, Any]]:
-    return [
-        {
-            "name": definition.name,
-            "description": definition.description,
-            "input_schema": definition.input_schema,
-            "capability_names": list(definition.capability_names),
-        }
-        for definition in runtime.mcp_tools
-    ]

@@ -31,7 +31,6 @@ from data_intelligence_sdk.runtime.mcp_client import MCPToolError
 from data_intelligence_sdk.tools import (
     create_execute_python_tool,
     create_mcp_tools,
-    mcp_catalog_prompt,
 )
 
 AgentFactory = Callable[..., object]
@@ -320,7 +319,7 @@ class GeneralPurposeEngine:
             }
             for source in corpus_package.sources
         ]
-        catalog = mcp_catalog_prompt(runtime)
+        method_hub_enabled = runtime.has_mcp_tools
         method_hub_instructions = (
             "Method Hub is enabled. For one tool operation, call the matching "
             "Method Hub tool directly. For multiple tool calls or any "
@@ -333,7 +332,7 @@ class GeneralPurposeEngine:
             "indexed corpus, prefer `corpus_retrieve_context` and answer from "
             "its returned chunks. Use retrieval tools instead of previewing an "
             "entire dataset when only relevant context is needed.\n\n"
-            if catalog
+            if method_hub_enabled
             else (
                 "Method Hub is disabled. Use execute_python when the request "
                 "requires data inspection, calculation, or code execution, and "

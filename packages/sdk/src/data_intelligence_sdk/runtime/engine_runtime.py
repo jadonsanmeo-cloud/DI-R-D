@@ -38,3 +38,9 @@ class EngineRuntimeContext:
         """Return capabilities for the active request sandbox, when provisioned."""
 
         return self.sandbox.environment if self.sandbox is not None else None
+
+    @property
+    def has_mcp_tools(self) -> bool:
+        """Return whether remote MCP tools are available for this request."""
+
+        return self.mcp_client is not None and bool(self.mcp_tools)
