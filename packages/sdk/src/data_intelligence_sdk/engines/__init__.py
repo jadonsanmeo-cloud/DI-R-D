@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from data_intelligence_sdk.core.types import EngineInput, EngineOutput
 from data_intelligence_sdk.engines.base import Engine
 
 if TYPE_CHECKING:  # pragma: no cover - import-time convenience only.
     from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 
-__all__ = ["Engine", "GeneralPurposeEngine"]
+__all__ = ["Engine", "EngineInput", "EngineOutput", "GeneralPurposeEngine"]
 
 
 def __getattr__(name: str) -> object:

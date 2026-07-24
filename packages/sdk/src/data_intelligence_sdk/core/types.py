@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from data_intelligence_sdk.intent import IntentAnalysis
+    from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 
 Intent = Literal["reason", "report", "general", "unknown"]
 SUPPORTED_INTENTS: tuple[Intent, ...] = (
@@ -124,6 +125,16 @@ class ExecutionSpec:
     constraints: dict[str, Any] = field(default_factory=dict)
     confirmed: bool = False
     engine_hint: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EngineInput:
+    """Runtime request state passed to an engine implementation."""
+
+    query: UserQuery
+    spec: ExecutionSpec
+    runtime: EngineRuntimeContext
+    user_context: UserContext | None = None
 
 
 @dataclass(slots=True)

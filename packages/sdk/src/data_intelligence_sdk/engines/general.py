@@ -19,10 +19,9 @@ from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
+    EngineInput,
     EngineOutput,
     ExecutionSpec,
-    UserContext,
 )
 from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
 from data_intelligence_sdk.runtime.deep_agent_backend import DeepAgentSandboxBackend
@@ -156,20 +155,13 @@ class GeneralPurposeEngine:
             model=resolved_model,
         )
 
-    def can_handle(self, spec: ExecutionSpec) -> bool:
-        return spec.intent in {
-            "reason",
-            "general",
-            "unknown",
-        }
-
     def run(
         self,
-        spec: ExecutionSpec,
-        corpus_package: DataCorpusPackage,
-        runtime: EngineRuntimeContext,
-        user_context: UserContext | None = None,
+        input: EngineInput,
     ) -> EngineOutput:
+        spec = input.spec
+        runtime = input.runtime
+        user_context = input.user_context
         del user_context
         if runtime.sandbox is None:
             raise RuntimeError(
@@ -180,7 +172,6 @@ class GeneralPurposeEngine:
             "deep_agent_started",
             inputs={
                 "objective": spec.objective,
-                "source_paths": runtime.sandbox.source_paths,
             },
         )
         execute_python = create_execute_python_tool(runtime)
@@ -190,7 +181,7 @@ class GeneralPurposeEngine:
             model=self.llm,
             tools=[*mcp_tools, execute_python],
             middleware=[_recover_tool_errors],
-            system_prompt=self._system_prompt(spec, corpus_package, runtime),
+            system_prompt=self._system_prompt(spec, runtime),
             backend=DeepAgentSandboxBackend(runtime.sandbox),
             subagents=[],
             name="general-purpose",
@@ -247,8 +238,7 @@ class GeneralPurposeEngine:
             engine_name=self.name,
             result=answer,
             metadata={
-                "sources": list(corpus_package.sources),
-                "sandbox_sources": dict(runtime.sandbox.source_paths),
+                "objective": spec.objective,
             },
         )
 
@@ -307,18 +297,8 @@ class GeneralPurposeEngine:
     def _system_prompt(
         self,
         spec: ExecutionSpec,
-        corpus_package: DataCorpusPackage,
         runtime: EngineRuntimeContext,
     ) -> str:
-        if runtime.sandbox is None:
-            raise RuntimeError("The request sandbox is unavailable.")
-        source_payload = [
-            {
-                "original": source,
-                "sandbox_path": runtime.sandbox.source_paths.get(source),
-            }
-            for source in corpus_package.sources
-        ]
         method_hub_enabled = runtime.has_mcp_tools
         method_hub_instructions = (
             "Method Hub is enabled. For one tool operation, call the matching "
@@ -341,17 +321,15 @@ class GeneralPurposeEngine:
             )
         )
         return (
-            "You are the only analysis agent for this request. Use the staged "
-            "data and available tools to answer the objective.\n\n"
+            "You are the only analysis agent for this request. Use the "
+            "available tools to answer the objective.\n\n"
             f"{method_hub_instructions}"
-            "When using tools or staged data, base the final answer only on "
+            "When using tools, base the final answer only on "
             "successful tool or sandbox output and never invent data. If an "
             "execution fails, inspect the structured error and correct the next "
             "attempt.\n\n"
             f"Objective: {spec.objective}\n"
-            f"Constraints: {json.dumps(spec.constraints, default=str)}\n"
-            "Staged sources:\n"
-            f"{json.dumps(source_payload, indent=2, default=str)}"
+            f"Constraints: {json.dumps(spec.constraints, default=str)}"
         )
 
 

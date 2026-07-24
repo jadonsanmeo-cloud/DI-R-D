@@ -293,9 +293,7 @@ class SpecEchoEngine:
 
     name = "spec_echo"
 
-    def can_handle(self, spec: ExecutionSpec) -> bool:
-        del spec
-        return True
+
 
     def run(
         self,

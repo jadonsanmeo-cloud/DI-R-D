@@ -304,12 +304,6 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(len(errors), 1)
         self.assertIn("must not catch read or parser errors", errors[0])
 
-    def test_general_engine_does_not_claim_report_specs(self):
-        engine = object.__new__(GeneralPurposeEngine)
-        spec = ExecutionSpec(intent="report", objective="Create a report")
-
-        self.assertFalse(engine.can_handle(spec))
-
     def test_pipeline_preserves_report_metadata_without_evidence(self):
         engine = _FakeEngine()
         pipeline = DataIntelligencePipeline(

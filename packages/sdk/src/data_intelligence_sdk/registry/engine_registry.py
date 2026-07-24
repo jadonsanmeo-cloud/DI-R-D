@@ -24,7 +24,7 @@ class EngineRegistry(Protocol):
 
 
 class InMemoryEngineRegistry:
-    """In-memory engine registry with optional agent-backed selection."""
+    """In-memory engine registry that delegates selection when configured."""
 
     def __init__(
         self,
@@ -64,10 +64,6 @@ class InMemoryEngineRegistry:
                 return self._fallback(spec)
             selected = self._engines.get(selected_name)
             return selected if selected is not None else self._fallback(spec)
-
-        for engine in self._engines.values():
-            if engine.can_handle(spec):
-                return engine
 
         return self._fallback(spec)
 

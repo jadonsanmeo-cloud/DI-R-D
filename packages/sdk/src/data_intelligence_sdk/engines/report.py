@@ -5408,8 +5408,6 @@ class ReportEngine:
             model=resolved_model,
         )
 
-    def can_handle(self, spec: ExecutionSpec) -> bool:
-        return spec.intent == "report"
 
     def run(
         self,

@@ -13,10 +13,7 @@ def langsmith_tracing_enabled() -> bool:
     """Return whether explicit LangSmith tracing is enabled."""
 
     return os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower() in {
-        "1",
         "true",
-        "yes",
-        "on",
     }
 
 

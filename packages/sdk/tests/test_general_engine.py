@@ -3,10 +3,11 @@ from __future__ import annotations
 import unittest
 from collections.abc import Callable
 from dataclasses import dataclass
+from inspect import signature
 from typing import cast
 from unittest.mock import patch
 
-from data_intelligence_sdk.core.types import DataCorpusPackage, ExecutionSpec
+from data_intelligence_sdk.core.types import EngineInput, ExecutionSpec, UserQuery
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.sandbox import EngineSandboxSession
@@ -59,14 +60,9 @@ def make_spec() -> ExecutionSpec:
     )
 
 
-def make_corpus() -> DataCorpusPackage:
-    return DataCorpusPackage(sources=["document.md"])
-
-
 def make_runtime() -> EngineRuntimeContext:
     sandbox = EngineSandboxSession(
         sandbox=object(),
-        source_paths={"document.md": "/workspace/input/document.md"},
     )
     return EngineRuntimeContext(
         sandbox=sandbox,
@@ -106,11 +102,36 @@ def run_engine(
     engine: GeneralPurposeEngine,
     runtime: EngineRuntimeContext,
 ):
+    spec = make_spec()
     with patch.object(engine, "_register_minimal_profile"):
-        return engine.run(make_spec(), make_corpus(), runtime)
+        return engine.run(
+            EngineInput(
+                query=UserQuery(text=spec.objective),
+                spec=spec,
+                runtime=runtime,
+            )
+        )
 
 
 class GeneralPurposeEngineRecoveryTests(unittest.TestCase):
+    def test_run_accepts_engine_input(self) -> None:
+        parameters = list(signature(GeneralPurposeEngine.run).parameters)
+
+        self.assertEqual(parameters, ["self", "input"])
+
+    def test_system_prompt_accepts_runtime_without_sources(self) -> None:
+        parameters = list(signature(GeneralPurposeEngine._system_prompt).parameters)
+
+        self.assertEqual(parameters, ["self", "spec", "runtime"])
+
+    def test_system_prompt_does_not_describe_sandbox_files(self) -> None:
+        engine = object.__new__(GeneralPurposeEngine)
+
+        prompt = engine._system_prompt(make_spec(), EngineRuntimeContext())
+
+        self.assertNotIn("Staged sources", prompt)
+        self.assertNotIn("sandbox_path", prompt)
+
     def test_non_empty_answer_with_successful_execution_returns_without_retry(
         self,
     ) -> None:

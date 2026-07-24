@@ -15,10 +15,6 @@ from data_intelligence_sdk.registry.engine_selector import (
 class FakeEngine:
     name: str
     description: str
-    supported_intent: str
-
-    def can_handle(self, spec: ExecutionSpec) -> bool:
-        return spec.intent == self.supported_intent
 
 
 class StaticSelector:
@@ -88,12 +84,10 @@ class EngineRegistryTests(unittest.TestCase):
         self.general = FakeEngine(
             "general_purpose",
             "General exploratory analysis and code execution.",
-            "general",
         )
         self.report = FakeEngine(
             "report",
             "Structured reports, charts, and report templates.",
-            "report",
         )
 
     def make_registry(self, selector: object) -> InMemoryEngineRegistry:
@@ -113,6 +107,15 @@ class EngineRegistryTests(unittest.TestCase):
         )
 
         self.assertIs(selected, self.report)
+
+    def test_agent_selection_uses_registered_engine_name(self) -> None:
+        selected_engine = FakeEngine("custom", "Selected by name.")
+        registry = InMemoryEngineRegistry(selector=StaticSelector("custom"))
+        registry.register(selected_engine)
+
+        selected = registry.select(make_spec())
+
+        self.assertIs(selected, selected_engine)
 
     def test_unknown_agent_selection_falls_back_to_general_purpose(self) -> None:
         registry = self.make_registry(StaticSelector("missing"))
@@ -143,6 +146,14 @@ class EngineRegistryTests(unittest.TestCase):
         registry.set_fallback(self.general)
 
         selected = registry.select(make_spec(intent="unknown"))
+
+        self.assertIs(selected, self.general)
+
+    def test_no_selector_uses_fallback_without_engine_self_routing(self) -> None:
+        registry = InMemoryEngineRegistry(fallback_engine=self.general)
+        registry.register(self.report)
+
+        selected = registry.select(make_spec(intent="report"))
 
         self.assertIs(selected, self.general)
 
