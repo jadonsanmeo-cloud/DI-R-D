@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, suppress
+from dataclasses import asdict
+import json
 import os
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+import httpx
+
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
     DataCorpusPackage,
+    EngineInput,
+    EngineOutput,
+    EngineTrace,
+    EvidenceBundle,
     ExecutionSpec,
     Intent,
     SessionContext,
@@ -41,6 +49,8 @@ from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDef
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
 from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
+
+DEFAULT_QUERYAI_REASON_URL = "http://localhost:7205/query"
 
 def _env_flag(name: str, *, default: bool) -> bool:
     raw_value = os.environ.get(name)
@@ -399,6 +409,65 @@ class ExampleSpecConfirmation:
 
 
 
+class QueryAIRemoteReasonEngine:
+    """Reasoning engine backed by the QueryAI workflow HTTP API."""
+
+    name = "reason"
+    description = (
+        "Remote QueryAI reason engine for question answering, retrieval, "
+        "table checks, and code-draft workflows."
+    )
+
+    def __init__(
+        self,
+        *,
+        endpoint: str = DEFAULT_QUERYAI_REASON_URL,
+        timeout_seconds: float = 300.0,
+    ) -> None:
+        self.endpoint = endpoint
+        self.timeout_seconds = timeout_seconds
+
+    def run(self, input: EngineInput) -> EngineOutput:
+        spec_text = json.dumps(asdict(input.spec), ensure_ascii=False, sort_keys=True)
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                response = client.post(
+                    self.endpoint,
+                    json={"query": input.query.text, "spec": spec_text},
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except httpx.HTTPError as exc:
+            raise RuntimeError(
+                "QueryAI reason engine request failed. Ensure the QueryAI workflow "
+                f"server is reachable at {self.endpoint}. When the API runs in "
+                "Docker, set QUERYAI_REASON_ENDPOINT to a host-reachable URL such "
+                "as http://host.docker.internal:7205/query."
+            ) from exc
+
+        final_answer = str(payload.get("final_answer") or "")
+        raw_evidence = payload.get("evidence")
+        evidence_sources = (
+            [str(item) for item in raw_evidence]
+            if isinstance(raw_evidence, list)
+            else []
+        )
+        run_id = payload.get("run_id")
+        return EngineOutput(
+            engine_name=self.name,
+            answer=final_answer,
+            result=final_answer,
+            evidence=EvidenceBundle(sources=evidence_sources),
+            trace=EngineTrace(),
+            metadata={
+                "engine_name": self.name,
+                "remote_engine": "queryai",
+                "queryai_run_id": str(run_id) if run_id is not None else None,
+                "queryai_endpoint": self.endpoint,
+                "evidence": evidence_sources,
+            },
+        )
+
 def create_example_pipeline(
     *,
     engine: object | None = None,
@@ -423,6 +492,7 @@ def create_example_pipeline(
     artifact_store: object | None = None,
     logger: RuntimeLogger | None = None,
     intent_service_base_url: str | None = None,
+    queryai_reason_endpoint: str | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
     resolved_method_hub_enabled = (
@@ -465,6 +535,13 @@ def create_example_pipeline(
             )
     uses_default_engine = engine is None
     if uses_default_engine:
+        reason_engine = QueryAIRemoteReasonEngine(
+            endpoint=(
+                queryai_reason_endpoint
+                or os.environ.get("QUERYAI_REASON_ENDPOINT")
+                or DEFAULT_QUERYAI_REASON_URL
+            )
+        )
         if llm is not None:
             general_engine = GeneralPurposeEngine(llm=llm)
             report_engine = ReportEngine(
@@ -500,6 +577,7 @@ def create_example_pipeline(
             fallback_engine_name=general_engine.name,
         )
         registry.register(general_engine)
+        registry.register(reason_engine)
         registry.register(report_engine)
     else:
         registry = InMemoryEngineRegistry(fallback_engine=engine)
@@ -522,7 +600,7 @@ def create_example_pipeline(
         sandbox_executor=sandbox_executor,
         sandbox_provider=sandbox_provider,
         artifact_store=artifact_store,
-        include_evidence=False,
+        include_evidence=True,
         logger=logger,
     )
 

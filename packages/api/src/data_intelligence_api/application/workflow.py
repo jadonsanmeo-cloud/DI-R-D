@@ -42,7 +42,7 @@ PipelineFactory = Callable[..., DataIntelligencePipeline]
 
 ENGINE_ROUTE_MAP = {
     "general": "general_purpose",
-    "reason": "general_purpose",
+    "reason": "reason",
     "report": "report",
 }
 
