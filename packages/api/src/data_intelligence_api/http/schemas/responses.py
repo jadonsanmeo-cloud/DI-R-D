@@ -15,6 +15,7 @@ class DataCorpusPackageRequest(BaseModel):
 
 class RuntimeOptionsRequest(BaseModel):
     method_hub_enabled: bool | None = None
+    engine: Literal["auto", "general", "reason", "report"] | None = None
 
 
 class MethodHubCapabilityResponse(BaseModel):

@@ -1,12 +1,8 @@
-"""Application workflow wiring around the Data Intelligence SDK.
-
-Concrete analyzer/spec/evidence/synthesis behavior belongs to the API application.
-"""
+"""Application workflow wiring around the Data Intelligence SDK."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager, suppress
-from dataclasses import asdict, is_dataclass
 import os
 from pathlib import Path
 from typing import Any
@@ -16,10 +12,7 @@ from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
     DataCorpusPackage,
-    EngineOutput,
-    EvidenceBundle,
     ExecutionSpec,
-    FinalResponse,
     Intent,
     SessionContext,
     UserContext,
@@ -55,13 +48,6 @@ def _env_flag(name: str, *, default: bool) -> bool:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
-
-def _as_result_dict(value: Any) -> dict[str, Any]:
-    if is_dataclass(value):
-        return asdict(value)
-    if isinstance(value, dict):
-        return value
-    return {"result": value}
 
 
 class _ReportDefaultsSpecBuilder:
@@ -411,34 +397,6 @@ class ExampleSpecConfirmation:
         return spec
 
 
-class ExampleEvidenceCollector:
-    def collect(self, spec: ExecutionSpec, output: EngineOutput) -> EvidenceBundle:
-        metadata = output.metadata
-        return EvidenceBundle(
-            sources=list(metadata.get("sources", spec.data_requirements)),
-            observations=list(metadata.get("observations", [])),
-            steps=list(output.trace.steps),
-            method_calls=list(output.trace.method_calls),
-            interface_defs=list(metadata.get("interface_defs", [])),
-            sandbox_results=[
-                _as_result_dict(result)
-                for result in metadata.get("sandbox_results", [])
-            ],
-            artifact_refs=list(output.trace.artifact_refs),
-            log_refs=list(output.trace.log_refs),
-        )
-
-
-class ExampleSynthesizer:
-    def synthesize(
-        self, spec: ExecutionSpec, output: EngineOutput, evidence: EvidenceBundle
-    ) -> FinalResponse:
-        del spec
-        return FinalResponse(
-            answer=str(output.result),
-            evidence=evidence,
-            metadata={"engine_name": output.engine_name},
-        )
 
 
 def create_example_pipeline(
@@ -557,8 +515,6 @@ def create_example_pipeline(
         spec_builder=spec_builder,
         spec_confirmation=ExampleSpecConfirmation(),
         engine_registry=registry,
-        evidence_collector=ExampleEvidenceCollector(),
-        synthesizer=ExampleSynthesizer(),
         mcp_client=mcp_client,
         mcp_tools=resolved_mcp_tools,
         interface_registry=interface_registry,

@@ -15,6 +15,7 @@ from data_intelligence_sdk.core.types import (
 @dataclass(frozen=True, slots=True)
 class WorkflowRuntimeOptions:
     method_hub_enabled: bool
+    engine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

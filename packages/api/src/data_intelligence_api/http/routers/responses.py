@@ -214,6 +214,12 @@ def _history_detail(
     method_hub_value = run.request_payload.get("runtime_options", {}).get(
         "method_hub_enabled"
     )
+    engine_value = run.request_payload.get("runtime_options", {}).get("engine")
+    restored_engine = (
+        engine_value
+        if engine_value in {"auto", "general", "reason", "report"}
+        else None
+    )
     metadata = run.response_metadata or {}
     return ResponseHistoryDetail(
         response_id=run.response_id,
@@ -223,7 +229,8 @@ def _history_detail(
         runtime_options=RuntimeOptionsRequest(
             method_hub_enabled=(
                 method_hub_value if isinstance(method_hub_value, bool) else False
-            )
+            ),
+            engine=restored_engine,
         ),
         output_text=run.output_text,
         evidence=run.evidence,
@@ -251,11 +258,15 @@ def _runtime_options_from_payload(
     *,
     default_enabled: bool,
 ) -> WorkflowRuntimeOptions:
-    raw_value = payload.get("runtime_options", {}).get("method_hub_enabled")
+    raw_options = payload.get("runtime_options", {})
+    raw_value = raw_options.get("method_hub_enabled")
+    raw_engine = raw_options.get("engine")
+    engine = raw_engine if raw_engine in {"general", "reason", "report"} else None
     return WorkflowRuntimeOptions(
         method_hub_enabled=(
             raw_value if isinstance(raw_value, bool) else default_enabled
-        )
+        ),
+        engine=engine,
     )
 
 
@@ -328,6 +339,7 @@ def create_responses_router(
                                 "method_hub_enabled": (
                                     invocation.runtime_options.method_hub_enabled
                                 ),
+                                "engine": invocation.runtime_options.engine or "auto",
                             },
                         },
                         prepared_execution=prepared_to_payload(prepared),
@@ -404,6 +416,11 @@ def create_responses_router(
                         run.request_payload,
                         default_enabled=settings.method_hub_default_enabled,
                     ).method_hub_enabled,
+                    "engine": _runtime_options_from_payload(
+                        run.request_payload,
+                        default_enabled=settings.method_hub_default_enabled,
+                    ).engine
+                    or "auto",
                 },
                 "expires_at": run.expires_at.isoformat(),
                 "error": (

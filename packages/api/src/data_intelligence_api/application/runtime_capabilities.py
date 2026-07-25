@@ -33,7 +33,8 @@ def resolve_runtime_options(
         if requested.method_hub_enabled is None
         else requested.method_hub_enabled
     )
-    return WorkflowRuntimeOptions(method_hub_enabled=enabled)
+    engine = None if requested.engine in (None, "auto") else requested.engine
+    return WorkflowRuntimeOptions(method_hub_enabled=enabled, engine=engine)
 
 
 def resolve_method_hub(
@@ -60,7 +61,9 @@ def resolve_method_hub(
 
 def method_hub_available(endpoint: str) -> bool:
     try:
-        MCPMethodClient(endpoint).connect()
+        client = MCPMethodClient(endpoint)
+        client.connect()
+        tuple(client.list_tools())
     except Exception:
         return False
     return True
