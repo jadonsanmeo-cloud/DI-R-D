@@ -94,14 +94,8 @@ class SpecBuilderPrompt:
         )
         task = {
             "mode": mode,
-            "query": _to_jsonable(spec_build_context.query),
-            "intent": spec_build_context.intent,
-            "spec_build_context": _to_jsonable(spec_build_context),
-            "selected_data_context": _to_jsonable(selected_data_context),
-            "corpus_summary": _to_jsonable(spec_build_context.corpus_summary),
-            "corpus_package": _to_jsonable(corpus_package),
-            "session_context": _to_jsonable(session_context),
-            "user_context": _to_jsonable(user_context),
+            "spec_context": _to_jsonable(spec_build_context),
+            "selected_data": _to_jsonable(selected_data_context),
             "previous_spec": _to_jsonable(previous_spec),
             "user_feedback": user_feedback,
         }
@@ -149,16 +143,15 @@ _SYSTEM_PROMPT = """You are the Spec Builder agent for a data intelligence pipel
 
 Create an ExecutionSpec draft from the provided context. Return only one JSON object.
 Do not execute the task, answer the user's question, or include markdown.
-Use spec_build_context as the task-local compacted context. It includes query,
-intent, corpus_summary, session_brief, user_brief, and deterministic task_hints.
-Use corpus_summary as the primary readable map of the available data. Use
-corpus_package only as the raw backing context.
-If selected_data_context is present, it is a hard boundary, not a suggestion:
-- data_requirements must equal selected_data_context.selected_sources;
-- scope tables must come only from selected_data_context.selected_tables;
-- scope vector collections must come only from selected_data_context.selected_vector_collections;
-- columns must come only from selected_data_context.selected_columns;
-- do not add metrics, group_by fields, tables, collections, or sources outside selected_data_context unless user_feedback explicitly asks for a revision.
+Use spec_context as the task-local compacted context. It includes query, intent,
+corpus_summary, session_brief, and user_brief. Use its corpus_summary as the
+primary readable map of the available data.
+If selected_data is present, it is a hard boundary, not a suggestion:
+- data_requirements must equal selected_data.selected_sources;
+- scope tables must come only from selected_data.selected_tables;
+- scope vector collections must come only from selected_data.selected_vector_collections;
+- columns must come only from selected_data.selected_columns;
+- do not add metrics, group_by fields, tables, collections, or sources outside selected_data unless user_feedback explicitly asks for a revision.
 
 ExecutionSpec JSON contract:
 {
@@ -180,7 +173,7 @@ ExecutionSpec JSON contract:
 
 Field rules:
 - objective: rewrite the user request into one clear executable objective.
-- data_requirements: include only source refs from corpus_package.sources, corpus_summary.sources, or refs explicitly present in corpus metadata.
+- data_requirements: include only source refs from spec_context.corpus_summary.sources or refs explicitly present in its corpus metadata.
 - capability_requirements: describe capabilities the engine/runtime must resolve; do not name concrete method calls unless the capability itself is method-specific.
 - constraints: structured task constraints such as filters, metrics, group_by, language, output_format, evidence_required, and scope.
 - engine_hint: use "report" for report tasks; otherwise use null unless a specific engine is clearly required.

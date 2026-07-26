@@ -14,7 +14,6 @@ from data_intelligence_sdk.spec.context import (
     SessionBrief,
     SpecBuildContext,
     SpecContextBuilder,
-    TaskHints,
     UserBrief,
     build_corpus_summary,
 )
@@ -32,6 +31,11 @@ from data_intelligence_sdk.spec.default_confirmation import (
     StaticSpecConfirmationProvider,
 )
 from data_intelligence_sdk.spec.llm_builder import LLMSpecBuilder
+from data_intelligence_sdk.spec.markdown import render_spec_markdown
+from data_intelligence_sdk.spec.markdown_builder import (
+    LLMMarkdownSpecBuilder,
+    validate_spec_markdown,
+)
 from data_intelligence_sdk.spec.prompts import DataSelectionPrompt, SpecBuilderPrompt
 
 __all__ = [
@@ -46,6 +50,9 @@ __all__ = [
     "LLMClusterSpecSelector",
     "LLMDataSelector",
     "LLMSpecBuilder",
+    "render_spec_markdown",
+    "LLMMarkdownSpecBuilder",
+    "validate_spec_markdown",
     "SelectedDataContext",
     "SessionBrief",
     "SpecBuilder",
@@ -53,7 +60,6 @@ __all__ = [
     "SpecBuildContext",
     "SpecConfirmation",
     "SpecContextBuilder",
-    "TaskHints",
     "UserBrief",
     "build_corpus_summary",
     "ConsoleSpecConfirmationProvider",

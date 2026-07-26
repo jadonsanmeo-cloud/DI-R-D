@@ -22,6 +22,7 @@ class ApiSettingsTests(unittest.TestCase):
         self.assertEqual(settings.spec_confirmation_ttl_seconds, 86400)
         self.assertEqual(settings.max_spec_revision_rounds, 5)
         self.assertIsNone(settings.model_config_path)
+        self.assertEqual(settings.default_organization_id, "test-org")
 
     def test_environment_overrides_are_normalized(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -34,6 +35,7 @@ class ApiSettingsTests(unittest.TestCase):
                     "DATABASE_URL": "postgresql://user:pass@db:5432/app",
                     "SPEC_CONFIRMATION_TTL_SECONDS": "600",
                     "MAX_SPEC_REVISION_ROUNDS": "7",
+                    "DEFAULT_ORGANIZATION_ID": "naph-org",
                 },
                 clear=True,
             ):
@@ -50,6 +52,7 @@ class ApiSettingsTests(unittest.TestCase):
         )
         self.assertEqual(settings.spec_confirmation_ttl_seconds, 600)
         self.assertEqual(settings.max_spec_revision_rounds, 7)
+        self.assertEqual(settings.default_organization_id, "naph-org")
 
     def test_model_config_path_loads_from_environment(self) -> None:
         with patch.dict(

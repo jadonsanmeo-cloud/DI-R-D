@@ -70,6 +70,29 @@ class SessionContext:
 
 
 @dataclass(slots=True)
+class PreprocessingStep:
+    """A governed preparation step resolved from the intent catalog."""
+
+    name: str
+    order: int
+    step_type: str
+    description: str | None = None
+    capability: str | None = None
+    required: bool = False
+    depends_on: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class IntentAnalysis:
+    """Normalized SDK intent plus its resolved catalog definition."""
+
+    intent: Intent
+    catalog_intent_id: str | None = None
+    preprocessing_steps: list[PreprocessingStep] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class PreparedExecution:
     """Prepared workflow state that can pause before engine selection."""
 
@@ -77,6 +100,20 @@ class PreparedExecution:
     intent: Intent
     corpus_package: DataCorpusPackage
     spec: "ExecutionSpec"
+    session_context: SessionContext | None = None
+    user_context: UserContext | None = None
+    run_artifact: Any | None = None
+    run_artifact_id: str | None = None
+    intent_analysis: IntentAnalysis | None = None
+
+
+@dataclass(slots=True)
+class PreparedMarkdownExecution:
+    """Prepared interactive Markdown awaiting confirmation."""
+
+    query: UserQuery
+    intent_analysis: IntentAnalysis
+    spec_markdown: str
     session_context: SessionContext | None = None
     user_context: UserContext | None = None
     run_artifact: Any | None = None
@@ -120,6 +157,7 @@ class ExecutionSpec:
     constraints: dict[str, Any] = field(default_factory=dict)
     confirmed: bool = False
     engine_hint: str | None = None
+    preprocessing_steps: list[PreprocessingStep] = field(default_factory=list)
 
 
 @dataclass(slots=True)

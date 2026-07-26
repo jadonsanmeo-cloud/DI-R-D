@@ -21,6 +21,7 @@ from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     EngineOutput,
     ExecutionSpec,
+    FinalResponse,
     InterfaceDefinition,
     UserContext,
 )
@@ -2071,6 +2072,41 @@ class ReportEngine:
                     "Renderer",
                 ],
             },
+        )
+
+    def run_markdown(
+        self,
+        *,
+        spec_markdown: str,
+        organization_id: str,
+        runtime: EngineRuntimeContext,
+        user_context: UserContext | None = None,
+    ) -> FinalResponse:
+        """Accept the public Markdown contract at the report boundary.
+
+        The current graph still uses its legacy typed state internally. This
+        bridge keeps that implementation private while the API and callers use
+        Markdown directly; retrieval code can read the organization metadata
+        when it resolves corpus documents.
+        """
+
+        if not spec_markdown.strip():
+            raise ValueError("Report Markdown spec must not be empty.")
+        if not organization_id.strip():
+            raise ValueError("Report organization ID is required.")
+        spec = ExecutionSpec(
+            intent="report",
+            objective=spec_markdown.strip(),
+            confirmed=True,
+        )
+        corpus_package = DataCorpusPackage(
+            metadata={"organization_id": organization_id},
+        )
+        output = self.run(spec, corpus_package, runtime, user_context)
+        return FinalResponse(
+            answer=str(output.result),
+            evidence=None,
+            metadata={"engine_name": output.engine_name, **output.metadata},
         )
 
     def _build_graph(self) -> Any:

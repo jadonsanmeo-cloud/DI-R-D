@@ -14,12 +14,16 @@ from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
     ExecutionSpec,
     FinalResponse,
+    IntentAnalysis,
     PreparedExecution,
+    PreparedMarkdownExecution,
+    PreprocessingStep,
     SessionContext,
     UserContext,
     UserQuery,
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
+from data_intelligence_sdk.spec.markdown_builder import validate_spec_markdown
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import create_example_pipeline
 
 from data_intelligence_api.domain.workflow import WorkflowInvocation
@@ -73,14 +77,6 @@ def build_workflow_invocation(
             user_id=request.user_id,
             session_id=request.session_id,
         ),
-        corpus_package=DataCorpusPackage(
-            sources=resolve_sources(
-                request.data_corpus_package.sources,
-                data_corpus_root,
-            ),
-            schemas=request.data_corpus_package.schemas,
-            metadata=request.data_corpus_package.metadata,
-        ),
         session_context=SessionContext(session_id=request.session_id),
         user_context=UserContext(user_id=request.user_id),
     )
@@ -92,6 +88,7 @@ def default_pipeline_factory(*, logger: RuntimeLogger) -> DataIntelligencePipeli
         config_path=os.getenv("MODEL_CONFIG_PATH") or None,
         use_llm_spec_builder=True,
         intent_service_base_url=os.getenv("INTENT_SERVICE_BASE_URL") or None,
+        default_organization_id=os.getenv("DEFAULT_ORGANIZATION_ID", "test-org"),
     )
 
 
@@ -113,39 +110,88 @@ def prepare_workflow(
     invocation: WorkflowInvocation,
     logger: RuntimeLogger,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
-) -> PreparedExecution:
+) -> PreparedMarkdownExecution:
     pipeline = pipeline_factory(logger=logger)
-    return pipeline.prepare_spec(
+    return pipeline.prepare_markdown(
         invocation.query,
-        invocation.corpus_package,
         invocation.session_context,
         invocation.user_context,
     )
 
 
-def revise_workflow(
-    prepared: PreparedExecution,
-    previous_spec: ExecutionSpec,
-    feedback: str,
+def revise_markdown_workflow(
+    prepared: PreparedMarkdownExecution,
+    spec_markdown: str,
     logger: RuntimeLogger,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
-) -> ExecutionSpec:
-    pipeline = pipeline_factory(logger=logger)
-    return pipeline.revise_spec(prepared, previous_spec, feedback)
+) -> str:
+    del logger, pipeline_factory, prepared
+    return validate_spec_markdown(spec_markdown)
 
 
-def execute_prepared_workflow(
-    prepared: PreparedExecution,
-    confirmed_spec: ExecutionSpec,
+def execute_prepared_markdown_workflow(
+    prepared: PreparedMarkdownExecution,
+    spec_markdown: str,
     logger: RuntimeLogger,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
 ) -> FinalResponse:
     pipeline = pipeline_factory(logger=logger)
-    return pipeline.execute_confirmed_spec(prepared, confirmed_spec)
+    return pipeline.execute_confirmed_markdown(prepared, spec_markdown)
 
 
 def spec_to_payload(spec: ExecutionSpec) -> dict:
     return asdict(spec)
+
+
+def markdown_spec_to_payload(markdown: str) -> dict[str, str]:
+    return {"spec_markdown": validate_spec_markdown(markdown)}
+
+
+def markdown_spec_from_payload(payload: dict) -> str:
+    if set(payload) != {"spec_markdown"}:
+        raise ValueError("Legacy structured spec payloads are unsupported.")
+    return validate_spec_markdown(payload["spec_markdown"])
+
+
+def prepared_markdown_to_payload(prepared: PreparedMarkdownExecution) -> dict:
+    return {
+        "version": 2,
+        "query": asdict(prepared.query),
+        "intent_analysis": asdict(prepared.intent_analysis),
+        "session_context": asdict(prepared.session_context)
+        if prepared.session_context is not None
+        else None,
+        "user_context": asdict(prepared.user_context)
+        if prepared.user_context is not None
+        else None,
+        "run_artifact_id": prepared.run_artifact_id,
+    }
+
+
+def prepared_markdown_from_payload(payload: dict, spec_markdown: str) -> PreparedMarkdownExecution:
+    analysis_payload = payload.get("intent_analysis")
+    if not isinstance(analysis_payload, dict):
+        raise ValueError("Legacy prepared execution payloads are unsupported.")
+    session_payload = payload.get("session_context")
+    user_payload = payload.get("user_context")
+    return PreparedMarkdownExecution(
+        query=UserQuery(**payload["query"]),
+        intent_analysis=IntentAnalysis(
+            intent=analysis_payload["intent"],
+            catalog_intent_id=analysis_payload.get("catalog_intent_id"),
+            preprocessing_steps=[
+                PreprocessingStep(**item)
+                for item in analysis_payload.get("preprocessing_steps", [])
+            ],
+            metadata=dict(analysis_payload.get("metadata", {})),
+        ),
+        spec_markdown=markdown_spec_from_payload({"spec_markdown": spec_markdown}),
+        session_context=SessionContext(**session_payload)
+        if session_payload is not None
+        else None,
+        user_context=UserContext(**user_payload) if user_payload is not None else None,
+        run_artifact_id=payload.get("run_artifact_id"),
+    )
 
 
 def spec_from_payload(payload: dict) -> ExecutionSpec:
@@ -153,6 +199,10 @@ def spec_from_payload(payload: dict) -> ExecutionSpec:
         intent=payload["intent"],
         objective=payload["objective"],
         data_requirements=list(payload.get("data_requirements", [])),
+        preprocessing_steps=[
+            PreprocessingStep(**item)
+            for item in payload.get("preprocessing_steps", [])
+        ],
         capability_requirements=[
             CapabilityRequirement(**item)
             for item in payload.get("capability_requirements", [])
@@ -176,12 +226,31 @@ def prepared_to_payload(prepared: PreparedExecution) -> dict:
         if prepared.user_context is not None
         else None,
         "run_artifact_id": prepared.run_artifact_id,
+        "intent_analysis": (
+            asdict(prepared.intent_analysis)
+            if prepared.intent_analysis is not None
+            else None
+        ),
     }
 
 
 def prepared_from_payload(payload: dict, spec: ExecutionSpec) -> PreparedExecution:
     session_payload = payload.get("session_context")
     user_payload = payload.get("user_context")
+    analysis_payload = payload.get("intent_analysis")
+    intent_analysis = (
+        IntentAnalysis(
+            intent=analysis_payload["intent"],
+            catalog_intent_id=analysis_payload.get("catalog_intent_id"),
+            preprocessing_steps=[
+                PreprocessingStep(**item)
+                for item in analysis_payload.get("preprocessing_steps", [])
+            ],
+            metadata=dict(analysis_payload.get("metadata", {})),
+        )
+        if isinstance(analysis_payload, dict)
+        else IntentAnalysis(intent=payload["intent"])
+    )
     return PreparedExecution(
         query=UserQuery(**payload["query"]),
         intent=payload["intent"],
@@ -192,4 +261,5 @@ def prepared_from_payload(payload: dict, spec: ExecutionSpec) -> PreparedExecuti
         else None,
         user_context=UserContext(**user_payload) if user_payload is not None else None,
         run_artifact_id=payload.get("run_artifact_id"),
+        intent_analysis=intent_analysis,
     )

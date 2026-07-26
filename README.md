@@ -193,6 +193,89 @@ Example pipeline factories live in `examples.basic_workflow` as app-owned wiring
 
 Tests use fake engines or fake LLMs and do not call OpenRouter.
 
+### Prepare an execution spec only
+
+Use the preparation CLI when debugging intent resolution and spec generation.
+It validates the corpus sources, calls AXIOM Intent Service, builds the structured
+`ExecutionSpec`, and writes a deterministic Markdown view. It stops before
+confirmation, engine selection, sandbox provisioning, and execution.
+
+Prerequisites:
+
+- export `OPENROUTER_API_KEY` for the spec-builder model;
+- run AXIOM Intent Service on `http://localhost:8005` (the AXIOM development
+  compose maps `8005:8005`);
+- run the command from the `Data-Intelligence-SDK` repository root.
+
+PowerShell example using the checked-in NAPH corpus:
+
+```powershell
+uv run python scripts/prepare_spec.py `
+  --query "Summarize the available NAPH reports" `
+  --output .data/debug-spec/execution-spec.md `
+  --config configs/development/proxy-openrouter.toml `
+  --intent-service-url http://localhost:8005 `
+  --verbose
+```
+
+The output is written to `.data/debug-spec/execution-spec.md`. The CLI calls the
+same Markdown preparation path as the Responses API and stops before confirmation
+and engine execution. It does not require local source files or a corpus package.
+
+Useful lifecycle events include:
+
+- `pipeline.intent_analysis.started` / `pipeline.intent_analyzed`;
+- `spec.context_built`;
+- `spec.llm_attempt.started` / `spec.llm_attempt.completed`;
+- `spec.validation_retry` with only the safe exception type;
+- `spec_preparation.completed` and `markdown_write.completed`.
+
+The CLI returns a non-zero exit code and logs `<phase>.failed` on invalid source,
+intent-service, model, validation, or output-write failures. Logs redact fields
+whose names contain `api_key`, `password`, `secret`, or `token`.
+
+### Scheduled dashboard-report spec worker
+
+The scheduled spec worker is separate from the interactive query flow. Every
+cycle it reads the three newest indexed Corpus documents for one organization,
+using Corpus PostgreSQL `documents.created_at` as a temporary `ingested_at`
+value. It creates one direct Markdown prompt per seed document and skips an
+existing `<document-id>.md` file.
+
+This worker only creates specs. It does not call Intent Service, confirm a spec,
+run an engine, retrieve related documents, generate a report, or update the
+dashboard. Interactive Responses queries use a separate Markdown path.
+
+Run one cycle from Windows CMD:
+
+```cmd
+cd /d "E:\UET\Lab\Data Intelligence\Data-Intelligence-SDK"
+set CORPUS_DATABASE_URL=postgresql+psycopg://app_dev:app_dev_password@localhost:30433/corpus
+set CORPUS_ORGANIZATION_ID=test-org
+uv run python scripts\recent_spec_worker.py --once --verbose
+```
+
+Run continuously with the default 15-minute interval:
+
+```cmd
+cd /d "E:\UET\Lab\Data Intelligence\Data-Intelligence-SDK"
+set CORPUS_DATABASE_URL=postgresql+psycopg://app_dev:app_dev_password@localhost:30433/corpus
+set CORPUS_ORGANIZATION_ID=test-org
+uv run python scripts\recent_spec_worker.py --verbose
+```
+
+Default configuration:
+
+```env
+RECENT_SPEC_WORKER_INTERVAL_SECONDS=900
+RECENT_SPEC_WORKER_LIMIT=3
+RECENT_SPEC_OUTPUT_DIR=.data/scheduled-report-specs
+```
+
+Generated files are stored under `.data\scheduled-report-specs`. Use
+`--output-dir`, `--limit`, or `--interval-seconds` to override the defaults, and
+use `--once` when debugging or invoking the worker from Windows Task Scheduler.
+
 ### Optional LangSmith tracing
 
 LangChain/LangGraph runs and the custom OpenAI-compatible spec-builder client
@@ -259,28 +342,23 @@ Check health:
 curl http://127.0.0.1:8000/health
 ```
 
-Run a streaming response against a local corpus source:
+Create a response spec from the ingested organization corpus:
 
 ```bash
 curl --no-buffer \
   -H 'Content-Type: application/json' \
   -d '{
     "input": "What is the total revenue?",
-    "data_corpus_package": {
-      "sources": ["data/samples/data.csv"],
-      "schemas": {},
-      "metadata": {}
-    }
+    "session_id": "demo"
   }' \
   http://127.0.0.1:8000/api/v1/responses
 ```
 
-The workflow classifies queries as `reason`, `report`, or `general`; all three
-are routed to an appropriate registered engine. `unknown` remains available for
-legacy or invalid classifier output.
-The initial stream ends with `response.requires_confirmation` and includes a
-`response_id`, `confirmation_token`, revision, intent, and editable spec. No
-engine runs before this event is confirmed.
+The workflow asks Intent Service for intent metadata, generates direct Markdown,
+and ends with `response.requires_confirmation`. The event includes a
+`response_id`, `confirmation_token`, revision, intent metadata, and `spec_markdown`.
+No engine runs before confirmation; the Markdown instructs Report Engine to
+retrieve all relevant documents from the configured organization corpus.
 
 Revise the pending spec (repeat as needed):
 
@@ -288,7 +366,7 @@ Revise the pending spec (repeat as needed):
 curl -N http://127.0.0.1:8000/api/v1/responses/RESP_ID/decision \
   -H 'Content-Type: application/json' \
   -H 'X-Confirmation-Token: TOKEN' \
-  -d '{"action":"revise","revision":1,"feedback":"Use monthly totals"}'
+  -d '{"action":"revise","revision":1,"spec_markdown":"# Interactive Execution Spec\n\n## User Request\n\nWhat is the total revenue?\n\n## Intent\n\nReport.\n\n## Preparation Guidance\n\nFollow intent metadata.\n\n## Execution Instructions\n\nRetrieve every relevant ingested document.\n\n## Expected Output\n\nA cited Markdown report."}'
 ```
 
 Confirm and stream the answer/report:
@@ -333,18 +411,13 @@ Check API health:
 curl http://127.0.0.1:8000/health
 ```
 
-Run a streaming response:
+Run a streaming response from the ingested organization corpus:
 
 ```bash
 curl -N http://127.0.0.1:8000/api/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "input": "Analyze this dataset",
-    "data_corpus_package": {
-      "sources": ["data/samples/data.csv"],
-      "schemas": {},
-      "metadata": {}
-    },
     "session_id": "docker-test"
   }'
 ```

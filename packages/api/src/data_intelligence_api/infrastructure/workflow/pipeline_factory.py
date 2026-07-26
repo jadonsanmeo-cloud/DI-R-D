@@ -40,6 +40,7 @@ from data_intelligence_sdk.runtime.method_hub import MethodHub
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
+from data_intelligence_sdk.spec.markdown_builder import LLMMarkdownSpecBuilder
 from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
 
 
@@ -307,6 +308,8 @@ def create_example_pipeline(
     artifact_store: object | None = None,
     logger: RuntimeLogger | None = None,
     intent_service_base_url: str | None = None,
+    default_organization_id: str | None = None,
+    markdown_report_engine: object | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
     if artifact_store is None:
@@ -324,6 +327,7 @@ def create_example_pipeline(
                 spec_llm_client,
                 require_actionable_spec=True,
                 default_missing_requirements=True,
+                logger=logger,
             )
         else:
             spec_builder = ExampleSpecBuilder()
@@ -352,6 +356,11 @@ def create_example_pipeline(
         if intent_service_base_url
         else ExampleIntentAnalyzer()
     )
+    resolved_markdown_report_engine = markdown_report_engine
+    if resolved_markdown_report_engine is None:
+        resolved_markdown_report_engine = (
+            ReportEngine() if use_llm_spec_builder else engine
+        )
     return DataIntelligencePipeline(
         intent_analyzer=intent_analyzer,
         spec_builder=spec_builder,
@@ -368,6 +377,15 @@ def create_example_pipeline(
         artifact_store=artifact_store,
         include_evidence=False,
         logger=logger,
+        markdown_spec_builder=(
+            LLMMarkdownSpecBuilder(spec_llm_client)
+            if use_llm_spec_builder and spec_llm_client is not None
+            else None
+        ),
+        markdown_report_engine=resolved_markdown_report_engine,
+        default_organization_id=(
+            default_organization_id or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
+        ),
     )
 
 

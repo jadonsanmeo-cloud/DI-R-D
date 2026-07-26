@@ -37,15 +37,15 @@ from data_intelligence_api.application.workflow import (
     SourceValidationError,
     build_workflow_invocation,
     default_pipeline_factory,
-    execute_prepared_workflow,
+    execute_prepared_markdown_workflow,
     prepare_workflow,
-    prepared_from_payload,
-    prepared_to_payload,
-    revise_workflow,
-    spec_from_payload,
-    spec_to_payload,
+    prepared_markdown_from_payload,
+    prepared_markdown_to_payload,
+    revise_markdown_workflow,
+    markdown_spec_from_payload,
+    markdown_spec_to_payload,
 )
-from data_intelligence_sdk.core.types import ExecutionSpec, FinalResponse
+from data_intelligence_sdk.core.types import FinalResponse, PreparedMarkdownExecution
 
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ def _confirmation_payload(
     revision: int,
     token: str,
     intent_payload: dict,
-    spec_payload: dict,
+    spec_markdown: str,
     expires_at: datetime,
 ) -> dict:
     return {
@@ -127,7 +127,7 @@ def _confirmation_payload(
         "revision": revision,
         "confirmation_token": token,
         "intent": intent_payload,
-        "spec": spec_payload,
+        "spec_markdown": spec_markdown,
         "expires_at": expires_at.isoformat(),
     }
 
@@ -140,16 +140,6 @@ def _raise_store_error(error: Exception) -> None:
     if isinstance(error, RunConflictError):
         raise HTTPException(status_code=409, detail=str(error)) from error
     raise error
-
-
-def _edited_spec(payload: dict, intent: str) -> ExecutionSpec:
-    return spec_from_payload(
-        {
-            "intent": intent,
-            **payload,
-            "confirmed": False,
-        }
-    )
 
 
 def create_responses_router(
@@ -203,15 +193,18 @@ def create_responses_router(
                     )
                 elif isinstance(message, WorkflowResultMessage):
                     prepared = message.result
-                    spec_payload = spec_to_payload(prepared.spec)
-                    intent_payload = {"value": prepared.intent}
+                    spec_markdown = prepared.spec_markdown
+                    intent_payload = {
+                        "value": prepared.intent_analysis.intent,
+                        "catalog_intent_id": prepared.intent_analysis.catalog_intent_id,
+                    }
                     run_repository.create_pending(
                         response_id=response_id,
                         token_hash=hash_confirmation_token(confirmation_token),
                         request_payload=payload.model_dump(mode="json"),
-                        prepared_execution=prepared_to_payload(prepared),
+                        prepared_execution=prepared_markdown_to_payload(prepared),
                         intent_payload=intent_payload,
-                        spec_payload=spec_payload,
+                        spec_payload=markdown_spec_to_payload(spec_markdown),
                         user_id=payload.user_id,
                         session_id=payload.session_id,
                         expires_at=expires_at,
@@ -221,7 +214,7 @@ def create_responses_router(
                         revision=1,
                         token=confirmation_token,
                         intent_payload=intent_payload,
-                        spec_payload=spec_payload,
+                        spec_markdown=spec_markdown,
                         expires_at=expires_at,
                     )
                     yield encode_sse("response.requires_confirmation", confirmation)
@@ -243,7 +236,7 @@ def create_responses_router(
                 "status": run.status,
                 "revision": run.current_revision,
                 "intent": run.intent_payload,
-                "spec": run.spec_payload,
+                "spec_markdown": markdown_spec_from_payload(run.spec_payload),
                 "expires_at": run.expires_at.isoformat(),
                 "error": (
                     {"code": run.error_code, "message": run.error_message}
@@ -275,44 +268,24 @@ def create_responses_router(
         except Exception as error:
             _raise_store_error(error)
 
-        current_spec = spec_from_payload(run.spec_payload)
-        prepared = prepared_from_payload(run.prepared_execution, current_spec)
+        current_markdown = markdown_spec_from_payload(run.spec_payload)
+        prepared = prepared_markdown_from_payload(
+            run.prepared_execution,
+            current_markdown,
+        )
         messages: queue.Queue[object] = queue.Queue()
         event_logger = QueueRuntimeLogger(messages)
 
         if decision.action == "revise":
-            edited_payload = (
-                decision.edited_spec.model_dump(mode="json")
-                if decision.edited_spec is not None
-                else None
-            )
-            base_spec = (
-                _edited_spec(edited_payload, current_spec.intent)
-                if edited_payload is not None
-                else current_spec
-            )
-            feedback = (decision.feedback or "").strip()
+            requested_markdown = decision.spec_markdown or ""
 
             async def revision_stream() -> AsyncIterator[str]:
-                operation = (
-                    lambda: revise_workflow(
-                        prepared,
-                        base_spec,
-                        feedback,
-                        event_logger,
-                        pipeline_factory,
-                    )
-                    if feedback
-                    else lambda: base_spec
+                operation = lambda: revise_markdown_workflow(
+                    prepared,
+                    requested_markdown,
+                    event_logger,
+                    pipeline_factory,
                 )
-                if not feedback:
-                    operation = lambda: base_spec
-                    event_logger.log(
-                        "pipeline.spec_revision_started", {"structured_edit": True}
-                    )
-                    event_logger.log(
-                        "pipeline.spec_revised", {"objective": base_spec.objective}
-                    )
                 async for message in _stream_operation(
                     response_id=response_id,
                     messages=messages,
@@ -329,22 +302,14 @@ def create_responses_router(
                             "response.failed", _failed_payload(response_id, message)
                         )
                     elif isinstance(message, WorkflowResultMessage):
-                        revised_spec = message.result
-                        revised_spec.confirmed = False
-                        source = (
-                            "structured_edit_and_feedback"
-                            if edited_payload is not None and feedback
-                            else "structured_edit"
-                            if edited_payload is not None
-                            else "feedback_revision"
-                        )
+                        result_markdown = message.result
                         updated = run_repository.save_revision(
                             response_id,
                             previous_revision=decision.revision,
-                            spec_payload=spec_to_payload(revised_spec),
-                            source=source,
-                            feedback=feedback or None,
-                            edited_spec=edited_payload,
+                            spec_payload=markdown_spec_to_payload(result_markdown),
+                            source="markdown_edit",
+                            feedback=None,
+                            edited_spec=None,
                         )
                         yield encode_sse(
                             "response.requires_confirmation",
@@ -353,22 +318,26 @@ def create_responses_router(
                                 revision=updated.current_revision,
                                 token=confirmation_token,
                                 intent_payload=updated.intent_payload,
-                                spec_payload=updated.spec_payload,
+                                spec_markdown=markdown_spec_from_payload(
+                                    updated.spec_payload
+                                ),
                                 expires_at=updated.expires_at,
                             ),
                         )
 
             return StreamingResponse(revision_stream(), media_type="text/event-stream")
 
-        current_spec.confirmed = True
         run_repository.record_confirmation(response_id, decision.revision)
 
         async def execution_stream() -> AsyncIterator[str]:
             async for message in _stream_operation(
                 response_id=response_id,
                 messages=messages,
-                operation=lambda: execute_prepared_workflow(
-                    prepared, current_spec, event_logger, pipeline_factory
+                operation=lambda: execute_prepared_markdown_workflow(
+                    prepared,
+                    current_markdown,
+                    event_logger,
+                    pipeline_factory,
                 ),
                 settings=settings,
                 error_code="pipeline_execution_failed",

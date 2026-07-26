@@ -9,6 +9,8 @@ from data_intelligence_sdk.core.types import (
     ExecutionSpec,
     FinalResponse,
     Intent,
+    IntentAnalysis,
+    PreparedMarkdownExecution,
     PreparedExecution,
     SessionContext,
     UserContext,
@@ -52,6 +54,9 @@ class DataIntelligencePipeline:
         include_evidence: bool = True,
         logger: RuntimeLogger | None = None,
         max_spec_revision_rounds: int = 3,
+        markdown_spec_builder: object | None = None,
+        markdown_report_engine: object | None = None,
+        default_organization_id: str = "test-org",
     ) -> None:
         self.intent_analyzer = intent_analyzer
         self.spec_builder = spec_builder
@@ -71,6 +76,9 @@ class DataIntelligencePipeline:
         self.include_evidence = include_evidence
         self.logger = logger
         self.max_spec_revision_rounds = max_spec_revision_rounds
+        self.markdown_spec_builder = markdown_spec_builder
+        self.markdown_report_engine = markdown_report_engine
+        self.default_organization_id = default_organization_id
 
     def _log(self, event: str, payload: dict[str, object] | None = None) -> None:
         if self.logger is not None:
@@ -99,6 +107,7 @@ class DataIntelligencePipeline:
                 prepared.corpus_package,
                 prepared.session_context,
                 prepared.user_context,
+                prepared.intent_analysis,
             )
         except Exception as exc:
             if prepared.run_artifact is not None:
@@ -127,7 +136,6 @@ class DataIntelligencePipeline:
             self._log(
                 "pipeline.start",
                 {
-                    "query": query.text,
                     "source_count": len(corpus_package.sources),
                     "has_schema": bool(corpus_package.schemas),
                     "has_metadata": bool(corpus_package.metadata),
@@ -138,13 +146,30 @@ class DataIntelligencePipeline:
                     ),
                 },
             )
-            intent = self.intent_analyzer.analyze(
+            self._log("pipeline.intent_analysis.started")
+            analysis_result = self.intent_analyzer.analyze(
                 query, corpus_package, session_context, user_context
             )
-            self._log("pipeline.intent_analyzed", {"intent": intent})
+            intent_analysis = _normalize_intent_analysis(analysis_result)
+            intent = intent_analysis.intent
+            self._log(
+                "pipeline.intent_analyzed",
+                {
+                    "intent": intent,
+                    "catalog_intent_id": intent_analysis.catalog_intent_id,
+                    "preprocessing_step_count": len(
+                        intent_analysis.preprocessing_steps
+                    ),
+                    "preprocessing_step_names": [
+                        step.name for step in intent_analysis.preprocessing_steps
+                    ],
+                },
+            )
+            self._log("pipeline.spec_build.started")
             spec = self.spec_builder.build(
                 query, intent, corpus_package, session_context, user_context
             )
+            spec.preprocessing_steps = list(intent_analysis.preprocessing_steps)
             self._log(
                 "pipeline.spec_built",
                 {
@@ -173,6 +198,7 @@ class DataIntelligencePipeline:
             run_artifact_id=(
                 run_artifact.run_id if run_artifact is not None else None
             ),
+            intent_analysis=intent_analysis,
         )
 
     def revise_spec(
@@ -203,6 +229,9 @@ class DataIntelligencePipeline:
             session_context=prepared.session_context,
             user_context=prepared.user_context,
         )
+        revised.preprocessing_steps = list(
+            _prepared_intent_analysis(prepared).preprocessing_steps
+        )
         self._log(
             "pipeline.spec_revised",
             {
@@ -213,6 +242,60 @@ class DataIntelligencePipeline:
             },
         )
         return revised
+
+    def prepare_markdown(
+        self,
+        query: UserQuery,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> PreparedMarkdownExecution:
+        """Prepare a direct Markdown spec without a caller corpus package."""
+
+        if self.markdown_spec_builder is None:
+            raise RuntimeError("Markdown spec builder is not configured.")
+        empty_corpus = DataCorpusPackage()
+        analysis = _normalize_intent_analysis(
+            self.intent_analyzer.analyze(
+                query, empty_corpus, session_context, user_context
+            )
+        )
+        markdown = self.markdown_spec_builder.build(query, analysis)
+        return PreparedMarkdownExecution(
+            query=query,
+            intent_analysis=analysis,
+            spec_markdown=markdown,
+            session_context=session_context,
+            user_context=user_context,
+        )
+
+    def execute_confirmed_markdown(
+        self,
+        prepared: PreparedMarkdownExecution,
+        spec_markdown: str,
+    ) -> FinalResponse:
+        """Execute Markdown through the configured Report Engine boundary."""
+
+        if self.markdown_report_engine is None:
+            raise RuntimeError("Markdown report engine is not configured.")
+        runtime = EngineRuntimeContext(
+            run_context=EngineRunContext(),
+            mcp_client=self.mcp_client,
+            method_hub=self.method_hub or MethodHub(),
+            interface_registry=self.interface_registry,
+            interface_builder=self.interface_builder,
+            sandbox_executor=self.sandbox_executor,
+            artifact_store=self.artifact_store,
+            log_store=self.log_store,
+            resource_manager=self.resource_manager,
+            sandbox=None,
+            run_artifact=prepared.run_artifact,
+        )
+        return self.markdown_report_engine.run_markdown(
+            spec_markdown=spec_markdown,
+            organization_id=self.default_organization_id,
+            runtime=runtime,
+            user_context=prepared.user_context,
+        )
 
     def execute_confirmed_spec(
         self,
@@ -361,6 +444,7 @@ class DataIntelligencePipeline:
         corpus_package: DataCorpusPackage,
         session_context: SessionContext | None,
         user_context: UserContext | None,
+        intent_analysis: IntentAnalysis | None = None,
     ) -> ExecutionSpec:
         for _ in range(self.max_spec_revision_rounds + 1):
             confirmation_result = self.spec_confirmation.confirm(
@@ -380,6 +464,7 @@ class DataIntelligencePipeline:
                     spec=spec,
                     session_context=session_context,
                     user_context=user_context,
+                    intent_analysis=intent_analysis,
                 )
                 spec = self.revise_spec(
                     prepared,
@@ -396,3 +481,17 @@ def _artifact_error(exc: BaseException) -> str:
     """Persist only the exception type so runtime secrets are never serialized."""
 
     return f"{type(exc).__name__}: runtime phase failed"
+
+
+def _normalize_intent_analysis(value: object) -> IntentAnalysis:
+    if isinstance(value, IntentAnalysis):
+        return value
+    if isinstance(value, str):
+        return IntentAnalysis(intent=value)  # type: ignore[arg-type]
+    raise TypeError("Intent analyzer must return an Intent or IntentAnalysis.")
+
+
+def _prepared_intent_analysis(prepared: PreparedExecution) -> IntentAnalysis:
+    if prepared.intent_analysis is not None:
+        return prepared.intent_analysis
+    return IntentAnalysis(intent=prepared.intent)

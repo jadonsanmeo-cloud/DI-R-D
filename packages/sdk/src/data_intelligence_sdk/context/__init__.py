@@ -5,7 +5,6 @@ from data_intelligence_sdk.spec.context import (
     SessionBrief,
     SpecBuildContext,
     SpecContextBuilder,
-    TaskHints,
     UserBrief,
     build_corpus_summary,
 )
@@ -16,7 +15,6 @@ __all__ = [
     "SessionBrief",
     "SpecBuildContext",
     "SpecContextBuilder",
-    "TaskHints",
     "UserBrief",
     "UserContextStore",
     "build_corpus_summary",

@@ -12,11 +12,9 @@ from data_intelligence_api.infrastructure.persistence.memory.run_repository impo
     InMemoryRunRepository,
 )
 from data_intelligence_sdk.core.types import (
-    CapabilityRequirement,
-    EvidenceBundle,
-    ExecutionSpec,
     FinalResponse,
-    PreparedExecution,
+    IntentAnalysis,
+    PreparedMarkdownExecution,
 )
 
 
@@ -123,39 +121,32 @@ class FakePipeline:
         self.logger = logger
         self.factory = factory
 
-    def prepare_spec(self, query, corpus, session_context, user_context):
+    def prepare_markdown(self, query, session_context, user_context):
         self.factory.prepare_calls += 1
         self.logger.log("pipeline.start", {})
         self.logger.log("pipeline.intent_analyzed", {"intent": "reason"})
-        spec = ExecutionSpec(
-            intent="reason",
-            objective=query.text,
-            data_requirements=list(corpus.sources),
-            capability_requirements=[CapabilityRequirement(name="inspect_data")],
+        markdown = (
+            "# Interactive Execution Spec\n\n"
+            f"## User Request\n\n{query.text}\n\n"
+            "## Intent\n\nReport.\n\n"
+            "## Preparation Guidance\n\nRetrieve context.\n\n"
+            "## Execution Instructions\n\nRetrieve and cite sources.\n\n"
+            "## Expected Output\n\nMarkdown report.\n"
         )
-        self.logger.log("pipeline.spec_built", {"objective": spec.objective})
-        return PreparedExecution(query, "reason", corpus, spec, session_context, user_context)
-
-    def revise_spec(self, prepared, previous_spec, feedback):
-        self.factory.revise_calls += 1
-        self.logger.log("pipeline.spec_revision_started", {})
-        revised = ExecutionSpec(
-            intent=previous_spec.intent,
-            objective=f"{previous_spec.objective} ({feedback})",
-            data_requirements=list(previous_spec.data_requirements),
-            capability_requirements=list(previous_spec.capability_requirements),
+        return PreparedMarkdownExecution(
+            query=query,
+            intent_analysis=IntentAnalysis(intent="report"),
+            spec_markdown=markdown,
+            session_context=session_context,
+            user_context=user_context,
         )
-        self.logger.log("pipeline.spec_revised", {"objective": revised.objective})
-        return revised
 
-    def execute_confirmed_spec(self, prepared, confirmed_spec):
+    def execute_confirmed_markdown(self, prepared, spec_markdown):
         self.factory.execute_calls += 1
         self.logger.log("pipeline.spec_confirmed", {})
-        self.logger.log("pipeline.engine_selected", {"engine": "fake"})
         return FinalResponse(
-            answer=f"Answer for: {confirmed_spec.objective}",
-            evidence=EvidenceBundle(sources=list(prepared.corpus_package.sources)),
-            metadata={"engine_name": "fake"},
+            answer=f"Answer for: {spec_markdown}",
+            metadata={"engine_name": "report"},
         )
 
 
@@ -185,7 +176,6 @@ class BackendApiTests(unittest.TestCase):
                 "/api/v1/responses",
                 json_body={
                     "input": "What is total revenue?",
-                    "data_corpus_package": {"sources": [source]},
                     "session_id": "session-1",
                 },
             )
@@ -204,7 +194,8 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(events[-1][0], "response.requires_confirmation")
         self.assertEqual(confirmation["revision"], 1)
-        self.assertEqual(confirmation["spec"]["objective"], "What is total revenue?")
+        self.assertIn("What is total revenue?", confirmation["spec_markdown"])
+        self.assertNotIn("capability_requirements", confirmation)
         self.assertEqual(factory.execute_calls, 0)
 
     def test_revise_then_confirm_resumes_same_response(self):
@@ -221,7 +212,13 @@ class BackendApiTests(unittest.TestCase):
                     "POST",
                     f"/api/v1/responses/{response_id}/decision",
                     headers={"X-Confirmation-Token": token},
-                    json_body={"action": "revise", "revision": 1, "feedback": "Use monthly totals"},
+                    json_body={
+                        "action": "revise",
+                        "revision": 1,
+                        "spec_markdown": pending["spec_markdown"].replace(
+                            "What is total revenue?", "Use monthly totals"
+                        ),
+                    },
                 )
             )
             revision = parse_sse(revised)[-1][1]
@@ -237,13 +234,13 @@ class BackendApiTests(unittest.TestCase):
             events = parse_sse(confirmed)
 
         self.assertEqual(revision["revision"], 2)
-        self.assertIn("Use monthly totals", revision["spec"]["objective"])
+        self.assertIn("Use monthly totals", revision["spec_markdown"])
         self.assertEqual(events[-1][0], "response.completed")
         self.assertEqual(events[-1][1]["response_id"], response_id)
-        self.assertEqual(factory.revise_calls, 1)
+        self.assertEqual(factory.revise_calls, 0)
         self.assertEqual(factory.execute_calls, 1)
 
-    def test_structured_edit_can_be_revised_without_feedback(self):
+    def test_complete_markdown_can_be_revised(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir)
@@ -257,19 +254,14 @@ class BackendApiTests(unittest.TestCase):
                     json_body={
                         "action": "revise",
                         "revision": 1,
-                        "edited_spec": {
-                            "objective": "Compare monthly revenue",
-                            "data_requirements": pending["spec"]["data_requirements"],
-                            "capability_requirements": pending["spec"]["capability_requirements"],
-                            "constraints": {"currency": "USD"},
-                            "engine_hint": "analytics",
-                        },
+                        "spec_markdown": pending["spec_markdown"].replace(
+                            "What is total revenue?", "Compare monthly revenue"
+                        ),
                     },
                 )
             )
-        spec = parse_sse(response)[-1][1]["spec"]
-        self.assertEqual(spec["objective"], "Compare monthly revenue")
-        self.assertEqual(spec["constraints"], {"currency": "USD"})
+        spec_markdown = parse_sse(response)[-1][1]["spec_markdown"]
+        self.assertIn("Compare monthly revenue", spec_markdown)
 
     def test_recovery_requires_token_and_returns_pending_spec(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -291,12 +283,15 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
     def test_expired_confirmation_returns_gone(self):
-        now = datetime(2026, 7, 14, tzinfo=timezone.utc)
-        store = InMemoryRunRepository(clock=lambda: now + timedelta(days=2))
+        clock_now = [datetime.now(timezone.utc)]
+        store = InMemoryRunRepository(clock=lambda: clock_now[0])
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir, store=store)
             _, _, pending = self.create_pending(app)
+            clock_now[0] = (
+                datetime.fromisoformat(pending["expires_at"]) + timedelta(seconds=1)
+            )
             response = asyncio.run(asgi_request(app, "GET", f"/api/v1/responses/{pending['response_id']}", headers={"X-Confirmation-Token": pending["confirmation_token"]}))
         self.assertEqual(response.status_code, 410)
 

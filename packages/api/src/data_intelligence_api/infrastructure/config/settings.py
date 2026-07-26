@@ -27,6 +27,7 @@ class ApiSettings:
     openai_compatible_base_url: str = "http://localhost:20128/v1"
     openai_compatible_api_key: str = ""
     openai_compatible_model: str = "cx/gpt-5.5"
+    default_organization_id: str = "test-org"
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
@@ -74,4 +75,5 @@ class ApiSettings:
                 "OPENAI_COMPATIBLE_MODEL",
                 "cx/gpt-5.5",
             ),
+            default_organization_id=os.getenv("DEFAULT_ORGANIZATION_ID", "test-org"),
         )

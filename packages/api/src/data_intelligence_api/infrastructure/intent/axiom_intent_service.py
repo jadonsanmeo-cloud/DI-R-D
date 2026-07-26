@@ -10,10 +10,20 @@ import httpx
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     Intent,
+    IntentAnalysis,
+    PreprocessingStep,
     SessionContext,
     UserContext,
     UserQuery,
 )
+
+_PREPROCESSING_STEP_TYPES = {
+    "understand",
+    "clarify",
+    "resolve_context",
+    "retrieve_data",
+    "validate_data",
+}
 
 _ROLE_MAP = {
     "human": "user",
@@ -62,14 +72,33 @@ class AxiomIntentServiceAnalyzer:
         corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
-    ) -> Intent:
+    ) -> IntentAnalysis:
         del corpus_package, user_context
         payload = {
             "query": query.text,
             "history": _history_from_session_context(session_context),
         }
         response_payload = self._post_prediction(payload)
-        return _map_catalog_intent(response_payload.get("primary_intent"))
+        resolved_intent = response_payload.get("resolved_intent")
+        resolved_payload = resolved_intent if isinstance(resolved_intent, dict) else {}
+        catalog_intent_id = str(
+            resolved_payload.get("intent_id")
+            or response_payload.get("primary_intent")
+            or ""
+        ).strip()
+        catalog_metadata = resolved_payload.get("metadata")
+        return IntentAnalysis(
+            intent=_map_catalog_intent(response_payload.get("primary_intent")),
+            catalog_intent_id=catalog_intent_id or None,
+            preprocessing_steps=_extract_preprocessing_steps(resolved_payload),
+            metadata={
+                "catalog_metadata": (
+                    dict(catalog_metadata) if isinstance(catalog_metadata, dict) else {}
+                ),
+                "confidence": response_payload.get("confidence"),
+                "language": response_payload.get("language"),
+            },
+        )
 
     def _post_prediction(self, payload: dict[str, Any]) -> dict[str, Any]:
         client = self._client or httpx.Client(timeout=self.timeout_seconds)
@@ -122,3 +151,44 @@ def _map_catalog_intent(value: object) -> Intent:
     if intent_id == "unknown_intent":
         return "unknown"
     return "general"
+
+
+def _extract_preprocessing_steps(
+    resolved_intent: dict[str, Any],
+) -> list[PreprocessingStep]:
+    processing_steps = resolved_intent.get("processing_steps")
+    if not isinstance(processing_steps, dict):
+        return []
+
+    steps: list[PreprocessingStep] = []
+    for name, raw_step in processing_steps.items():
+        if not isinstance(raw_step, dict):
+            continue
+        step_type = str(raw_step.get("step_type") or "").strip()
+        if step_type not in _PREPROCESSING_STEP_TYPES:
+            continue
+        raw_dependencies = raw_step.get("depends_on")
+        dependencies = (
+            [str(value) for value in raw_dependencies]
+            if isinstance(raw_dependencies, list)
+            else []
+        )
+        steps.append(
+            PreprocessingStep(
+                name=str(name),
+                order=int(raw_step.get("order", 0)),
+                step_type=step_type,
+                description=_optional_string(raw_step.get("description")),
+                capability=_optional_string(raw_step.get("capability")),
+                required=bool(raw_step.get("required", False)),
+                depends_on=dependencies,
+            )
+        )
+    return sorted(steps, key=lambda step: (step.order, step.name))
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
