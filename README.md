@@ -155,7 +155,7 @@ uv run python -c "import data_intelligence_sdk, data_intelligence_api; print('Py
 
 Khởi động Sandbox Service từ AXIOM platform và bảo đảm endpoint trong
 `configs/proxy-openrouter.toml` truy cập được từ API. Mỗi QA request sẽ yêu cầu
-service tạo một request-scoped sandbox, stage input, chạy code và dọn runtime.
+service tạo một request-scoped sandbox, chạy generated code và dọn runtime.
 
 Image này chỉ tồn tại trên máy đã build. Người khác pull source từ GitHub vẫn phải
 chạy lại lệnh `docker build`.
@@ -356,13 +356,12 @@ implementations.
 ## Architecture Flow
 
 ```text
-User Query + DataCorpusPackage
+User Query
   -> Intent Analyzer
   -> Spec Builder
-  -> Engine Registry
-  -> GeneralPurposeEngine
-  -> one request-scoped AXIOM sandbox
-  -> one Deep Agent
+  -> Engine Registry (LLM-based selection)
+  -> EngineInput(query, spec, runtime, user_context)
+  -> selected Engine
        -> execute_python(code)
             -> persist code artifact
             -> sandbox.run(runtime runner)
@@ -373,19 +372,19 @@ User Query + DataCorpusPackage
 
 Supporting layers:
 
-- `runtime`: request orchestration, engine runtime context, logging, and the Deep Agents sandbox backend.
-- `sandbox`: one isolated AXIOM environment per request with staged input data and direct source execution.
+- `runtime`: request orchestration, `EngineRuntimeContext`, logging, MCP access, artifacts, and sandbox execution.
+- `sandbox`: one isolated AXIOM execution environment per request for generated code. It is not a staged file workspace for engine input data.
 - `artifacts`: one persistent filesystem bundle per pipeline invocation, containing every generated-code attempt and execution observation.
 - `context`: user and session context placeholders.
 
 ## Base Design Notes
 
-- `DataCorpusPackage` describes the available data universe for a task. It may contain source refs, schemas, semantic metadata, and policy metadata; it does not necessarily contain raw data.
+- `DataCorpusPackage` describes the available data universe for pipeline/spec-building and compatibility flows. Engines should not depend on direct access to it.
 - `DataHubContext` remains available as a compatibility alias for `DataCorpusPackage` during the transition.
 - `Intent` is a controlled string selected from `SUPPORTED_INTENTS`: `reason` for data questions, `report` for report generation, `general` for general-purpose queries handled by `GeneralPurposeEngine`, and `unknown` for classifier failures or legacy payloads. The spec carries the richer objective, constraints, and capability requirements.
 - `ExecutionSpec.capability_requirements` describes what the selected engine/runtime must resolve.
-- Engines receive an `EngineRuntimeContext`, which owns an `EngineRunContext` and the request-scoped sandbox session.
-- `GeneralPurposeEngine` contains one Deep Agent with request-scoped sandbox and optional Method Hub MCP capabilities.
+- Engines receive `EngineInput(query, spec, runtime, user_context)`. `runtime` owns the request-scoped `EngineRunContext`, sandbox session, MCP/tools, logs, and artifacts.
+- `GeneralPurposeEngine` contains one Deep Agent with request-scoped runtime tools and optional Method Hub MCP capabilities.
 - With Method Hub disabled, the agent uses `execute_python(code)`. With it enabled, simple operations use direct MCP tools while composed operations use `execute_python(code)` and the sandbox broker helper.
 - `EngineOutput` contains raw engine output plus `EngineTrace`.
 - `EvidenceBundle` uses engine trace, method calls, interface definitions, sandbox results, observations, artifact refs, and log refs for audit and final response generation.
@@ -393,7 +392,7 @@ Supporting layers:
 
 ## Base Query-to-Answer Workflow
 
-The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, the AXIOM Method Hub MCP server, and AXIOM sandbox-service. `GeneralPurposeEngine` uses `deepagents==0.6.12` to select direct MCP tools or generate, execute, observe, and correct sandboxed Python analysis. The SDK contains no local Method Hub registry or concrete Method Hub implementations.
+The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, the AXIOM Method Hub MCP server, and AXIOM sandbox-service. `GeneralPurposeEngine` receives only `EngineInput`, then uses `deepagents==0.6.12` to select direct MCP tools or generate, execute, observe, and correct sandboxed Python analysis. The SDK contains no local Method Hub registry or concrete Method Hub implementations.
 
 ```python
 from data_intelligence_sdk import DataCorpusPackage, UserQuery
@@ -408,6 +407,10 @@ print(response.answer)
 print(response.metadata["artifact_ref"])
 ```
 
+The high-level request starts from `UserQuery`. The compatibility pipeline may
+still accept `DataCorpusPackage` while it prepares a spec, but selected engines
+do not receive that package directly; they receive `EngineInput`.
+
 Run the example pipeline from the command line:
 
 ```bash
@@ -415,7 +418,8 @@ uv run python examples/run_pipeline.py --source sales.csv --query "What is the t
 uv run python examples/run_pipeline.py --package examples/data_corpus_package/data_corpus_package.json --query "Summarize this package"
 ```
 
-The `--package` file describes a data corpus package by reference:
+The `--package` file is compatibility input for the demo pipeline/spec builder.
+It describes a data corpus package by reference:
 
 ```json
 {
@@ -426,7 +430,7 @@ The `--package` file describes a data corpus package by reference:
 }
 ```
 
-Relative paths resolve from the package file directory. The example runner maps `vectordb` and `db` into `DataCorpusPackage.sources`, loads `schema.json` into `DataCorpusPackage.schemas`, and loads `catalog.json` into `DataCorpusPackage.metadata["catalog"]`.
+Relative paths resolve from the package file directory. The example runner maps `vectordb` and `db` into `DataCorpusPackage.sources`, loads `schema.json` into `DataCorpusPackage.schemas`, and loads `catalog.json` into `DataCorpusPackage.metadata["catalog"]` before engine selection. Engines do not access these fields directly.
 
 The checked-in example at `examples/data_corpus_package/` models `db` as a Postgres-style warehouse reference and `vectordb` as persisted document chunk storage with `chunk_id`, `document_id`, `content`, `embedding`, and `metadata` fields. It includes five raw CSV files under `raw/csv/` and five raw text files under `raw/txt/`.
 
@@ -461,9 +465,9 @@ uv run python examples/demo_workflow_cli.py \
   --query "Summarize this data corpus package"
 ```
 
-The CLI builds the spec, selects the engine, provisions one sandbox, stages the
-local source files, runs the Deep Agent, and prints the answer. Add `--verbose`
-to enable AXIOM debug logs and print response metadata:
+The CLI builds the spec, selects the engine, provisions one request-scoped
+sandbox for generated-code execution, runs the Deep Agent, and prints the
+answer. Add `--verbose` to enable AXIOM debug logs and print response metadata:
 
 ```bash
 uv run python examples/demo_workflow_cli.py \

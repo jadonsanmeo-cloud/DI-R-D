@@ -14,10 +14,11 @@ import type {
 import SpecConfirmationCard from '@/new-components/chat/content/SpecConfirmationCard';
 import TaskPlanCard, { TaskItem } from '@/new-components/chat/content/TaskPlanCard';
 import { AttachedConnector, ConnectorInstance } from '@/new-components/connector/types';
+import EngineSelector from '@/new-components/responses-chat/EngineSelector';
 import MethodHubToggle from '@/new-components/responses-chat/MethodHubToggle';
 import FromTaskBanner from '@/new-components/scheduled-task/FromTaskBanner';
 import SaveAsScheduledTaskDrawer from '@/new-components/scheduled-task/SaveAsScheduledTaskDrawer';
-import type { EditableExecutionSpec, ResponseConfirmationState } from '@/types/responses';
+import type { EditableExecutionSpec, ResponseConfirmationState, ResponseEngine } from '@/types/responses';
 import type { ChatReplayPayload } from '@/types/scheduled-task';
 import axios from '@/utils/ctx-axios';
 import { sendSpacePostRequest } from '@/utils/request';
@@ -75,6 +76,10 @@ const generateUUID = () => {
 };
 
 const PENDING_RESPONSE_STORAGE_KEY = 'data-intelligence.pending-response';
+
+const isResponseEngine = (value: unknown): value is ResponseEngine => {
+  return value === 'auto' || value === 'general' || value === 'reason' || value === 'report';
+};
 
 const cleanFinalContent = (text: string): string => {
   let cleaned = text.replace(/\\n/g, '\n').trim();
@@ -543,6 +548,7 @@ const Playground: NextPage = () => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [methodHubEnabled, setMethodHubEnabled] = useState(false);
+  const [responseEngine, setResponseEngine] = useState<ResponseEngine>('auto');
   const [methodHubAvailable, setMethodHubAvailable] = useState(false);
   const [runtimeCapabilitiesLoading, setRuntimeCapabilitiesLoading] = useState(true);
 
@@ -669,6 +675,9 @@ const Playground: NextPage = () => {
         if (typeof payload.runtime_options?.method_hub_enabled === 'boolean') {
           methodHubModeRestoredRef.current = true;
           setMethodHubEnabled(payload.runtime_options.method_hub_enabled);
+        }
+        if (isResponseEngine(payload.runtime_options?.engine)) {
+          setResponseEngine(payload.runtime_options.engine);
         }
         const confirmation: ResponseConfirmationState = {
           responseId: pending.responseId,
@@ -971,6 +980,11 @@ const Playground: NextPage = () => {
         }
         methodHubModeRestoredRef.current = true;
         setMethodHubEnabled(detail.runtime_options.method_hub_enabled);
+        if (isResponseEngine(detail.runtime_options.engine)) {
+          setResponseEngine(detail.runtime_options.engine);
+        } else {
+          setResponseEngine('auto');
+        }
       })
       .catch(error => {
         if (active) {
@@ -1829,6 +1843,7 @@ const Playground: NextPage = () => {
 
     let finalQuery = inputQuery;
     const chatMode = 'backend_qa_flow';
+    const effectiveMethodHubEnabled = methodHubAvailable && methodHubEnabled;
     let currentUploadedFilePath: string | null = null;
 
     // Create the conversation id before upload so files are stored in the same
@@ -2024,7 +2039,8 @@ const Playground: NextPage = () => {
           },
           session_id: historySessionId,
           runtime_options: {
-            method_hub_enabled: methodHubEnabled,
+            method_hub_enabled: effectiveMethodHubEnabled,
+            engine: responseEngine,
           },
         }),
         signal: controller.signal,
@@ -3159,8 +3175,9 @@ const Playground: NextPage = () => {
                                     className='flex items-center justify-center text-gray-500 hover:text-violet-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20 transition-all flex-shrink-0'
                                   />
                                 </Dropdown>
+                                <EngineSelector value={responseEngine} onChange={setResponseEngine} />
                                 <MethodHubToggle
-                                  enabled={methodHubEnabled}
+                                  enabled={methodHubAvailable && methodHubEnabled}
                                   available={methodHubAvailable}
                                   loading={runtimeCapabilitiesLoading}
                                   label={t('method_hub_toggle')}
@@ -3415,8 +3432,9 @@ const Playground: NextPage = () => {
                             <div className='model-selector-premium'>
                               <ModelSelector onChange={val => setModel(val)} />
                             </div>
+                            <EngineSelector value={responseEngine} onChange={setResponseEngine} />
                             <MethodHubToggle
-                              enabled={methodHubEnabled}
+                              enabled={methodHubAvailable && methodHubEnabled}
                               available={methodHubAvailable}
                               loading={runtimeCapabilitiesLoading}
                               label={t('method_hub_toggle')}

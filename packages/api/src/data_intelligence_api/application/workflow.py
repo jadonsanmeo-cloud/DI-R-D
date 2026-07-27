@@ -22,6 +22,7 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
+from data_intelligence_sdk.registry.engine_selector import EngineDescriptor
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     create_example_pipeline,
 )
@@ -38,6 +39,27 @@ from data_intelligence_api.http.schemas.responses import CreateResponseRequest
 
 DEFAULT_QUERY = "Analyze this data corpus."
 PipelineFactory = Callable[..., DataIntelligencePipeline]
+
+ENGINE_ROUTE_MAP = {
+    "general": "general_purpose",
+    "reason": "reason",
+    "report": "report",
+}
+
+class RequestedEngineSelector:
+    def __init__(self, engine_name: str) -> None:
+        self.engine_name = engine_name
+
+    def select(
+        self,
+        spec: ExecutionSpec,
+        engines: tuple[EngineDescriptor, ...],
+    ) -> str:
+        del spec
+        names = {engine.name for engine in engines}
+        if self.engine_name not in names:
+            raise ValueError(f"Requested engine is not registered: {self.engine_name}")
+        return self.engine_name
 
 
 class SourceValidationError(ValueError):
@@ -115,6 +137,7 @@ def default_pipeline_factory(
     resolved_options = runtime_options or WorkflowRuntimeOptions(
         method_hub_enabled=method_hub_settings.enabled
     )
+    requested_engine = ENGINE_ROUTE_MAP.get(resolved_options.engine or "")
     resolved_method_hub = resolve_method_hub(
         resolved_options,
         endpoint=method_hub_settings.endpoint,
@@ -127,12 +150,18 @@ def default_pipeline_factory(
         if resolved_options.method_hub_enabled
         else {}
     )
+    engine_kwargs = (
+        {"engine_selector": RequestedEngineSelector(requested_engine)}
+        if requested_engine is not None
+        else {}
+    )
     return create_example_pipeline(
         logger=logger,
         config_manager=config_manager,
         use_llm_spec_builder=True,
         intent_service_base_url=intent_service_settings.endpoint,
         mcp_client=resolved_method_hub.client,
+        **engine_kwargs,
         **method_hub_kwargs,
     )
 

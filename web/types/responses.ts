@@ -8,8 +8,11 @@ export interface CorpusRequest {
   metadata: Record<string, unknown>;
 }
 
+export type ResponseEngine = 'auto' | 'general' | 'reason' | 'report';
+
 export interface RuntimeOptions {
   method_hub_enabled: boolean;
+  engine?: ResponseEngine;
 }
 
 export interface RuntimeCapabilities {
