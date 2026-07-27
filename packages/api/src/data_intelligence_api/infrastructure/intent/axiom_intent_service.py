@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import httpx
@@ -9,11 +10,29 @@ import httpx
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     Intent,
+    IntentAnalysis,
+    PreprocessingStep,
     SessionContext,
     UserContext,
     UserQuery,
 )
-from data_intelligence_sdk.intent import IntentAnalysis
+
+_PREPROCESSING_STEP_TYPES = {
+    "understand",
+    "clarify",
+    "resolve_context",
+    "retrieve_data",
+    "validate_data",
+}
+
+_ROLE_MAP = {
+    "human": "user",
+    "user": "user",
+    "view": "assistant",
+    "ai": "assistant",
+    "assistant": "assistant",
+    "system": "system",
+}
 
 _REPORT_INTENTS = {
     "comparative_analysis",
@@ -53,15 +72,33 @@ class AxiomIntentServiceAnalyzer:
         corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
-    ) -> Intent:
-        """Return the normalized SDK intent for compatibility with the protocol."""
-
-        return self.analyze_details(
-            query,
-            corpus_package,
-            session_context,
-            user_context,
-        ).intent
+    ) -> IntentAnalysis:
+        del corpus_package, user_context
+        payload = {
+            "query": query.text,
+            "history": _history_from_session_context(session_context),
+        }
+        response_payload = self._post_prediction(payload)
+        resolved_intent = response_payload.get("resolved_intent")
+        resolved_payload = resolved_intent if isinstance(resolved_intent, dict) else {}
+        catalog_intent_id = str(
+            resolved_payload.get("intent_id")
+            or response_payload.get("primary_intent")
+            or ""
+        ).strip()
+        catalog_metadata = resolved_payload.get("metadata")
+        return IntentAnalysis(
+            intent=_map_catalog_intent(response_payload.get("primary_intent")),
+            catalog_intent_id=catalog_intent_id or None,
+            preprocessing_steps=_extract_preprocessing_steps(resolved_payload),
+            metadata={
+                "catalog_metadata": (
+                    dict(catalog_metadata) if isinstance(catalog_metadata, dict) else {}
+                ),
+                "confidence": response_payload.get("confidence"),
+                "language": response_payload.get("language"),
+            },
+        )
 
     def analyze_details(
         self,
@@ -70,46 +107,16 @@ class AxiomIntentServiceAnalyzer:
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> IntentAnalysis:
-        """Return AXIOM catalog classification plus its normalized SDK intent."""
+        """Return the full normalized Intent Service classification."""
 
-        del corpus_package, session_context, user_context
-        payload = {
-            "query": query.text,
-            "search_type": "hybrid",
-            "limit": 1,
-        }
-        response_payload = self._search_catalog(payload)
-        raw_results = response_payload.get("results")
-        if not isinstance(raw_results, list) or not raw_results:
-            raise RuntimeError("Intent Service catalog search returned no matches.")
-        top_match = raw_results[0]
-        if not isinstance(top_match, dict):
-            raise RuntimeError("Intent Service catalog match must be an object.")
-        definition = top_match.get("intent")
-        if not isinstance(definition, dict):
-            raise RuntimeError("Intent Service catalog match is missing its intent.")
-        catalog_intent = str(definition.get("intent_id") or "").strip()
-        if not catalog_intent:
-            raise RuntimeError("Intent Service catalog match has no intent id.")
-        score = top_match.get("score")
-        raw_processing_steps = definition.get("processing_steps")
-        processing_steps = (
-            dict(raw_processing_steps) if isinstance(raw_processing_steps, dict) else {}
-        )
-        return IntentAnalysis(
-            intent=_map_catalog_intent(catalog_intent),
-            source="axiom_intent_service",
-            catalog_intent=catalog_intent or None,
-            score=float(score) if isinstance(score, (int, float)) else None,
-            processing_steps=processing_steps,
-        )
+        return self.analyze(query, corpus_package, session_context, user_context)
 
-    def _search_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post_prediction(self, payload: dict[str, Any]) -> dict[str, Any]:
         client = self._client or httpx.Client(timeout=self.timeout_seconds)
         close_client = self._client is None
         try:
             response = client.post(
-                f"{self.base_url}/api/v1/intent-search",
+                f"{self.base_url}/api/v1/intent-predictions",
                 json=payload,
             )
             response.raise_for_status()
@@ -118,10 +125,30 @@ class AxiomIntentServiceAnalyzer:
                 raise ValueError("Intent Service response must be a JSON object.")
             return data
         except (httpx.HTTPError, ValueError) as exc:
-            raise RuntimeError("Intent Service catalog search request failed.") from exc
+            raise RuntimeError("Intent Service prediction request failed.") from exc
         finally:
             if close_client:
                 client.close()
+
+
+def _history_from_session_context(
+    session_context: SessionContext | None,
+) -> list[dict[str, str]]:
+    if session_context is None:
+        return []
+    return list(_normalize_turns(session_context.turns))
+
+
+def _normalize_turns(turns: Iterable[dict[str, Any]]) -> Iterable[dict[str, str]]:
+    for turn in turns:
+        role = _ROLE_MAP.get(str(turn.get("role", "")).lower())
+        text = turn.get("text", turn.get("content"))
+        if role is None or text is None:
+            continue
+        text_value = str(text).strip()
+        if not text_value:
+            continue
+        yield {"role": role, "text": text_value}
 
 
 def _map_catalog_intent(value: object) -> Intent:
@@ -135,3 +162,44 @@ def _map_catalog_intent(value: object) -> Intent:
     if intent_id == "unknown_intent":
         return "unknown"
     return "general"
+
+
+def _extract_preprocessing_steps(
+    resolved_intent: dict[str, Any],
+) -> list[PreprocessingStep]:
+    processing_steps = resolved_intent.get("processing_steps")
+    if not isinstance(processing_steps, dict):
+        return []
+
+    steps: list[PreprocessingStep] = []
+    for name, raw_step in processing_steps.items():
+        if not isinstance(raw_step, dict):
+            continue
+        step_type = str(raw_step.get("step_type") or "").strip()
+        if step_type not in _PREPROCESSING_STEP_TYPES:
+            continue
+        raw_dependencies = raw_step.get("depends_on")
+        dependencies = (
+            [str(value) for value in raw_dependencies]
+            if isinstance(raw_dependencies, list)
+            else []
+        )
+        steps.append(
+            PreprocessingStep(
+                name=str(name),
+                order=int(raw_step.get("order", 0)),
+                step_type=step_type,
+                description=_optional_string(raw_step.get("description")),
+                capability=_optional_string(raw_step.get("capability")),
+                required=bool(raw_step.get("required", False)),
+                depends_on=dependencies,
+            )
+        )
+    return sorted(steps, key=lambda step: (step.order, step.name))
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None

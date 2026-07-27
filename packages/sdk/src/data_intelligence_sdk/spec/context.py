@@ -72,7 +72,6 @@ class SpecBuildContext:
     intent_analysis: IntentAnalysis | None = None
     session_brief: SessionBrief = field(default_factory=SessionBrief)
     user_brief: UserBrief = field(default_factory=UserBrief)
-    task_hints: TaskHints = field(default_factory=TaskHints)
 
 
 class SpecContextBuilder:
@@ -96,7 +95,6 @@ class SpecContextBuilder:
         corpus_summary = build_corpus_summary(corpus_package)
         session_brief = self._build_session_brief(session_context)
         user_brief = self._build_user_brief(user_context)
-        task_hints = self._build_task_hints(query, intent, corpus_summary, user_brief)
         return SpecBuildContext(
             query=query,
             intent=intent,
@@ -104,7 +102,6 @@ class SpecContextBuilder:
             intent_analysis=intent_analysis,
             session_brief=session_brief,
             user_brief=user_brief,
-            task_hints=task_hints,
         )
 
     def _build_session_brief(

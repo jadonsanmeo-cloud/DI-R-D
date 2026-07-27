@@ -23,6 +23,7 @@ from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     EngineOutput,
     ExecutionSpec,
+    FinalResponse,
     InterfaceDefinition,
     UserContext,
 )
@@ -2257,11 +2258,21 @@ class RouterAgent(_PromptAgent):
     def run(
         self,
         step_request: dict[str, Any],
-        runtime: EngineRuntimeContext,
-        sources: list[str],
+        runtime: EngineRuntimeContext | list[dict[str, Any]],
+        sources: list[str] | None = None,
     ) -> dict[str, Any]:
-        method_hub = _method_hub_payload(runtime)
-        payload = self._invoke_native_route(step_request, runtime, sources)
+        if isinstance(runtime, EngineRuntimeContext):
+            resolved_sources = sources or []
+            method_hub = _method_hub_payload(runtime)
+            payload = self._invoke_native_route(
+                step_request,
+                runtime,
+                resolved_sources,
+            )
+        else:
+            resolved_sources = sources or []
+            method_hub = runtime
+            payload = None
         if isinstance(payload, dict):
             if "use_existing_tool" in payload:
                 payload["route"] = (
@@ -2280,9 +2291,9 @@ class RouterAgent(_PromptAgent):
                     payload,
                     step_request,
                     method_hub,
-                    sources,
+                    resolved_sources,
                 )
-        return self._fallback_route(step_request, method_hub, sources)
+        return self._fallback_route(step_request, method_hub, resolved_sources)
 
     def _invoke_native_route(
         self,
@@ -5489,6 +5500,33 @@ class ReportEngine:
             },
         )
 
+    def run_markdown(
+        self,
+        *,
+        spec_markdown: str,
+        organization_id: str,
+        runtime: EngineRuntimeContext,
+        user_context: UserContext | None = None,
+    ) -> FinalResponse:
+        """Execute a confirmed Markdown report spec through the report engine."""
+
+        spec = ExecutionSpec(
+            intent="report",
+            objective=spec_markdown.strip(),
+            confirmed=True,
+            engine_hint="report",
+        )
+        corpus_package = DataCorpusPackage(
+            metadata={"organization_id": organization_id}
+        )
+        output = self.run(spec, corpus_package, runtime, user_context)
+        answer = output.answer if output.answer is not None else output.result
+        return FinalResponse(
+            answer=str(answer),
+            evidence=output.evidence,
+            metadata={**dict(output.metadata), "engine_name": output.engine_name},
+        )
+
     def _build_graph(self) -> Any:
         graph = StateGraph(_ReportGraphState)
         graph.add_node("plan", self._graph_plan)
@@ -6196,11 +6234,20 @@ class ReportEngine:
                 ),
             }
         else:
-            route = self.router_agent.run(
-                state["step"],
-                runtime=state["runtime"],
-                sources=scope["sources"],
-            )
+            try:
+                route = self.router_agent.run(
+                    state["step"],
+                    runtime=state["runtime"],
+                    sources=scope["sources"],
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument 'runtime'" not in str(exc):
+                    raise
+                route = self.router_agent.run(
+                    state["step"],
+                    inventory,
+                    scope["sources"],
+                )
         if route.get("route") == "existing_tool":
             tool = next(
                 (

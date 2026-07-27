@@ -48,6 +48,7 @@ from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
 from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
 from data_intelligence_sdk.spec import LLMSpecBuilder
+from data_intelligence_sdk.spec.markdown_builder import LLMMarkdownSpecBuilder
 from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
 
 DEFAULT_QUERYAI_REASON_URL = "http://localhost:7205/query"
@@ -493,6 +494,8 @@ def create_example_pipeline(
     logger: RuntimeLogger | None = None,
     intent_service_base_url: str | None = None,
     queryai_reason_endpoint: str | None = None,
+    default_organization_id: str | None = None,
+    markdown_report_engine: object | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
     resolved_method_hub_enabled = (
@@ -522,18 +525,19 @@ def create_example_pipeline(
                 shared_llm_client,
                 require_actionable_spec=True,
                 default_missing_requirements=True,
+                logger=logger,
             )
-        else:
-            spec_builder = ExampleSpecBuilder()
+    else:
+        spec_builder = ExampleSpecBuilder()
     spec_builder = _ReportDefaultsSpecBuilder(spec_builder)
-    if sandbox_provider is None:
+    uses_default_engine = engine is None
+    if sandbox_provider is None and uses_default_engine:
         sandbox_settings = resolved_config_manager.sandbox_settings()
         if sandbox_settings.enabled:
             sandbox_provider = _configure_request_sandbox_provider(
                 config_manager=resolved_config_manager,
                 method_hub_enabled=resolved_method_hub_enabled,
             )
-    uses_default_engine = engine is None
     if uses_default_engine:
         reason_engine = QueryAIRemoteReasonEngine(
             endpoint=(
@@ -588,6 +592,14 @@ def create_example_pipeline(
         if intent_service_base_url
         else ExampleIntentAnalyzer()
     )
+    resolved_markdown_report_engine = markdown_report_engine
+    if resolved_markdown_report_engine is None:
+        if use_llm_spec_builder:
+            resolved_markdown_report_engine = (
+                report_engine if uses_default_engine else ReportEngine()
+            )
+        else:
+            resolved_markdown_report_engine = engine
     return DataIntelligencePipeline(
         intent_analyzer=intent_analyzer,
         spec_builder=spec_builder,
@@ -602,6 +614,15 @@ def create_example_pipeline(
         artifact_store=artifact_store,
         include_evidence=True,
         logger=logger,
+        markdown_spec_builder=(
+            LLMMarkdownSpecBuilder(shared_llm_client)
+            if use_llm_spec_builder and shared_llm_client is not None
+            else None
+        ),
+        markdown_report_engine=resolved_markdown_report_engine,
+        default_organization_id=(
+            default_organization_id or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
+        ),
     )
 
 

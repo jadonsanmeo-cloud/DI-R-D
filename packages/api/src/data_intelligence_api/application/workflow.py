@@ -15,7 +15,10 @@ from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
     ExecutionSpec,
     FinalResponse,
+    IntentAnalysis,
     PreparedExecution,
+    PreparedMarkdownExecution,
+    PreprocessingStep,
     SessionContext,
     UserContext,
     UserQuery,
@@ -23,6 +26,7 @@ from data_intelligence_sdk.core.types import (
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.registry.engine_selector import EngineDescriptor
+from data_intelligence_sdk.spec.markdown_builder import validate_spec_markdown
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     create_example_pipeline,
 )
@@ -99,6 +103,7 @@ def build_workflow_invocation(
     method_hub_default_enabled: bool = False,
 ) -> WorkflowInvocation:
     query_text = (request.input or "").strip() or DEFAULT_QUERY
+    package = request.data_corpus_package
     return WorkflowInvocation(
         query=UserQuery(
             text=query_text,
@@ -107,11 +112,11 @@ def build_workflow_invocation(
         ),
         corpus_package=DataCorpusPackage(
             sources=resolve_sources(
-                request.data_corpus_package.sources,
+                package.sources if package is not None else [],
                 data_corpus_root,
             ),
-            schemas=request.data_corpus_package.schemas,
-            metadata=request.data_corpus_package.metadata,
+            schemas=package.schemas if package is not None else {},
+            metadata=package.metadata if package is not None else {},
         ),
         session_context=SessionContext(session_id=request.session_id),
         user_context=UserContext(user_id=request.user_id),
@@ -130,12 +135,8 @@ def default_pipeline_factory(
     config_manager = ConfigManager(os.getenv("MODEL_CONFIG_PATH") or None)
     method_hub_settings = config_manager.method_hub_settings()
     intent_service_settings = config_manager.intent_service_settings()
-    if not intent_service_settings.enabled:
-        raise RuntimeError(
-            "AXIOM Intent Service must be enabled in [intent_service]."
-        )
     resolved_options = runtime_options or WorkflowRuntimeOptions(
-        method_hub_enabled=method_hub_settings.enabled
+        method_hub_enabled=False
     )
     requested_engine = ENGINE_ROUTE_MAP.get(resolved_options.engine or "")
     resolved_method_hub = resolve_method_hub(
@@ -159,7 +160,11 @@ def default_pipeline_factory(
         logger=logger,
         config_manager=config_manager,
         use_llm_spec_builder=True,
-        intent_service_base_url=intent_service_settings.endpoint,
+        intent_service_base_url=(
+            os.getenv("INTENT_SERVICE_BASE_URL")
+            or (intent_service_settings.endpoint if intent_service_settings.enabled else None)
+        ),
+        default_organization_id=os.getenv("DEFAULT_ORGANIZATION_ID", "test-org"),
         mcp_client=resolved_method_hub.client,
         **engine_kwargs,
         **method_hub_kwargs,
@@ -208,18 +213,44 @@ def prepare_workflow(
     invocation: WorkflowInvocation,
     logger: RuntimeLogger,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
-) -> PreparedExecution:
+) -> PreparedMarkdownExecution:
     pipeline = _create_pipeline(
         pipeline_factory,
         logger=logger,
         runtime_options=invocation.runtime_options,
     )
-    return pipeline.prepare_spec(
+    return pipeline.prepare_markdown(
         invocation.query,
-        invocation.corpus_package,
         invocation.session_context,
         invocation.user_context,
     )
+
+def revise_markdown_workflow(
+    prepared: PreparedMarkdownExecution,
+    spec_markdown: str,
+    logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+) -> str:
+    del prepared, runtime_options, pipeline_factory
+    logger.log("pipeline.spec_revision_started", {"format": "markdown"})
+    revised = validate_spec_markdown(spec_markdown)
+    logger.log("pipeline.spec_revised", {"format": "markdown"})
+    return revised
+
+def execute_prepared_markdown_workflow(
+    prepared: PreparedMarkdownExecution,
+    spec_markdown: str,
+    logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+) -> FinalResponse:
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=runtime_options,
+    )
+    return pipeline.execute_confirmed_markdown(prepared, spec_markdown)
 
 
 def revise_workflow(
@@ -269,7 +300,19 @@ def spec_from_payload(payload: dict) -> ExecutionSpec:
         constraints=dict(payload.get("constraints", {})),
         confirmed=bool(payload.get("confirmed", False)),
         engine_hint=payload.get("engine_hint"),
+        preprocessing_steps=[
+            PreprocessingStep(**item)
+            for item in payload.get("preprocessing_steps", [])
+        ],
     )
+
+def markdown_spec_to_payload(markdown: str) -> dict[str, str]:
+    return {"spec_markdown": validate_spec_markdown(markdown)}
+
+def markdown_spec_from_payload(payload: dict) -> str:
+    if set(payload) != {"spec_markdown"}:
+        raise ValueError("Legacy structured spec payloads are unsupported.")
+    return validate_spec_markdown(payload["spec_markdown"])
 
 
 def prepared_to_payload(prepared: PreparedExecution) -> dict:
@@ -287,17 +330,80 @@ def prepared_to_payload(prepared: PreparedExecution) -> dict:
             asdict(prepared.user_context) if prepared.user_context is not None else None
         ),
         "run_artifact_id": prepared.run_artifact_id,
+        "intent_analysis": (
+            asdict(prepared.intent_analysis)
+            if prepared.intent_analysis is not None
+            else None
+        ),
     }
 
 
 def prepared_from_payload(payload: dict, spec: ExecutionSpec) -> PreparedExecution:
     session_payload = payload.get("session_context")
     user_payload = payload.get("user_context")
+    analysis_payload = payload.get("intent_analysis")
     return PreparedExecution(
         query=UserQuery(**payload["query"]),
         intent=payload["intent"],
         corpus_package=DataCorpusPackage(**payload["corpus_package"]),
         spec=spec,
+        session_context=(
+            SessionContext(**session_payload) if session_payload is not None else None
+        ),
+        user_context=UserContext(**user_payload) if user_payload is not None else None,
+        run_artifact_id=payload.get("run_artifact_id"),
+        intent_analysis=(
+            IntentAnalysis(
+                intent=analysis_payload["intent"],
+                catalog_intent_id=analysis_payload.get("catalog_intent_id"),
+                preprocessing_steps=[
+                    PreprocessingStep(**item)
+                    for item in analysis_payload.get("preprocessing_steps", [])
+                ],
+                metadata=dict(analysis_payload.get("metadata", {})),
+            )
+            if isinstance(analysis_payload, dict)
+            else None
+        ),
+    )
+
+def prepared_markdown_to_payload(prepared: PreparedMarkdownExecution) -> dict:
+    return {
+        "version": 2,
+        "query": asdict(prepared.query),
+        "intent_analysis": asdict(prepared.intent_analysis),
+        "session_context": (
+            asdict(prepared.session_context)
+            if prepared.session_context is not None
+            else None
+        ),
+        "user_context": (
+            asdict(prepared.user_context) if prepared.user_context is not None else None
+        ),
+        "run_artifact_id": prepared.run_artifact_id,
+    }
+
+def prepared_markdown_from_payload(
+    payload: dict,
+    spec_markdown: str,
+) -> PreparedMarkdownExecution:
+    analysis_payload = payload.get("intent_analysis")
+    if not isinstance(analysis_payload, dict):
+        raise ValueError("Legacy prepared execution payloads are unsupported.")
+    session_payload = payload.get("session_context")
+    user_payload = payload.get("user_context")
+    return PreparedMarkdownExecution(
+        query=UserQuery(**payload["query"]),
+        intent_analysis=IntentAnalysis(
+            intent=analysis_payload["intent"],
+            catalog_intent_id=analysis_payload.get("catalog_intent_id"),
+            preprocessing_steps=[
+                PreprocessingStep(**item)
+                for item in analysis_payload.get("preprocessing_steps", [])
+            ],
+            metadata=dict(analysis_payload.get("metadata", {})),
+        ),
+        spec_markdown=validate_spec_markdown(spec_markdown),
         session_context=(
             SessionContext(**session_payload) if session_payload is not None else None
         ),

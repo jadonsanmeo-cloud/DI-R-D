@@ -71,7 +71,7 @@ SelectedDataContext JSON contract:
 Selection rules:
 - Select sources, tables, columns, vector collections, and documents only if they
   exist in spec_build_context.corpus_summary.
-- Prefer task_hints when they are present, but verify them against corpus_summary.
+- Infer relevance from the query and verify every selection against corpus_summary.
 - Include a short reason for each important selection.
 - Put ambiguities or missing details in missing_information.
 - Use confidence between 0 and 1.

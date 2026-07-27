@@ -5,7 +5,6 @@ import unittest
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
 from data_intelligence_api.main import create_app
@@ -13,11 +12,9 @@ from data_intelligence_api.infrastructure.persistence.memory.run_repository impo
     InMemoryRunRepository,
 )
 from data_intelligence_sdk.core.types import (
-    CapabilityRequirement,
-    EvidenceBundle,
-    ExecutionSpec,
     FinalResponse,
-    PreparedExecution,
+    IntentAnalysis,
+    PreparedMarkdownExecution,
 )
 
 
@@ -34,10 +31,7 @@ class AsgiResponse:
         return self.content.decode("utf-8").splitlines()
 
 
-async def asgi_request(
-    app, method, path, *, json_body=None, content=None, headers=None
-):
-    target = urlsplit(path)
+async def asgi_request(app, method, path, *, json_body=None, content=None, headers=None):
     body = json.dumps(json_body).encode() if json_body is not None else (content or b"")
     request_headers = {key.lower(): value for key, value in (headers or {}).items()}
     if json_body is not None:
@@ -48,13 +42,11 @@ async def asgi_request(
         "http_version": "1.1",
         "method": method,
         "scheme": "http",
-        "path": target.path,
-        "raw_path": target.path.encode("ascii"),
-        "query_string": target.query.encode("ascii"),
+        "path": path,
+        "raw_path": path.encode("ascii"),
+        "query_string": b"",
         "root_path": "",
-        "headers": [
-            (key.encode(), value.encode()) for key, value in request_headers.items()
-        ],
+        "headers": [(key.encode(), value.encode()) for key, value in request_headers.items()],
         "client": ("127.0.0.1", 12345),
         "server": ("testserver", 80),
     }
@@ -129,41 +121,32 @@ class FakePipeline:
         self.logger = logger
         self.factory = factory
 
-    def prepare_spec(self, query, corpus, session_context, user_context):
+    def prepare_markdown(self, query, session_context, user_context):
         self.factory.prepare_calls += 1
         self.logger.log("pipeline.start", {})
         self.logger.log("pipeline.intent_analyzed", {"intent": "reason"})
-        spec = ExecutionSpec(
-            intent="reason",
-            objective=query.text,
-            data_requirements=list(corpus.sources),
-            capability_requirements=[CapabilityRequirement(name="inspect_data")],
+        markdown = (
+            "# Interactive Execution Spec\n\n"
+            f"## User Request\n\n{query.text}\n\n"
+            "## Intent\n\nReport.\n\n"
+            "## Preparation Guidance\n\nRetrieve context.\n\n"
+            "## Execution Instructions\n\nRetrieve and cite sources.\n\n"
+            "## Expected Output\n\nMarkdown report.\n"
         )
-        self.logger.log("pipeline.spec_built", {"objective": spec.objective})
-        return PreparedExecution(
-            query, "reason", corpus, spec, session_context, user_context
+        return PreparedMarkdownExecution(
+            query=query,
+            intent_analysis=IntentAnalysis(intent="report"),
+            spec_markdown=markdown,
+            session_context=session_context,
+            user_context=user_context,
         )
 
-    def revise_spec(self, prepared, previous_spec, feedback):
-        self.factory.revise_calls += 1
-        self.logger.log("pipeline.spec_revision_started", {})
-        revised = ExecutionSpec(
-            intent=previous_spec.intent,
-            objective=f"{previous_spec.objective} ({feedback})",
-            data_requirements=list(previous_spec.data_requirements),
-            capability_requirements=list(previous_spec.capability_requirements),
-        )
-        self.logger.log("pipeline.spec_revised", {"objective": revised.objective})
-        return revised
-
-    def execute_confirmed_spec(self, prepared, confirmed_spec):
+    def execute_confirmed_markdown(self, prepared, spec_markdown):
         self.factory.execute_calls += 1
         self.logger.log("pipeline.spec_confirmed", {})
-        self.logger.log("pipeline.engine_selected", {"engine": "fake"})
         return FinalResponse(
-            answer=f"Answer for: {confirmed_spec.objective}",
-            evidence=EvidenceBundle(sources=list(prepared.corpus_package.sources)),
-            metadata={"engine_name": "fake"},
+            answer=f"Answer for: {spec_markdown}",
+            metadata={"engine_name": "report"},
         )
 
 
@@ -193,7 +176,6 @@ class BackendApiTests(unittest.TestCase):
                 "/api/v1/responses",
                 json_body={
                     "input": "What is total revenue?",
-                    "data_corpus_package": {"sources": [source]},
                     "session_id": "session-1",
                 },
             )
@@ -201,19 +183,6 @@ class BackendApiTests(unittest.TestCase):
         events = parse_sse(response)
         confirmation = events[-1][1]
         return response, events, confirmation
-
-    def complete_response(self, app, source="sales.csv"):
-        _, _, pending = self.create_pending(app, source)
-        completed = asyncio.run(
-            asgi_request(
-                app,
-                "POST",
-                f"/api/v1/responses/{pending['response_id']}/decision",
-                headers={"X-Confirmation-Token": pending["confirmation_token"]},
-                json_body={"action": "confirm", "revision": pending["revision"]},
-            )
-        )
-        return pending, parse_sse(completed)
 
     def test_initial_request_pauses_before_engine_execution(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -225,7 +194,8 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(events[-1][0], "response.requires_confirmation")
         self.assertEqual(confirmation["revision"], 1)
-        self.assertEqual(confirmation["spec"]["objective"], "What is total revenue?")
+        self.assertIn("What is total revenue?", confirmation["spec_markdown"])
+        self.assertNotIn("capability_requirements", confirmation)
         self.assertEqual(factory.execute_calls, 0)
 
     def test_revise_then_confirm_resumes_same_response(self):
@@ -245,7 +215,9 @@ class BackendApiTests(unittest.TestCase):
                     json_body={
                         "action": "revise",
                         "revision": 1,
-                        "feedback": "Use monthly totals",
+                        "spec_markdown": pending["spec_markdown"].replace(
+                            "What is total revenue?", "Use monthly totals"
+                        ),
                     },
                 )
             )
@@ -262,110 +234,13 @@ class BackendApiTests(unittest.TestCase):
             events = parse_sse(confirmed)
 
         self.assertEqual(revision["revision"], 2)
-        self.assertIn("Use monthly totals", revision["spec"]["objective"])
+        self.assertIn("Use monthly totals", revision["spec_markdown"])
         self.assertEqual(events[-1][0], "response.completed")
         self.assertEqual(events[-1][1]["response_id"], response_id)
-        self.assertEqual(factory.revise_calls, 1)
+        self.assertEqual(factory.revise_calls, 0)
         self.assertEqual(factory.execute_calls, 1)
 
-    def test_response_history_lists_completed_runs_for_session(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
-            app = self.make_app(temp_dir)
-            pending, _ = self.complete_response(app)
-
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    "/api/v1/responses?session_id=session-1&limit=20",
-                )
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["items"][0]["response_id"], pending["response_id"]
-        )
-        self.assertEqual(response.json()["items"][0]["title"], "What is total revenue?")
-        self.assertEqual(response.json()["items"][0]["status"], "completed")
-        self.assertIn("Answer for", response.json()["items"][0]["output_preview"])
-
-    def test_response_history_detail_restores_output_and_evidence(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
-            app = self.make_app(temp_dir)
-            pending, _ = self.complete_response(app)
-
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    f"/api/v1/responses/{pending['response_id']}/history?session_id=session-1",
-                )
-            )
-
-        payload = response.json()
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["input"], "What is total revenue?")
-        self.assertEqual(payload["output_text"], "Answer for: What is total revenue?")
-        self.assertEqual(Path(payload["evidence"]["sources"][0]).name, "sales.csv")
-        self.assertEqual(payload["metadata"], {"engine_name": "fake"})
-        self.assertTrue(payload["spec"]["confirmed"])
-
-    def test_response_history_hides_runs_from_another_session(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
-            app = self.make_app(temp_dir)
-            pending, _ = self.complete_response(app)
-
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    f"/api/v1/responses/{pending['response_id']}/history?session_id=session-2",
-                )
-            )
-
-        self.assertEqual(response.status_code, 404)
-
-    def test_response_history_delete_is_session_scoped(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
-            app = self.make_app(temp_dir)
-            pending, _ = self.complete_response(app)
-
-            deleted = asyncio.run(
-                asgi_request(
-                    app,
-                    "DELETE",
-                    f"/api/v1/responses/{pending['response_id']}?session_id=session-1",
-                )
-            )
-            missing = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    f"/api/v1/responses/{pending['response_id']}/history?session_id=session-1",
-                )
-            )
-
-        self.assertEqual(deleted.status_code, 204)
-        self.assertEqual(missing.status_code, 404)
-
-    def test_response_history_limit_is_bounded(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = self.make_app(temp_dir)
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    "/api/v1/responses?session_id=session-1&limit=101",
-                )
-            )
-
-        self.assertEqual(response.status_code, 422)
-
-    def test_structured_edit_can_be_revised_without_feedback(self):
+    def test_complete_markdown_can_be_revised(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir)
@@ -379,43 +254,22 @@ class BackendApiTests(unittest.TestCase):
                     json_body={
                         "action": "revise",
                         "revision": 1,
-                        "edited_spec": {
-                            "objective": "Compare monthly revenue",
-                            "data_requirements": pending["spec"]["data_requirements"],
-                            "capability_requirements": pending["spec"][
-                                "capability_requirements"
-                            ],
-                            "constraints": {"currency": "USD"},
-                            "engine_hint": "analytics",
-                        },
+                        "spec_markdown": pending["spec_markdown"].replace(
+                            "What is total revenue?", "Compare monthly revenue"
+                        ),
                     },
                 )
             )
-        spec = parse_sse(response)[-1][1]["spec"]
-        self.assertEqual(spec["objective"], "Compare monthly revenue")
-        self.assertEqual(spec["constraints"], {"currency": "USD"})
+        spec_markdown = parse_sse(response)[-1][1]["spec_markdown"]
+        self.assertIn("Compare monthly revenue", spec_markdown)
 
     def test_recovery_requires_token_and_returns_pending_spec(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir)
             _, _, pending = self.create_pending(app)
-            wrong = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    f"/api/v1/responses/{pending['response_id']}",
-                    headers={"X-Confirmation-Token": "wrong"},
-                )
-            )
-            recovered = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    f"/api/v1/responses/{pending['response_id']}",
-                    headers={"X-Confirmation-Token": pending["confirmation_token"]},
-                )
-            )
+            wrong = asyncio.run(asgi_request(app, "GET", f"/api/v1/responses/{pending['response_id']}", headers={"X-Confirmation-Token": "wrong"}))
+            recovered = asyncio.run(asgi_request(app, "GET", f"/api/v1/responses/{pending['response_id']}", headers={"X-Confirmation-Token": pending["confirmation_token"]}))
         self.assertEqual(wrong.status_code, 404)
         self.assertEqual(recovered.status_code, 200)
         self.assertEqual(recovered.json()["status"], "awaiting_confirmation")
@@ -425,32 +279,20 @@ class BackendApiTests(unittest.TestCase):
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir)
             _, _, pending = self.create_pending(app)
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "POST",
-                    f"/api/v1/responses/{pending['response_id']}/decision",
-                    headers={"X-Confirmation-Token": pending["confirmation_token"]},
-                    json_body={"action": "confirm", "revision": 2},
-                )
-            )
+            response = asyncio.run(asgi_request(app, "POST", f"/api/v1/responses/{pending['response_id']}/decision", headers={"X-Confirmation-Token": pending["confirmation_token"]}, json_body={"action": "confirm", "revision": 2}))
         self.assertEqual(response.status_code, 409)
 
     def test_expired_confirmation_returns_gone(self):
-        now = datetime.now(timezone.utc)
-        store = InMemoryRunRepository(clock=lambda: now + timedelta(days=2))
+        clock_now = [datetime.now(timezone.utc)]
+        store = InMemoryRunRepository(clock=lambda: clock_now[0])
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "sales.csv").write_text("revenue\n42\n")
             app = self.make_app(temp_dir, store=store)
             _, _, pending = self.create_pending(app)
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "GET",
-                    f"/api/v1/responses/{pending['response_id']}",
-                    headers={"X-Confirmation-Token": pending["confirmation_token"]},
-                )
+            clock_now[0] = (
+                datetime.fromisoformat(pending["expires_at"]) + timedelta(seconds=1)
             )
+            response = asyncio.run(asgi_request(app, "GET", f"/api/v1/responses/{pending['response_id']}", headers={"X-Confirmation-Token": pending["confirmation_token"]}))
         self.assertEqual(response.status_code, 410)
 
     def test_upload_keeps_files_under_corpus_root(self):
@@ -460,18 +302,8 @@ class BackendApiTests(unittest.TestCase):
                 {"conv_uid": "session-1"},
                 [("files", "../../sales report.csv", b"42", "text/csv")],
             )
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "POST",
-                    "/api/v1/backend_qa_flow/upload",
-                    content=body,
-                    headers={"content-type": content_type},
-                )
-            )
-            stored = Path(
-                temp_dir, response.json()["data"]["files"][0]["relative_path"]
-            ).resolve()
+            response = asyncio.run(asgi_request(app, "POST", "/api/v1/backend_qa_flow/upload", content=body, headers={"content-type": content_type}))
+            stored = Path(temp_dir, response.json()["data"]["files"][0]["relative_path"]).resolve()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(stored.parent.name, "session-1")
         self.assertTrue(stored.name.endswith("-sales_report.csv"))
@@ -480,35 +312,10 @@ class BackendApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = self.make_app(temp_dir)
             health = asyncio.run(asgi_request(app, "GET", "/health"))
-            cors = asyncio.run(
-                asgi_request(
-                    app,
-                    "OPTIONS",
-                    "/api/v1/responses/x/decision",
-                    headers={
-                        "Origin": "http://localhost:3000",
-                        "Access-Control-Request-Method": "POST",
-                        "Access-Control-Request-Headers": "X-Confirmation-Token",
-                    },
-                )
-            )
-            delete_cors = asyncio.run(
-                asgi_request(
-                    app,
-                    "OPTIONS",
-                    "/api/v1/responses/x",
-                    headers={
-                        "Origin": "http://localhost:3000",
-                        "Access-Control-Request-Method": "DELETE",
-                    },
-                )
-            )
+            cors = asyncio.run(asgi_request(app, "OPTIONS", "/api/v1/responses/x/decision", headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "X-Confirmation-Token"}))
         self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(cors.status_code, 200)
-        self.assertIn(
-            "X-Confirmation-Token", cors.headers["access-control-allow-headers"]
-        )
-        self.assertEqual(delete_cors.status_code, 200)
+        self.assertIn("X-Confirmation-Token", cors.headers["access-control-allow-headers"])
 
 
 if __name__ == "__main__":

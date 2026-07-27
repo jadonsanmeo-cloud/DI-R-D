@@ -170,7 +170,7 @@ class EngineRegistryTests(unittest.TestCase):
         )
 
         self.assertEqual(selected, "report")
-        self.assertEqual(client.stage, "engine_selector")
+        self.assertEqual(client.stage, "engine-selector")
         request_payload = json.loads(client.messages[-1]["content"])
         self.assertNotIn("engine_hint", request_payload["spec"])
         self.assertEqual(

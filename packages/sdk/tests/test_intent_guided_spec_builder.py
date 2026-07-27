@@ -121,7 +121,7 @@ class IntentGuidedSpecBuilderTests(unittest.TestCase):
         self.assertEqual(llm_client.stage, "spec-builder")
         task = json.loads(llm_client.messages[1]["content"])
         self.assertEqual(
-            task["spec_build_context"]["intent_analysis"]["processing_steps"],
+            task["spec_context"]["intent_analysis"]["processing_steps"],
             PROCESSING_STEPS,
         )
 

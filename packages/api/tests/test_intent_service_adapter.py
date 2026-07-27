@@ -15,30 +15,8 @@ from data_intelligence_api.infrastructure.intent.axiom_intent_service import (
 
 
 class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
-    def test_analyze_details_keeps_processing_steps_from_top_catalog_intent(
-        self,
-    ) -> None:
+    def test_analyze_posts_query_and_session_history_without_datahub(self) -> None:
         captured: dict[str, object] = {}
-        processing_steps = {
-            "inspect_schema": {
-                "order": 1,
-                "step_type": "understand",
-                "description": "Inspect the available schema.",
-                "capability": "inspect_data",
-                "required": True,
-                "depends_on": [],
-                "follow_up_prompt": None,
-            },
-            "answer_query": {
-                "order": 2,
-                "step_type": "analyze",
-                "description": "Answer the data question.",
-                "capability": "query_structured_data",
-                "required": True,
-                "depends_on": ["inspect_schema"],
-                "follow_up_prompt": None,
-            },
-        }
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured["url"] = str(request.url)
@@ -46,20 +24,11 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
             return httpx.Response(
                 200,
                 json={
-                    "count": 1,
-                    "results": [
-                        {
-                            "intent": {
-                                "intent_id": "data_query",
-                                "intent_name": "Data query",
-                                "intent_description": "Answer a structured data query.",
-                                "processing_steps": processing_steps,
-                                "routing_target": "data_intelligence",
-                            },
-                            "score": 0.92,
-                            "matched_by": ["hybrid"],
-                        }
-                    ],
+                    "primary_intent": "data_query",
+                    "secondary_intents": [],
+                    "confidence": 0.92,
+                    "language": "en",
+                    "reasoning": "The user asks for data retrieval.",
                 },
             )
 
@@ -69,7 +38,7 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
             client=client,
         )
 
-        analysis = analyzer.analyze_details(
+        analysis = analyzer.analyze(
             UserQuery(text="How many orders do we have?"),
             DataCorpusPackage(
                 sources=["orders.csv"],
@@ -86,19 +55,20 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
         )
 
         self.assertEqual(analysis.intent, "reason")
-        self.assertEqual(analysis.catalog_intent, "data_query")
-        self.assertEqual(analysis.processing_steps, processing_steps)
-        self.assertEqual(analysis.score, 0.92)
+        self.assertEqual(analysis.catalog_intent_id, "data_query")
         self.assertEqual(
             captured["url"],
-            "http://intent-service.local/api/v1/intent-search",
+            "http://intent-service.local/api/v1/intent-predictions",
         )
         self.assertEqual(
             captured["payload"],
             {
                 "query": "How many orders do we have?",
-                "search_type": "hybrid",
-                "limit": 1,
+                "history": [
+                    {"role": "user", "text": "I care about orders."},
+                    {"role": "assistant", "text": "Okay."},
+                    {"role": "system", "text": "Use concise answers."},
+                ],
             },
         )
 
@@ -108,20 +78,11 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
                 lambda request: httpx.Response(
                     200,
                     json={
-                        "count": 1,
-                        "results": [
-                            {
-                                "intent": {
-                                    "intent_id": "data_description",
-                                    "intent_name": "Data description",
-                                    "intent_description": "Describe a dataset.",
-                                    "processing_steps": {},
-                                    "routing_target": "data_intelligence",
-                                },
-                                "score": 0.87,
-                                "matched_by": ["hybrid"],
-                            }
-                        ],
+                        "primary_intent": "data_description",
+                        "secondary_intents": [],
+                        "confidence": 0.87,
+                        "language": "en",
+                        "reasoning": "The user asks for a narrative report.",
                     },
                 )
             )
@@ -131,12 +92,86 @@ class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
             client=client,
         )
 
-        intent = analyzer.analyze(
+        analysis = analyzer.analyze(
             UserQuery(text="Create a report about orders."),
             DataCorpusPackage(sources=["orders.csv"]),
         )
 
-        self.assertEqual(intent, "report")
+        self.assertEqual(analysis.intent, "report")
+
+    def test_analyze_filters_and_orders_governed_preprocessing_steps(self) -> None:
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "primary_intent": "data_query",
+                        "confidence": 0.91,
+                        "language": "en",
+                        "resolved_intent": {
+                            "intent_id": "data_query",
+                            "metadata": {"domain": "analytics"},
+                            "processing_steps": {
+                                "present_answer": {
+                                    "order": 8,
+                                    "step_type": "present",
+                                    "required": True,
+                                },
+                                "retrieve_sources": {
+                                    "order": 4,
+                                    "step_type": "retrieve_data",
+                                    "description": "Retrieve matching sources.",
+                                    "capability": "corpus_retrieval",
+                                    "required": True,
+                                    "depends_on": ["resolve_request_context"],
+                                },
+                                "understand_request": {
+                                    "order": 1,
+                                    "step_type": "understand",
+                                    "required": True,
+                                    "depends_on": [],
+                                },
+                                "analyze_data": {
+                                    "order": 6,
+                                    "step_type": "analyze",
+                                    "required": True,
+                                },
+                                "resolve_request_context": {
+                                    "order": 3,
+                                    "step_type": "resolve_context",
+                                    "required": True,
+                                    "depends_on": ["understand_request"],
+                                },
+                            },
+                        },
+                    },
+                )
+            )
+        )
+        analyzer = AxiomIntentServiceAnalyzer(
+            base_url="http://intent-service.local",
+            client=client,
+        )
+
+        analysis = analyzer.analyze(
+            UserQuery(text="Inspect orders."),
+            DataCorpusPackage(sources=["orders.csv"]),
+        )
+
+        self.assertEqual(analysis.catalog_intent_id, "data_query")
+        self.assertEqual(
+            [step.name for step in analysis.preprocessing_steps],
+            ["understand_request", "resolve_request_context", "retrieve_sources"],
+        )
+        self.assertEqual(
+            [step.step_type for step in analysis.preprocessing_steps],
+            ["understand", "resolve_context", "retrieve_data"],
+        )
+        self.assertEqual(
+            analysis.preprocessing_steps[-1].depends_on,
+            ["resolve_request_context"],
+        )
+        self.assertEqual(analysis.metadata["catalog_metadata"], {"domain": "analytics"})
 
 
 if __name__ == "__main__":

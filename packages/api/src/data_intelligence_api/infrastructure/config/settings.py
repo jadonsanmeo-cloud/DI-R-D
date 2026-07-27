@@ -27,6 +27,7 @@ class ApiSettings:
     artifact_root: Path = Path("artifacts")
     method_hub_default_enabled: bool = False
     method_hub_endpoint: str = "http://localhost:8000/mcp"
+    default_organization_id: str = "test-org"
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
@@ -40,7 +41,12 @@ class ApiSettings:
             raise ValueError("The [api] configuration must be a TOML table.")
 
         root = Path(os.getenv("DATA_CORPUS_ROOT", Path.cwd())).resolve()
-        origins_value = api_payload.get("cors_origins", DEFAULT_CORS_ORIGINS)
+        origins_env = os.getenv("API_CORS_ORIGINS")
+        origins_value = (
+            origins_env.split(",")
+            if origins_env is not None
+            else api_payload.get("cors_origins", DEFAULT_CORS_ORIGINS)
+        )
         if not isinstance(origins_value, (list, tuple)):
             raise ValueError("api.cors_origins must be an array of origins.")
         origins = tuple(
@@ -49,17 +55,36 @@ class ApiSettings:
         if not origins:
             origins = DEFAULT_CORS_ORIGINS
 
-        timeout = float(api_payload.get("pipeline_timeout_seconds", 300))
+        timeout = float(
+            os.getenv(
+                "PIPELINE_TIMEOUT_SECONDS",
+                str(api_payload.get("pipeline_timeout_seconds", 300)),
+            )
+        )
         if timeout <= 0:
-            raise ValueError("api.pipeline_timeout_seconds must be greater than zero.")
-        ttl = int(api_payload.get("spec_confirmation_ttl_seconds", 86400))
+            raise ValueError(
+                "PIPELINE_TIMEOUT_SECONDS/api.pipeline_timeout_seconds must be greater than zero."
+            )
+        ttl = int(
+            os.getenv(
+                "SPEC_CONFIRMATION_TTL_SECONDS",
+                str(api_payload.get("spec_confirmation_ttl_seconds", 86400)),
+            )
+        )
         if ttl <= 0:
             raise ValueError(
-                "api.spec_confirmation_ttl_seconds must be greater than zero."
+                "SPEC_CONFIRMATION_TTL_SECONDS/api.spec_confirmation_ttl_seconds must be greater than zero."
             )
-        max_revisions = int(api_payload.get("max_spec_revision_rounds", 5))
+        max_revisions = int(
+            os.getenv(
+                "MAX_SPEC_REVISION_ROUNDS",
+                str(api_payload.get("max_spec_revision_rounds", 5)),
+            )
+        )
         if max_revisions <= 0:
-            raise ValueError("api.max_spec_revision_rounds must be greater than zero.")
+            raise ValueError(
+                "MAX_SPEC_REVISION_ROUNDS/api.max_spec_revision_rounds must be greater than zero."
+            )
         max_upload_bytes = int(api_payload.get("max_upload_bytes", 50 * 1024 * 1024))
         if max_upload_bytes <= 0:
             raise ValueError("api.max_upload_bytes must be greater than zero.")
@@ -76,4 +101,8 @@ class ApiSettings:
             artifact_root=Path(config_manager.artifact_settings().root).resolve(),
             method_hub_default_enabled=method_hub.enabled,
             method_hub_endpoint=method_hub.endpoint,
+            default_organization_id=os.getenv(
+                "DEFAULT_ORGANIZATION_ID",
+                str(api_payload.get("default_organization_id", "test-org")),
+            ),
         )

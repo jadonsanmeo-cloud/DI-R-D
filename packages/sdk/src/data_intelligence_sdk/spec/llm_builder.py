@@ -16,6 +16,7 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.runtime.llm_client import LLMClient
+from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.datahub import DataHubClusterer
 from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.spec.cluster_specs import (
@@ -44,6 +45,7 @@ class LLMSpecBuilder:
         max_validation_retries: int = 2,
         require_actionable_spec: bool = False,
         default_missing_requirements: bool = False,
+        logger: RuntimeLogger | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.prompt = prompt or SpecBuilderPrompt()
@@ -55,6 +57,11 @@ class LLMSpecBuilder:
         self.max_validation_retries = max_validation_retries
         self.require_actionable_spec = require_actionable_spec
         self.default_missing_requirements = default_missing_requirements
+        self.logger = logger
+
+    def _log(self, event: str, payload: dict[str, object] | None = None) -> None:
+        if self.logger is not None:
+            self.logger.log(event, payload or {})
 
     def build(
         self,
@@ -118,6 +125,7 @@ class LLMSpecBuilder:
             user_context,
             intent_analysis,
         )
+        self._log_context(spec_build_context)
         selected_data_context = self._select_data(spec_build_context)
         messages = self.prompt.build_messages(
             spec_build_context=spec_build_context,
@@ -209,6 +217,7 @@ class LLMSpecBuilder:
             user_context,
             intent_analysis,
         )
+        self._log_context(spec_build_context)
         selected_data_context = self._select_data(
             spec_build_context,
             previous_spec=previous_spec,
@@ -240,7 +249,9 @@ class LLMSpecBuilder:
     ) -> ExecutionSpec:
         current_messages = list(messages)
         for attempt in range(self.max_validation_retries + 1):
-            payload = self.llm_client.complete_json(
+            self._log("spec.llm_attempt.started", {"attempt": attempt + 1})
+            payload = _complete_json(
+                self.llm_client,
                 current_messages,
                 stage="spec-builder",
             )
@@ -264,10 +275,22 @@ class LLMSpecBuilder:
                     ]
                 if self.require_actionable_spec:
                     self._validate_source_boundaries(spec, available_sources)
+                self._log(
+                    "spec.llm_attempt.completed",
+                    {
+                        "attempt": attempt + 1,
+                        "capability_count": len(spec.capability_requirements),
+                        "data_requirement_count": len(spec.data_requirements),
+                    },
+                )
                 return spec
             except ValueError as error:
                 if attempt >= self.max_validation_retries:
                     raise
+                self._log(
+                    "spec.validation_retry",
+                    {"attempt": attempt + 1, "error_type": type(error).__name__},
+                )
                 current_messages = [
                     *messages,
                     {
@@ -288,6 +311,20 @@ class LLMSpecBuilder:
                     },
                 ]
         raise RuntimeError("ExecutionSpec validation retry loop exhausted.")
+
+    def _log_context(self, context: object) -> None:
+        corpus_summary = getattr(context, "corpus_summary", None)
+        self._log(
+            "spec.context_built",
+            {
+                "source_count": len(getattr(corpus_summary, "sources", [])),
+                "table_count": len(getattr(corpus_summary, "tables", [])),
+                "vector_collection_count": len(
+                    getattr(corpus_summary, "vector_collections", [])
+                ),
+                "dataset_count": len(getattr(corpus_summary, "datasets", [])),
+            },
+        )
 
     def _default_capability_name(self, spec: ExecutionSpec) -> str:
         objective = spec.objective.lower()
@@ -527,6 +564,19 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
         raise ValueError("Expected a JSON object.")
     return value
 
+
+def _complete_json(
+    llm_client: LLMClient,
+    messages: list[dict[str, str]],
+    *,
+    stage: str,
+) -> dict[str, Any]:
+    try:
+        return llm_client.complete_json(messages, stage=stage)
+    except TypeError as exc:
+        if "stage" not in str(exc):
+            raise
+        return llm_client.complete_json(messages)
 
 def _selected_data_to_dict(value: object | None) -> dict[str, Any]:
     if value is None:
