@@ -249,7 +249,37 @@ def execute_prepared_markdown_workflow(
         logger=logger,
         runtime_options=runtime_options,
     )
+    if runtime_options.engine in {"general", "reason"}:
+        spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
+        prepared_execution = PreparedExecution(
+            query=prepared.query,
+            intent=spec.intent,
+            corpus_package=DataCorpusPackage(),
+            spec=spec,
+            session_context=prepared.session_context,
+            user_context=prepared.user_context,
+            intent_analysis=prepared.intent_analysis,
+            run_artifact=prepared.run_artifact,
+            run_artifact_id=prepared.run_artifact_id,
+        )
+        return pipeline.execute_confirmed_spec(prepared_execution, spec)
     return pipeline.execute_confirmed_markdown(prepared, spec_markdown)
+
+def _execution_spec_from_markdown(
+    prepared: PreparedMarkdownExecution,
+    spec_markdown: str,
+    runtime_options: WorkflowRuntimeOptions,
+) -> ExecutionSpec:
+    intent = runtime_options.engine or prepared.intent_analysis.intent
+    if intent not in {"general", "reason", "report"}:
+        intent = prepared.intent_analysis.intent
+    return ExecutionSpec(
+        intent=intent,
+        objective=validate_spec_markdown(spec_markdown),
+        confirmed=True,
+        engine_hint=ENGINE_ROUTE_MAP.get(runtime_options.engine or ""),
+        preprocessing_steps=list(prepared.intent_analysis.preprocessing_steps),
+    )
 
 
 def revise_workflow(

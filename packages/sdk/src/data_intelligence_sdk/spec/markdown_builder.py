@@ -26,7 +26,10 @@ class LLMMarkdownSpecBuilder:
         messages = _build_messages(query, analysis)
         current_messages = list(messages)
         for attempt in range(self.max_validation_retries + 1):
-            markdown = self.llm_client.complete_text(current_messages)
+            markdown = self.llm_client.complete_text(
+                current_messages,
+                stage="markdown-spec-builder",
+            )
             try:
                 return validate_spec_markdown(markdown)
             except ValueError as exc:

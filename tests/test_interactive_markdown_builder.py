@@ -10,9 +10,12 @@ class SequencedTextClient:
     def __init__(self) -> None:
         self.responses = ["invalid", _valid_markdown()]
         self.text_calls = 0
+        self.stages: list[str] = []
 
-    def complete_text(self, messages: list[dict[str, str]]) -> str:
+    def complete_text(self, messages: list[dict[str, str]], *, stage: str) -> str:
+        del messages
         self.text_calls += 1
+        self.stages.append(stage)
         return self.responses.pop(0)
 
     def complete_json(self, messages: list[dict[str, str]]) -> dict:
@@ -65,6 +68,10 @@ class InteractiveMarkdownBuilderTests(unittest.TestCase):
 
         self.assertEqual(markdown, _valid_markdown())
         self.assertEqual(client.text_calls, 2)
+        self.assertEqual(
+            client.stages,
+            ["markdown-spec-builder", "markdown-spec-builder"],
+        )
         self.assertNotIn("capability_requirements", markdown)
         self.assertNotIn("data_requirements", markdown)
 

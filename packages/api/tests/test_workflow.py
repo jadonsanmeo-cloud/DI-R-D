@@ -6,6 +6,7 @@ from unittest.mock import ANY, patch
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
     ExecutionSpec,
+    FinalResponse,
     IntentAnalysis,
     PreparedExecution,
     PreprocessingStep,
@@ -20,6 +21,7 @@ from data_intelligence_api.application.workflow import (
     SourceValidationError,
     build_workflow_invocation,
     default_pipeline_factory,
+    execute_prepared_markdown_workflow,
     prepared_from_payload,
     prepared_to_payload,
     spec_from_payload,
@@ -28,6 +30,7 @@ from data_intelligence_api.application.workflow import (
     markdown_spec_from_payload,
     markdown_spec_to_payload,
 )
+from data_intelligence_api.domain.workflow import WorkflowRuntimeOptions
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     ExampleIntentAnalyzer,
     create_example_pipeline,
@@ -221,6 +224,65 @@ class BackendWorkflowTests(unittest.TestCase):
             report_engine.received["spec_markdown"],
             "# Interactive Execution Spec\n\nConfirmed instructions.",
         )
+
+    def test_requested_general_markdown_execution_uses_engine_registry_path(self) -> None:
+        class FakePipeline:
+            def __init__(self) -> None:
+                self.confirmed_spec = None
+                self.prepared_execution = None
+                self.report_markdown_called = False
+
+            def execute_confirmed_spec(self, prepared, spec):
+                self.prepared_execution = prepared
+                self.confirmed_spec = spec
+                return FinalResponse(
+                    answer="general-result",
+                    metadata={"engine_name": "general_purpose"},
+                )
+
+            def execute_confirmed_markdown(self, prepared, spec_markdown):
+                del prepared, spec_markdown
+                self.report_markdown_called = True
+                return FinalResponse(answer="report-result")
+
+        pipeline = FakePipeline()
+        markdown = (
+            "# Interactive Execution Spec\n\n"
+            "## User Request\n\nAnswer a general question.\n\n"
+            "## Intent\n\nGeneral.\n\n"
+            "## Preparation Guidance\n\nUse available context.\n\n"
+            "## Execution Instructions\n\nUse the general engine.\n\n"
+            "## Expected Output\n\nMarkdown answer.\n"
+        )
+        prepared = PreparedMarkdownExecution(
+            query=UserQuery(text="Answer a general question"),
+            intent_analysis=IntentAnalysis(intent="report"),
+            spec_markdown=markdown,
+        )
+
+        def pipeline_factory(*, logger, runtime_options):
+            del logger
+            self.assertEqual(runtime_options.engine, "general")
+            return pipeline
+
+        result = execute_prepared_markdown_workflow(
+            prepared,
+            markdown,
+            logger=object(),
+            runtime_options=WorkflowRuntimeOptions(
+                method_hub_enabled=False,
+                engine="general",
+            ),
+            pipeline_factory=pipeline_factory,
+        )
+
+        self.assertEqual(result.metadata["engine_name"], "general_purpose")
+        self.assertFalse(pipeline.report_markdown_called)
+        self.assertEqual(pipeline.confirmed_spec.intent, "general")
+        self.assertEqual(pipeline.confirmed_spec.objective, markdown)
+        self.assertTrue(pipeline.confirmed_spec.confirmed)
+        self.assertEqual(pipeline.confirmed_spec.engine_hint, "general_purpose")
+        self.assertEqual(pipeline.prepared_execution.corpus_package, DataCorpusPackage())
 
     def test_example_intent_analyzer_does_not_infer_intent_from_datahub(self) -> None:
         intent = ExampleIntentAnalyzer().analyze(
