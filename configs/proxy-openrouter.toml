@@ -1,6 +1,6 @@
 [models]
 [[models.llms]]
-name = "deepseek/deepseek-v4-flash"
+name = "nvidia/nemotron-3-nano-30b-a3b"
 provider = "proxy/openrouter"
 api_base = "https://openrouter.ai/api/v1"
 api_key = "${env:OPENROUTER_API_KEY}"
