@@ -24,11 +24,11 @@ class ReportEngineMarkdownBoundaryTests(unittest.TestCase):
 
         self.assertEqual(result.answer, "report")
         engine.run.assert_called_once()
-        spec, corpus, received_runtime, received_user = engine.run.call_args.args
-        self.assertEqual(spec.objective, markdown.strip())
-        self.assertEqual(corpus.metadata["organization_id"], "test-org")
-        self.assertIs(received_runtime, runtime)
-        self.assertIs(received_user, user_context)
+        (engine_input,) = engine.run.call_args.args
+        self.assertEqual(engine_input.spec.objective, markdown.strip())
+        self.assertEqual(engine_input.corpus_package.metadata["organization_id"], "test-org")
+        self.assertIs(engine_input.runtime, runtime)
+        self.assertIs(engine_input.user_context, user_context)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,22 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "business-economics-finance",
+  "extends": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Business, Economics and Finance",
+  "description": "A decision-grade blueprint for markets, organizations, strategy, operations, economics, and financial evidence.",
+  "tags": ["business", "economics", "finance", "market", "strategy", "operations"],
+  "selection": {
+    "report_intents": ["business_analysis", "economic_report", "financial_analysis", "strategy_review"],
+    "keywords": ["business", "market", "revenue", "cost", "finance", "economy", "strategy", "operations", "customer", "performance"],
+    "data_signals": ["goal_evidence", "headline_metric", "comparison_dimension", "primary_measure", "time"]
+  },
+  "adaptation": {
+    "guidance": [
+      "Organize analysis around context, performance, drivers, trade-offs, risks, and decision implications only where evidence exists.",
+      "Separate observed results from inferred causes and recommendations.",
+      "Use charts for real trends, segment comparisons, distributions, or relationships—not generic dashboards."
+    ]
+  }
+}

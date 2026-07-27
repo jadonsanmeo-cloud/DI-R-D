@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import asdict
-from inspect import signature
 from typing import Any
 
 from data_intelligence_sdk.core.types import (
@@ -490,12 +489,14 @@ class DataIntelligencePipeline:
                     sandbox=sandbox,
                     run_artifact=run_artifact,
                 )
-                output = _run_engine(
-                    engine,
-                    query=prepared.query,
-                    spec=confirmed_spec,
-                    runtime=runtime,
-                    user_context=prepared.user_context,
+                output = engine.run(
+                    EngineInput(
+                        query=prepared.query,
+                        spec=confirmed_spec,
+                        runtime=runtime,
+                        corpus_package=prepared.corpus_package,
+                        user_context=prepared.user_context,
+                    )
                 )
         except Exception as exc:
             if run_artifact is not None:
@@ -688,33 +689,6 @@ def _optional_string(value: object) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
-
-def _run_engine(
-    engine: object,
-    *,
-    query: UserQuery,
-    spec: ExecutionSpec,
-    runtime: EngineRuntimeContext,
-    user_context: UserContext | None,
-) -> EngineOutput:
-    run = getattr(engine, "run")
-    if _accepts_engine_input(run):
-        return run(
-            EngineInput(
-                query=query,
-                spec=spec,
-                runtime=runtime,
-                user_context=user_context,
-            )
-        )
-    return run(spec, DataCorpusPackage(), runtime, user_context)
-
-def _accepts_engine_input(run: object) -> bool:
-    try:
-        parameters = list(signature(run).parameters.values())
-    except (TypeError, ValueError):
-        return False
-    return len(parameters) == 1
 
 def _final_response_from_engine_output(
     output: EngineOutput,

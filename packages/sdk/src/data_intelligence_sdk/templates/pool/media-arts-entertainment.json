@@ -1,0 +1,22 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "media-arts-entertainment",
+  "extends": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Media, Arts and Entertainment",
+  "description": "An interpretive blueprint for music, hip-hop, media, narratives, audiences, creative work, and cultural impact.",
+  "tags": ["media", "music", "hip-hop", "art", "entertainment", "audience"],
+  "selection": {
+    "report_intents": ["media_analysis", "music_report", "cultural_analysis", "creative_review"],
+    "keywords": ["media", "music", "hip-hop", "rap", "artist", "art", "film", "entertainment", "audience", "narrative"],
+    "data_signals": ["goal_evidence", "theme", "creator", "audience", "cultural_context"]
+  },
+  "adaptation": {
+    "guidance": [
+      "Organize sections around form, themes, creators, context, audience, influence, and tensions only when supported.",
+      "Ground interpretation in specific works, passages, patterns, or audience evidence.",
+      "Use visual comparison only for meaningful distributions or timelines; prefer concept and evidence cards for interpretation."
+    ]
+  }
+}

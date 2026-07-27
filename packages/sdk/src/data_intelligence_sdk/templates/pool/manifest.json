@@ -1,15 +1,24 @@
 {
   "schema_version": "1.0",
   "pool_id": "builtin-report-templates",
-  "description": "Built-in generic report templates available to TemplateAgent.",
+  "description": "Content-aware domain blueprints available to TemplateAgent.",
   "template_schema": "template.schema.json",
+  "fallback_template_id": "adaptive-raw-report",
+  "selection_policy": {
+    "minimum_confidence": 0.68,
+    "max_preview_characters": 12000,
+    "text_extensions": [".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".html", ".htm", ".xml", ".yaml", ".yml"]
+  },
   "templates": [
     {
       "template_id": "document-analysis",
       "version": "1.1.0",
       "path": "document-analysis.json",
       "name": "Document Analysis",
+      "description": "Format-oriented document analysis retained for explicit requests and compatibility.",
+      "domain": "cross-domain documents",
       "tags": ["document", "pdf", "text", "content", "insight"],
+      "source_extensions": [".pdf", ".txt", ".md", ".markdown", ".doc", ".docx", ".rtf"],
       "selection_hint": "Use for PDF, text, Markdown, and document sources that need goal-driven analysis of subjects, claims, evidence, relationships, and limitations."
     },
     {
@@ -17,7 +26,10 @@
       "version": "1.1.0",
       "path": "data-profile.json",
       "name": "Data Analysis",
+      "description": "Format-oriented tabular analysis retained for explicit requests and compatibility.",
+      "domain": "cross-domain datasets",
       "tags": ["dataset", "table", "csv", "spreadsheet", "analysis"],
+      "source_extensions": [".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".jsonl"],
       "selection_hint": "Use for CSV, TSV, Excel, Parquet, and JSON tables that need goal-driven patterns, comparisons, relationships, anomalies, and limitations."
     },
     {
@@ -25,7 +37,10 @@
       "version": "1.0.0",
       "path": "executive-overview.json",
       "name": "Executive Overview",
+      "description": "Compact decision-facing overview for management audiences.",
+      "domain": "cross-domain executive",
       "tags": ["executive", "overview", "kpi", "trend"],
+      "source_extensions": [],
       "selection_hint": "Use for concise management reports that prioritize KPIs, movement over time, drivers, and actions."
     },
     {
@@ -33,7 +48,10 @@
       "version": "1.0.0",
       "path": "time-series-analysis.json",
       "name": "Time-series Analysis",
+      "description": "Evidence-led analysis centered on ordered change and temporal patterns.",
+      "domain": "cross-domain temporal",
       "tags": ["time-series", "trend", "growth", "anomaly"],
+      "source_extensions": [],
       "selection_hint": "Use when the report goal centers on how one or more measures change over an ordered time dimension."
     },
     {
@@ -41,8 +59,106 @@
       "version": "1.0.0",
       "path": "segment-comparison.json",
       "name": "Segment Comparison",
+      "description": "Comparative analysis of categories, cohorts, regions, products, or other segments.",
+      "domain": "cross-domain comparison",
       "tags": ["comparison", "ranking", "segment", "composition"],
+      "source_extensions": [],
       "selection_hint": "Use when the report compares categories, cohorts, regions, products, or other business segments."
+    },
+    {
+      "template_id": "education-learning",
+      "version": "1.0.0",
+      "path": "education-learning.json",
+      "name": "Education and Learning",
+      "description": "Deep analysis of learning material, curricula, pedagogy, outcomes, skills, and educational evidence.",
+      "domain": "education and learning",
+      "llm_candidate": true,
+      "tags": ["education", "learning", "training", "curriculum", "pedagogy", "skills"],
+      "source_extensions": [],
+      "selection_hint": "Choose when the content substantially concerns teaching, learning, courses, learners, competencies, assessment, or educational design."
+    },
+    {
+      "template_id": "business-economics-finance",
+      "version": "1.0.0",
+      "path": "business-economics-finance.json",
+      "name": "Business, Economics and Finance",
+      "description": "Decision-grade analysis of markets, organizations, strategy, operations, economics, and financial evidence.",
+      "domain": "business, economics and finance",
+      "llm_candidate": true,
+      "tags": ["business", "economics", "finance", "market", "strategy", "operations"],
+      "source_extensions": [],
+      "selection_hint": "Choose when the evidence centers on organizations, markets, money, performance, strategy, operations, or economic behavior."
+    },
+    {
+      "template_id": "technology-engineering",
+      "version": "1.0.0",
+      "path": "technology-engineering.json",
+      "name": "Technology and Engineering",
+      "description": "Systematic analysis of software, architecture, engineering decisions, technical systems, and innovation.",
+      "domain": "technology and engineering",
+      "llm_candidate": true,
+      "tags": ["technology", "software", "engineering", "architecture", "system", "innovation"],
+      "source_extensions": [],
+      "selection_hint": "Choose when the source concerns software, system design, architecture, engineering trade-offs, products, infrastructure, or technical innovation."
+    },
+    {
+      "template_id": "health-wellbeing",
+      "version": "1.0.0",
+      "path": "health-wellbeing.json",
+      "name": "Health and Wellbeing",
+      "description": "Careful evidence synthesis for health, wellness, behavior, care delivery, and quality-of-life topics.",
+      "domain": "health and wellbeing",
+      "llm_candidate": true,
+      "tags": ["health", "wellbeing", "medical", "care", "wellness", "behavior"],
+      "source_extensions": [],
+      "selection_hint": "Choose when the content materially concerns health outcomes, care, wellbeing, behavior, symptoms, interventions, or quality of life."
+    },
+    {
+      "template_id": "society-culture-relationships",
+      "version": "1.0.0",
+      "path": "society-culture-relationships.json",
+      "name": "Society, Culture and Relationships",
+      "description": "Contextual analysis of communities, identity, relationships, family, marriage, norms, and lived experience.",
+      "domain": "society, culture and relationships",
+      "llm_candidate": true,
+      "tags": ["society", "culture", "relationships", "marriage", "family", "identity"],
+      "source_extensions": [],
+      "selection_hint": "Choose when the subject concerns social groups, relationships, marriage, family, identity, cultural norms, or lived experience."
+    },
+    {
+      "template_id": "media-arts-entertainment",
+      "version": "1.0.0",
+      "path": "media-arts-entertainment.json",
+      "name": "Media, Arts and Entertainment",
+      "description": "Interpretive analysis of music, hip-hop, media, narratives, audiences, creative work, and cultural impact.",
+      "domain": "media, arts and entertainment",
+      "llm_candidate": true,
+      "tags": ["media", "music", "hip-hop", "art", "entertainment", "audience"],
+      "source_extensions": [],
+      "selection_hint": "Choose when the content concerns music or hip-hop, visual or performing arts, media, entertainment, narratives, creators, or audiences."
+    },
+    {
+      "template_id": "science-policy-environment",
+      "version": "1.0.0",
+      "path": "science-policy-environment.json",
+      "name": "Science, Policy and Environment",
+      "description": "Evidence-centered analysis of research, public policy, institutions, scientific claims, and environmental systems.",
+      "domain": "science, policy and environment",
+      "llm_candidate": true,
+      "tags": ["science", "research", "policy", "government", "environment", "evidence"],
+      "source_extensions": [],
+      "selection_hint": "Choose when the source centers on scientific research, public policy, institutions, environment, methods, evidence quality, or societal impact."
+    },
+    {
+      "template_id": "adaptive-raw-report",
+      "version": "1.0.0",
+      "path": "adaptive-raw-report.json",
+      "name": "Adaptive Raw Report",
+      "description": "Broad, content-neutral blueprint used when no specialized candidate is sufficiently confident.",
+      "domain": "cross-domain raw fallback",
+      "tags": ["raw", "generic", "adaptive", "fallback", "cross-domain"],
+      "source_extensions": [],
+      "selection_hint": "Use only as the declared low-confidence fallback; adapt sections directly to the available content and plan."
     }
   ]
 }

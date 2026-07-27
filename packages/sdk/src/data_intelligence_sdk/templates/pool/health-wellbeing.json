@@ -1,0 +1,22 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "health-wellbeing",
+  "extends": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Health and Wellbeing",
+  "description": "A careful evidence-synthesis blueprint for health, wellness, behavior, care delivery, and quality of life.",
+  "tags": ["health", "wellbeing", "medical", "care", "wellness", "behavior"],
+  "selection": {
+    "report_intents": ["health_analysis", "wellbeing_report", "care_review"],
+    "keywords": ["health", "medical", "wellbeing", "care", "symptom", "treatment", "intervention", "patient", "behavior"],
+    "data_signals": ["goal_evidence", "outcome", "population", "intervention", "risk_factor"]
+  },
+  "adaptation": {
+    "guidance": [
+      "Organize sections around population or context, observed outcomes, contributing factors, interventions, and evidence quality only when supported.",
+      "Clearly separate association, reported experience, and causal evidence.",
+      "Avoid diagnostic or treatment claims beyond the source and foreground uncertainty and coverage."
+    ]
+  }
+}

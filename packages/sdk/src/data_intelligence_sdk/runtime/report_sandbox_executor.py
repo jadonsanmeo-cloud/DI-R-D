@@ -82,16 +82,27 @@ class RequestSandboxExecutor:
             translated_inputs,
         )
         timeout_seconds = self._timeout_seconds(resource_policy)
-        try:
-            observation = self.session.execute_python(
-                call_source,
-                self.run_artifact,
-                timeout_seconds=timeout_seconds,
-            )
-        except Exception as exc:
+        observation = None
+        for attempt in range(2):
+            try:
+                observation = self.session.execute_python(
+                    call_source,
+                    self.run_artifact,
+                    timeout_seconds=timeout_seconds,
+                )
+                break
+            except Exception as exc:
+                if attempt == 0 and self.session.reprovision():
+                    continue
+                return SandboxRunResult(
+                    status="failed",
+                    error=str(exc),
+                    metadata={"mode": mode},
+                )
+        if observation is None:
             return SandboxRunResult(
                 status="failed",
-                error=str(exc),
+                error="Sandbox execution did not return an observation.",
                 metadata={"mode": mode},
             )
 

@@ -65,6 +65,7 @@
         {
           "block_id": "trend-kpis",
           "type": "kpi_group",
+          "content_role": "metrics",
           "title": "Trend Metrics",
           "required": true,
           "layout": {"span": 12, "emphasis": "featured"},
@@ -74,6 +75,7 @@
         {
           "block_id": "trend-narrative",
           "type": "narrative",
+          "content_role": "executive_summary",
           "required": true,
           "layout": {"span": 12, "emphasis": "standard"},
           "data_requirement_refs": ["time-series-values", "period-change"],
@@ -91,6 +93,7 @@
         {
           "block_id": "main-time-series-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Measure Over Time",
           "required": true,
           "layout": {"span": 8, "emphasis": "featured"},
@@ -111,6 +114,7 @@
         {
           "block_id": "period-change-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Period-over-period Change",
           "required": false,
           "layout": {"span": 4, "emphasis": "supporting"},
@@ -140,6 +144,7 @@
         {
           "block_id": "anomaly-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Anomaly Candidates",
           "required": false,
           "layout": {"span": 8, "emphasis": "featured"},
@@ -160,6 +165,7 @@
         {
           "block_id": "caveats",
           "type": "narrative",
+          "content_role": "limitation",
           "required": true,
           "layout": {"span": 4, "emphasis": "supporting"},
           "data_requirement_refs": ["time-series-values"],

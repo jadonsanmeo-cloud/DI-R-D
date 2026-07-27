@@ -1,0 +1,22 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "society-culture-relationships",
+  "extends": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Society, Culture and Relationships",
+  "description": "A contextual blueprint for communities, identity, relationships, family, marriage, norms, and lived experience.",
+  "tags": ["society", "culture", "relationships", "marriage", "family", "identity"],
+  "selection": {
+    "report_intents": ["social_analysis", "culture_report", "relationship_analysis"],
+    "keywords": ["society", "culture", "relationship", "marriage", "family", "identity", "community", "norm", "gender"],
+    "data_signals": ["goal_evidence", "social_group", "theme", "experience", "context"]
+  },
+  "adaptation": {
+    "guidance": [
+      "Organize analysis around context, perspectives, norms, relationships, tensions, and consequences only where the evidence supports them.",
+      "Represent multiple perspectives and avoid treating one account as universal.",
+      "Prefer thematic insight cards and evidence trails over artificial quantification."
+    ]
+  }
+}

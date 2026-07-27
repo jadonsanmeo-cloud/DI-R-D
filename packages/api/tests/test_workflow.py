@@ -158,7 +158,10 @@ class BackendWorkflowTests(unittest.TestCase):
                 intent_service_base_url="http://localhost:8005",
             )
 
-        analyzer_class.assert_called_once_with(base_url="http://localhost:8005")
+        analyzer_class.assert_called_once()
+        analyzer_kwargs = analyzer_class.call_args.kwargs
+        self.assertEqual(analyzer_kwargs["base_url"], "http://localhost:8005")
+        self.assertNotIn("fallback_analyzer", analyzer_kwargs)
         self.assertIs(pipeline.intent_analyzer, analyzer_class.return_value)
 
     def test_llm_pipeline_uses_report_engine_for_markdown_execution(self) -> None:

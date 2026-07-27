@@ -171,6 +171,7 @@ class EngineInput:
     query: UserQuery
     spec: ExecutionSpec
     runtime: EngineRuntimeContext
+    corpus_package: DataCorpusPackage = field(default_factory=DataCorpusPackage)
     user_context: UserContext | None = None
 
 

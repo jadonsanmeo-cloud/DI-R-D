@@ -37,6 +37,7 @@ from data_intelligence_sdk.registry.engine_selector import (
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.sandbox import (
     EngineSandboxSession,
+    SandboxEnvironment,
     SandboxSessionProvider,
 )
 from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
@@ -203,25 +204,33 @@ class _AxiomSandboxProvider:
 
     @contextmanager
     def open(self, corpus_package: DataCorpusPackage):
-        sandbox = self.client.create_sandbox(
-            self.workspace_id,
-            capability_profiles=list(self.capability_profiles),
-        )
+        def create_sandbox():
+            return self.client.create_sandbox(
+                self.workspace_id,
+                capability_profiles=list(self.capability_profiles),
+            )
+
+        sandbox = create_sandbox()
+        session = None
         try:
             sandbox.wait_until_ready()
-            source_paths = self._stage_sources(sandbox, corpus_package)
-            yield EngineSandboxSession(
+            session = EngineSandboxSession(
                 sandbox=sandbox,
-                source_paths=source_paths,
+                environment=SandboxEnvironment.from_payload(
+                    getattr(sandbox, "capabilities", None)
+                ),
+                sandbox_factory=create_sandbox,
             )
+            session.source_paths = self._stage_sources(session, corpus_package)
+            yield session
         finally:
             if self.cleanup:
                 with suppress(Exception):
-                    sandbox.delete()
+                    (session.sandbox if session is not None else sandbox).delete()
 
     @staticmethod
     def _stage_sources(
-        sandbox: object,
+        session: EngineSandboxSession,
         corpus_package: DataCorpusPackage,
     ) -> dict[str, str]:
         source_paths: dict[str, str] = {}
@@ -239,7 +248,7 @@ class _AxiomSandboxProvider:
                 filename = f"{index}_{filename}"
             used_names.add(filename)
             relative_path = f"input/{filename}"
-            sandbox.write(relative_path, host_path.read_bytes())
+            session.write(relative_path, host_path.read_bytes())
             source_paths[source_text] = f"/workspace/{relative_path}"
         return source_paths
 
@@ -587,7 +596,9 @@ def create_example_pipeline(
         registry.register(engine)
     interface_registry = interface_registry or InMemoryInterfaceRegistry()
     intent_analyzer = (
-        AxiomIntentServiceAnalyzer(base_url=intent_service_base_url)
+        AxiomIntentServiceAnalyzer(
+            base_url=intent_service_base_url,
+        )
         if intent_service_base_url
         else ExampleIntentAnalyzer()
     )

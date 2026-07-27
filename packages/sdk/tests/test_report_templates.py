@@ -1,4 +1,8 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 from data_intelligence_sdk.core.types import DataCorpusPackage, ExecutionSpec
 from data_intelligence_sdk.engines.report import (
@@ -65,12 +69,227 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertEqual(
             set(loaded),
             {
+                "adaptive-raw-report",
+                "business-economics-finance",
                 "document-analysis",
                 "data-profile",
+                "education-learning",
                 "executive-overview",
+                "health-wellbeing",
+                "media-arts-entertainment",
+                "science-policy-environment",
                 "time-series-analysis",
                 "segment-comparison",
+                "society-culture-relationships",
+                "technology-engineering",
             },
+        )
+
+    def test_domain_templates_inherit_adaptive_structure_from_pool(self):
+        definition = self.pool.get("technology-engineering")
+
+        self.assertEqual(definition["template_id"], "technology-engineering")
+        self.assertTrue(definition["sections"])
+        self.assertEqual(
+            definition["data_requirements"][0]["requirement_id"],
+            "goal-evidence",
+        )
+        self.assertIn(
+            "quality attributes",
+            " ".join(definition["adaptation"]["guidance"]),
+        )
+
+    def test_llm_receives_only_seven_new_domain_templates(self):
+        candidate_ids = {
+            item["template_id"]
+            for item in self.pool.selection_candidates()
+        }
+
+        self.assertEqual(
+            candidate_ids,
+            {
+                "business-economics-finance",
+                "education-learning",
+                "health-wellbeing",
+                "media-arts-entertainment",
+                "science-policy-environment",
+                "society-culture-relationships",
+                "technology-engineering",
+            },
+        )
+        self.assertNotIn("adaptive-raw-report", candidate_ids)
+        self.assertNotIn("document-analysis", candidate_ids)
+
+    def test_low_confidence_selection_uses_manifest_raw_fallback(self):
+        proposal = self.agent.run(
+            ExecutionSpec(intent="report", objective="Analyze this source"),
+            {"steps": []},
+            DataCorpusPackage(sources=["unknown.bin"]),
+        )
+
+        self.assertEqual(
+            proposal["selection"]["template_id"],
+            self.pool.manifest()["fallback_template_id"],
+        )
+        self.assertEqual(proposal["selection"]["confidence"], 0.0)
+
+    def test_llm_selection_builds_valid_dynamic_instance(self):
+        class RecordingLLM:
+            def __init__(self):
+                self.prompt = ""
+
+            def invoke(self, prompt):
+                self.prompt = prompt.to_string()
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "template_id": "technology-engineering",
+                            "confidence": 0.93,
+                            "selection_reason": (
+                                "The content describes software architecture, "
+                                "modularity, dependencies, and trade-offs."
+                            ),
+                            "content_profile": {
+                                "domain": "technology and engineering"
+                            },
+                            "title_strategy": (
+                                "Name the software-design subject and central tension."
+                            ),
+                            "instance_blueprint": {
+                                "sections": [
+                                    {
+                                        "section_id": "design-overview",
+                                        "title": "Design Concepts at a Glance",
+                                        "purpose": "Profile and summarize the material.",
+                                        "required": True,
+                                        "layout": {
+                                            "columns": 12,
+                                            "density": "comfortable",
+                                        },
+                                        "blocks": [
+                                            {
+                                                "content_role": "data_profile",
+                                                "block_id": "profile",
+                                            },
+                                            {
+                                                "content_role": "executive_summary",
+                                                "block_id": "summary",
+                                            },
+                                            {
+                                                "content_role": "key_findings",
+                                                "block_id": "findings",
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        "section_id": "evidence",
+                                        "title": "Architectural Evidence",
+                                        "purpose": "Ground the interpretation.",
+                                        "required": True,
+                                        "layout": {
+                                            "columns": 12,
+                                            "density": "detailed",
+                                        },
+                                        "blocks": [
+                                            {
+                                                "content_role": "supporting_evidence",
+                                                "block_id": "evidence-trail",
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "section_id": "limits",
+                                        "title": "Synthesis and Limits",
+                                        "purpose": "Conclude with evidence limits.",
+                                        "required": True,
+                                        "layout": {
+                                            "columns": 12,
+                                            "density": "detailed",
+                                        },
+                                        "blocks": [
+                                            {
+                                                "content_role": "limitation",
+                                                "block_id": "limitations",
+                                            }
+                                        ],
+                                    },
+                                ]
+                            },
+                        }
+                    )
+                )
+
+        llm = RecordingLLM()
+        agent = TemplateAgent(llm, self.pool)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "software-design.md"
+            source.write_text(
+                "Unique preview marker: modular boundaries and information hiding.",
+                encoding="utf-8",
+            )
+            proposal = agent.run(
+                ExecutionSpec(
+                    intent="report",
+                    objective="Explain the software design concepts",
+                ),
+                {
+                    "steps": [
+                        {
+                            "step_id": "read",
+                            "outputs": [
+                                {
+                                    "name": "content",
+                                    "shape": "table",
+                                    "semantic_roles": ["goal_evidence"],
+                                }
+                            ],
+                        }
+                    ]
+                },
+                DataCorpusPackage(sources=[str(source)]),
+            )
+
+        self.assertEqual(
+            proposal["selection"]["template_id"],
+            "technology-engineering",
+        )
+        self.assertEqual(len(proposal["template_instance"]["sections"]), 3)
+        self.assertEqual(
+            proposal["template_instance"]["sections"][0]["title"],
+            "Design Concepts at a Glance",
+        )
+        self.assertIn("Education and Learning", llm.prompt)
+        self.assertIn("Technology and Engineering", llm.prompt)
+        self.assertIn("Unique preview marker", llm.prompt)
+        self.assertNotIn('"name": "Adaptive Raw Report"', llm.prompt)
+        self.assertNotIn('"name": "Document Analysis"', llm.prompt)
+
+    def test_dynamic_instance_normalizes_invalid_section_layouts(self):
+        definition = self.pool.get("adaptive-raw-report")
+        requested_sections = json.loads(json.dumps(definition["sections"]))
+        requested_sections[0]["layout"] = "comfortable"
+        requested_sections[1]["layout"] = None
+        requested_sections[2]["layout"] = {
+            "columns": 99,
+            "density": "unexpected",
+        }
+
+        sections = self.agent._adapt_sections(
+            definition,
+            {"instance_blueprint": {"sections": requested_sections}},
+        )
+
+        self.assertEqual(
+            sections[0]["layout"],
+            {"columns": 12, "density": "comfortable"},
+        )
+        self.assertEqual(
+            sections[1]["layout"],
+            {"columns": 12, "density": "comfortable"},
+        )
+        self.assertEqual(
+            sections[2]["layout"],
+            {"columns": 12, "density": "comfortable"},
         )
 
     def test_source_format_selects_specialized_template(self):
@@ -430,6 +649,9 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertIn("echarts@5.5.1", html)
         self.assertIn("<style>", html)
         self.assertIn('data-chart-id="report.overview.chart"', html)
+        self.assertIn('class="report-nav"', html)
+        self.assertIn('class="theme-toggle"', html)
+        self.assertIn("Document profile", html)
 
     def test_renderer_uses_dashboard_layout_and_limits_kpis(self):
         metrics = [{"name": f"metric_{index}", "value": index} for index in range(1, 7)]
@@ -467,6 +689,120 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertEqual(html.count('class="kpi-item '), 4)
         self.assertNotIn("metric_5", html)
         self.assertIn(".report-block { grid-column: 1 / -1; }", html)
+
+    def test_renderer_falls_back_for_invalid_layout_types(self):
+        rendered = ReportRenderer().render(
+            {
+                "title": "Layout fallback report",
+                "summary": "Renderer input contains malformed layout values.",
+                "sections": [
+                    {
+                        "section_id": "string-layout",
+                        "title": "String layout",
+                        "layout": "comfortable",
+                        "blocks": [
+                            {
+                                "block_id": "string-block-layout",
+                                "type": "narrative",
+                                "title": "Narrative",
+                                "layout": "featured",
+                                "content": {"text": "Valid report content."},
+                            }
+                        ],
+                    },
+                    {
+                        "section_id": "null-layout",
+                        "title": "Null layout",
+                        "layout": None,
+                        "blocks": [
+                            {
+                                "block_id": "null-block-layout",
+                                "type": "narrative",
+                                "title": "Narrative",
+                                "layout": None,
+                                "content": {"text": "More valid report content."},
+                            }
+                        ],
+                    },
+                ],
+                "warnings": [],
+            }
+        )
+        html = next(item["content"] for item in rendered if item["format"] == "html")
+
+        self.assertEqual(html.count("density-comfortable"), 2)
+        self.assertIn('style="--block-span:6"', html)
+
+    def test_renderer_omits_empty_optional_table_without_material_issue(self):
+        rendered = ReportRenderer().render(
+            {
+                "title": "Evidence report",
+                "summary": "A meaningful summary.",
+                "sections": [
+                    {
+                        "section_id": "quality",
+                        "title": "Quality",
+                        "blocks": [
+                            {
+                                "block_id": "optional-table",
+                                "type": "table",
+                                "required": False,
+                                "status": "no_data",
+                                "content": {"rows": []},
+                            }
+                        ],
+                    }
+                ],
+                "warnings": [],
+            }
+        )
+        html = next(item["content"] for item in rendered if item["format"] == "html")
+
+        self.assertNotIn("No table data is available", html)
+        self.assertNotIn("Material Data Issues", html)
+
+    def test_renderer_supports_profile_and_non_chart_visual_blocks(self):
+        rendered = ReportRenderer().render(
+            {
+                "title": "Software design concepts",
+                "summary": "A detailed subject-specific summary.",
+                "sections": [
+                    {
+                        "section_id": "overview",
+                        "title": "Overview",
+                        "blocks": [
+                            {
+                                "block_id": "profile",
+                                "type": "profile",
+                                "content": {
+                                    "items": [
+                                        {"label": "File type", "value": "HTML"}
+                                    ]
+                                },
+                            },
+                            {
+                                "block_id": "insights",
+                                "type": "insight_grid",
+                                "content": {
+                                    "items": [
+                                        {
+                                            "title": "Modularity",
+                                            "text": "Boundaries reduce change propagation.",
+                                        }
+                                    ]
+                                },
+                            },
+                        ],
+                    }
+                ],
+                "warnings": [],
+            }
+        )
+        html = next(item["content"] for item in rendered if item["format"] == "html")
+
+        self.assertIn('class="profile-list"', html)
+        self.assertIn('class="insight-grid"', html)
+        self.assertIn("01 / Analysis", html)
 
     def test_chart_fallback_maps_document_semantic_fields(self):
         chart = ChartAgent(None)._fallback_chart(
