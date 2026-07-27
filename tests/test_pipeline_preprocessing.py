@@ -4,7 +4,6 @@ import unittest
 
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     ExecutionSpec,
     IntentAnalysis,
     PreprocessingStep,
@@ -22,7 +21,13 @@ def governed_step() -> PreprocessingStep:
 
 
 class StructuredAnalyzer:
-    def analyze(self, *args: object) -> IntentAnalysis:
+    def analyze(
+        self,
+        query: UserQuery,
+        session_context: object,
+        user_context: object,
+    ) -> IntentAnalysis:
+        del query, session_context, user_context
         return IntentAnalysis(
             intent="reason",
             catalog_intent_id="data_query",
@@ -31,7 +36,13 @@ class StructuredAnalyzer:
 
 
 class LegacyAnalyzer:
-    def analyze(self, *args: object) -> str:
+    def analyze(
+        self,
+        query: UserQuery,
+        session_context: object,
+        user_context: object,
+    ) -> str:
+        del query, session_context, user_context
         return "general"
 
 
@@ -84,7 +95,6 @@ class PipelinePreprocessingTests(unittest.TestCase):
 
         prepared = pipeline(StructuredAnalyzer(), builder).prepare_spec(
             UserQuery(text="Inspect orders"),
-            DataCorpusPackage(sources=["orders.csv"]),
         )
 
         self.assertEqual(builder.received_intent, "reason")
@@ -100,7 +110,6 @@ class PipelinePreprocessingTests(unittest.TestCase):
 
         prepared = pipeline(LegacyAnalyzer(), builder).prepare_spec(
             UserQuery(text="Inspect orders"),
-            DataCorpusPackage(sources=["orders.csv"]),
         )
 
         self.assertEqual(builder.received_intent, "general")
@@ -112,7 +121,6 @@ class PipelinePreprocessingTests(unittest.TestCase):
         subject = pipeline(StructuredAnalyzer(), builder)
         prepared = subject.prepare_spec(
             UserQuery(text="Inspect orders"),
-            DataCorpusPackage(sources=["orders.csv"]),
         )
 
         revised = subject.revise_spec(prepared, prepared.spec, "Focus on totals")

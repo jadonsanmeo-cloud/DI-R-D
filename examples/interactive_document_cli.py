@@ -20,7 +20,6 @@ if str(EXAMPLES_DIR) not in sys.path:
 
 from basic_workflow import create_example_pipeline  # noqa: E402
 from data_intelligence_sdk.core.types import (  # noqa: E402
-    DataCorpusPackage,
     ExecutionSpec,
     FinalResponse,
     PreparedExecution,
@@ -363,8 +362,7 @@ def run(
         _section("User Query", output)
         query_text = _prompt_non_empty("> ", input_stream, output)
         pipeline = pipeline_factory(args)
-        corpus = DataCorpusPackage(sources=[str(path.resolve()) for path in selected])
-        prepared = pipeline.prepare_spec(UserQuery(query_text), corpus)
+        prepared = pipeline.prepare_spec(UserQuery(query_text))
         confirmed = _confirm_or_revise(
             pipeline,
             prepared,

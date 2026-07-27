@@ -37,8 +37,8 @@ class _IntentAnalyzer:
     def __init__(self, analysis: IntentAnalysis) -> None:
         self.analysis = analysis
 
-    def analyze_details(self, query, corpus_package, session_context, user_context):
-        del query, corpus_package, session_context, user_context
+    def analyze_details(self, query, session_context, user_context):
+        del query, session_context, user_context
         return self.analysis
 
 
@@ -102,7 +102,6 @@ class IntentGuidedSpecBuilderTests(unittest.TestCase):
 
         prepared = pipeline.prepare_spec(
             UserQuery(text="How many orders do we have?"),
-            DataCorpusPackage(sources=["orders.csv"]),
         )
 
         self.assertIs(spec_builder.analysis, self.analysis)

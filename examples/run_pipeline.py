@@ -161,10 +161,7 @@ def main() -> None:
             logger=None if args.no_trace else FileRuntimeLogger(args.trace_log_path)
         )
 
-        response = pipeline.run(
-            UserQuery(args.query),
-            corpus_package,
-        )
+        response = pipeline.run(UserQuery(args.query))
 
         print(response.answer)
         if artifact_ref := response.metadata.get("artifact_ref"):

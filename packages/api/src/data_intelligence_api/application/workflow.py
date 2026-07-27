@@ -203,9 +203,8 @@ def execute_workflow(
     )
     return pipeline.run(
         invocation.query,
-        invocation.corpus_package,
-        invocation.session_context,
-        invocation.user_context,
+        session_context=invocation.session_context,
+        user_context=invocation.user_context,
     )
 
 

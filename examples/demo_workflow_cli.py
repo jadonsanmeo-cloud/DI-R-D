@@ -181,7 +181,7 @@ def run(
     _section("User Query", output)
     print(args.query, file=output)
     _section("Executing Runtime", output)
-    response = pipeline.run(UserQuery(args.query), corpus)
+    response = pipeline.run(UserQuery(args.query))
     _print_response(response, output, verbose=args.verbose)
     return 0
 

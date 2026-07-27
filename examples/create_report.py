@@ -131,7 +131,7 @@ def main() -> None:
     pipeline = create_report_pipeline(
         logger=None if args.no_trace else FileRuntimeLogger(args.trace_log_path)
     )
-    response = pipeline.run(UserQuery(args.query), corpus_package)
+    response = pipeline.run(UserQuery(args.query))
     report = response.answer
     if isinstance(report, str):
         if report.lstrip().lower().startswith(("<!doctype html", "<html")):

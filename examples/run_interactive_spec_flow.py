@@ -523,7 +523,7 @@ def main() -> None:
         "ClusterSpecSelector -> LLMSpecBuilder -> SpecConfirmation"
     )
 
-    response = pipeline.run(UserQuery(args.query), corpus_package)
+    response = pipeline.run(UserQuery(args.query))
 
     print("")
     print("=== Final Demo Output ===")

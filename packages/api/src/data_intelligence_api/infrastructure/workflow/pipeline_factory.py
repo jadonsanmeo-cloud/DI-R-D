@@ -297,11 +297,10 @@ class ExampleIntentAnalyzer:
     def analyze(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> Intent:
-        del corpus_package, session_context, user_context
+        del session_context, user_context
         text = query.text.lower()
         if any(
             term in text

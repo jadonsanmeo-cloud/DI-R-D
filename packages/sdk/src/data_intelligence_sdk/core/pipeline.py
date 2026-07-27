@@ -145,7 +145,6 @@ class DataIntelligencePipeline:
     def run(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> FinalResponse:
@@ -153,9 +152,8 @@ class DataIntelligencePipeline:
 
         prepared = self.prepare_spec(
             query,
-            corpus_package,
-            session_context,
-            user_context,
+            session_context=session_context,
+            user_context=user_context,
         )
         try:
             confirmed_spec = self._confirm_spec(prepared)
@@ -172,12 +170,12 @@ class DataIntelligencePipeline:
     def prepare_spec(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> PreparedExecution:
         """Analyze intent and build a draft spec without selecting an engine."""
 
+        corpus_package = DataCorpusPackage()
         create_run = getattr(self.artifact_store, "create_run", None)
         run_artifact = (
             create_run(query, corpus_package) if callable(create_run) else None
@@ -197,7 +195,6 @@ class DataIntelligencePipeline:
             )
             analyzed_intent = self._analyze_intent(
                 query,
-                corpus_package,
                 session_context,
                 user_context,
             )
@@ -358,10 +355,8 @@ class DataIntelligencePipeline:
 
         if self.markdown_spec_builder is None:
             raise RuntimeError("Markdown spec builder is not configured.")
-        corpus_package = DataCorpusPackage()
         analyzed_intent = self._analyze_intent(
             query,
-            corpus_package,
             session_context,
             user_context,
         )
@@ -499,7 +494,6 @@ class DataIntelligencePipeline:
                     engine,
                     query=prepared.query,
                     spec=confirmed_spec,
-                    corpus_package=prepared.corpus_package,
                     runtime=runtime,
                     user_context=prepared.user_context,
                 )
@@ -573,19 +567,13 @@ class DataIntelligencePipeline:
     def _analyze_intent(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None,
         user_context: UserContext | None,
     ) -> object:
         analyze_details = getattr(self.intent_analyzer, "analyze_details", None)
         if callable(analyze_details):
-            return analyze_details(query, corpus_package, session_context, user_context)
-        return self.intent_analyzer.analyze(
-            query,
-            corpus_package,
-            session_context,
-            user_context,
-        )
+            return analyze_details(query, session_context, user_context)
+        return self.intent_analyzer.analyze(query, session_context, user_context)
 
     def _confirm_spec(
         self,
@@ -701,13 +689,11 @@ def _optional_string(value: object) -> str | None:
     normalized = str(value).strip()
     return normalized or None
 
-
 def _run_engine(
     engine: object,
     *,
     query: UserQuery,
     spec: ExecutionSpec,
-    corpus_package: DataCorpusPackage,
     runtime: EngineRuntimeContext,
     user_context: UserContext | None,
 ) -> EngineOutput:
@@ -721,7 +707,7 @@ def _run_engine(
                 user_context=user_context,
             )
         )
-    return run(spec, corpus_package, runtime, user_context)
+    return run(spec, DataCorpusPackage(), runtime, user_context)
 
 def _accepts_engine_input(run: object) -> bool:
     try:

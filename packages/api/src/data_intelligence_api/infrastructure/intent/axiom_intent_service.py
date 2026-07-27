@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
 import httpx
 
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     Intent,
     IntentAnalysis,
     PreprocessingStep,
@@ -23,15 +21,6 @@ _PREPROCESSING_STEP_TYPES = {
     "resolve_context",
     "retrieve_data",
     "validate_data",
-}
-
-_ROLE_MAP = {
-    "human": "user",
-    "user": "user",
-    "view": "assistant",
-    "ai": "assistant",
-    "assistant": "assistant",
-    "system": "system",
 }
 
 _REPORT_INTENTS = {
@@ -69,54 +58,55 @@ class AxiomIntentServiceAnalyzer:
     def analyze(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> IntentAnalysis:
-        del corpus_package, user_context
+        del session_context, user_context
         payload = {
+            "limit": 1,
             "query": query.text,
-            "history": _history_from_session_context(session_context),
+            "search_type": "hybrid",
         }
-        response_payload = self._post_prediction(payload)
-        resolved_intent = response_payload.get("resolved_intent")
-        resolved_payload = resolved_intent if isinstance(resolved_intent, dict) else {}
-        catalog_intent_id = str(
-            resolved_payload.get("intent_id")
-            or response_payload.get("primary_intent")
-            or ""
-        ).strip()
+        response_payload = self._post_intent_search(payload)
+        top_hit = _top_search_hit(response_payload)
+        resolved_payload = _hit_intent(top_hit)
+        catalog_intent_id = str(resolved_payload.get("intent_id") or "").strip()
         catalog_metadata = resolved_payload.get("metadata")
         return IntentAnalysis(
-            intent=_map_catalog_intent(response_payload.get("primary_intent")),
+            intent=_map_catalog_intent(catalog_intent_id),
             catalog_intent_id=catalog_intent_id or None,
             preprocessing_steps=_extract_preprocessing_steps(resolved_payload),
             metadata={
                 "catalog_metadata": (
                     dict(catalog_metadata) if isinstance(catalog_metadata, dict) else {}
                 ),
-                "confidence": response_payload.get("confidence"),
-                "language": response_payload.get("language"),
+                "score": top_hit.get("score") if top_hit is not None else None,
+                "lexical_score": (
+                    top_hit.get("lexical_score") if top_hit is not None else None
+                ),
+                "semantic_score": (
+                    top_hit.get("semantic_score") if top_hit is not None else None
+                ),
+                "matched_by": top_hit.get("matched_by") if top_hit is not None else [],
             },
         )
 
     def analyze_details(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> IntentAnalysis:
         """Return the full normalized Intent Service classification."""
 
-        return self.analyze(query, corpus_package, session_context, user_context)
+        return self.analyze(query, session_context, user_context)
 
-    def _post_prediction(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post_intent_search(self, payload: dict[str, Any]) -> dict[str, Any]:
         client = self._client or httpx.Client(timeout=self.timeout_seconds)
         close_client = self._client is None
         try:
             response = client.post(
-                f"{self.base_url}/api/v1/intent-predictions",
+                f"{self.base_url}/api/v1/intent-search",
                 json=payload,
             )
             response.raise_for_status()
@@ -125,30 +115,10 @@ class AxiomIntentServiceAnalyzer:
                 raise ValueError("Intent Service response must be a JSON object.")
             return data
         except (httpx.HTTPError, ValueError) as exc:
-            raise RuntimeError("Intent Service prediction request failed.") from exc
+            raise RuntimeError("Intent Service search request failed.") from exc
         finally:
             if close_client:
                 client.close()
-
-
-def _history_from_session_context(
-    session_context: SessionContext | None,
-) -> list[dict[str, str]]:
-    if session_context is None:
-        return []
-    return list(_normalize_turns(session_context.turns))
-
-
-def _normalize_turns(turns: Iterable[dict[str, Any]]) -> Iterable[dict[str, str]]:
-    for turn in turns:
-        role = _ROLE_MAP.get(str(turn.get("role", "")).lower())
-        text = turn.get("text", turn.get("content"))
-        if role is None or text is None:
-            continue
-        text_value = str(text).strip()
-        if not text_value:
-            continue
-        yield {"role": role, "text": text_value}
 
 
 def _map_catalog_intent(value: object) -> Intent:
@@ -162,6 +132,23 @@ def _map_catalog_intent(value: object) -> Intent:
     if intent_id == "unknown_intent":
         return "unknown"
     return "general"
+
+def _top_search_hit(response_payload: dict[str, Any]) -> dict[str, Any] | None:
+    results = response_payload.get("results")
+    if not isinstance(results, list) or not results:
+        return None
+    top_hit = results[0]
+    if not isinstance(top_hit, dict):
+        raise ValueError("Intent Service search result must be a JSON object.")
+    return top_hit
+
+def _hit_intent(top_hit: dict[str, Any] | None) -> dict[str, Any]:
+    if top_hit is None:
+        return {}
+    intent = top_hit.get("intent")
+    if not isinstance(intent, dict):
+        raise ValueError("Intent Service search hit must include an intent object.")
+    return intent
 
 
 def _extract_preprocessing_steps(
