@@ -102,7 +102,6 @@ class PreparedExecution:
 
     query: UserQuery
     intent: Intent
-    corpus_package: DataCorpusPackage
     spec: "ExecutionSpec"
     session_context: SessionContext | None = None
     user_context: UserContext | None = None

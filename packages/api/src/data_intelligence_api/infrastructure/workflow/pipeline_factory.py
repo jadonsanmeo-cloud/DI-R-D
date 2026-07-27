@@ -15,7 +15,6 @@ import httpx
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
-    DataCorpusPackage,
     EngineInput,
     EngineOutput,
     EngineTrace,
@@ -72,14 +71,12 @@ class _ReportDefaultsSpecBuilder:
         self,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
         spec = self.delegate.build(
             query,
             intent,
-            corpus_package,
             session_context,
             user_context,
         )
@@ -89,7 +86,6 @@ class _ReportDefaultsSpecBuilder:
         self,
         query: UserQuery,
         intent_analysis: IntentAnalysis,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -102,7 +98,6 @@ class _ReportDefaultsSpecBuilder:
             spec = build_with_intent_analysis(
                 query,
                 intent_analysis,
-                corpus_package,
                 session_context,
                 user_context,
             )
@@ -110,7 +105,6 @@ class _ReportDefaultsSpecBuilder:
             spec = self.delegate.build(
                 query,
                 intent_analysis.intent,
-                corpus_package,
                 session_context,
                 user_context,
             )
@@ -123,7 +117,6 @@ class _ReportDefaultsSpecBuilder:
         user_feedback: str,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -132,7 +125,6 @@ class _ReportDefaultsSpecBuilder:
             user_feedback=user_feedback,
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
             session_context=session_context,
             user_context=user_context,
         )
@@ -145,7 +137,6 @@ class _ReportDefaultsSpecBuilder:
         user_feedback: str,
         query: UserQuery,
         intent_analysis: IntentAnalysis,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -160,7 +151,6 @@ class _ReportDefaultsSpecBuilder:
                 user_feedback=user_feedback,
                 query=query,
                 intent_analysis=intent_analysis,
-                corpus_package=corpus_package,
                 session_context=session_context,
                 user_context=user_context,
             )
@@ -170,7 +160,6 @@ class _ReportDefaultsSpecBuilder:
                 user_feedback=user_feedback,
                 query=query,
                 intent=intent_analysis.intent,
-                corpus_package=corpus_package,
                 session_context=session_context,
                 user_context=user_context,
             )
@@ -203,7 +192,7 @@ class _AxiomSandboxProvider:
         self.capability_profiles = capability_profiles
 
     @contextmanager
-    def open(self, corpus_package: DataCorpusPackage):
+    def open(self):
         def create_sandbox():
             return self.client.create_sandbox(
                 self.workspace_id,
@@ -221,36 +210,11 @@ class _AxiomSandboxProvider:
                 ),
                 sandbox_factory=create_sandbox,
             )
-            session.source_paths = self._stage_sources(session, corpus_package)
             yield session
         finally:
             if self.cleanup:
                 with suppress(Exception):
                     (session.sandbox if session is not None else sandbox).delete()
-
-    @staticmethod
-    def _stage_sources(
-        session: EngineSandboxSession,
-        corpus_package: DataCorpusPackage,
-    ) -> dict[str, str]:
-        source_paths: dict[str, str] = {}
-        used_names: set[str] = set()
-        for index, source in enumerate(corpus_package.sources):
-            source_text = str(source)
-            host_path = Path(source_text)
-            if not host_path.is_file():
-                raise ValueError(
-                    "The sandbox runtime currently requires local source files: "
-                    f"{source_text}"
-                )
-            filename = host_path.name
-            if filename in used_names:
-                filename = f"{index}_{filename}"
-            used_names.add(filename)
-            relative_path = f"input/{filename}"
-            session.write(relative_path, host_path.read_bytes())
-            source_paths[source_text] = f"/workspace/{relative_path}"
-        return source_paths
 
 
 def _configure_axiom_sandbox_provider(
@@ -354,7 +318,6 @@ class ExampleSpecBuilder:
         self,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -365,14 +328,9 @@ class ExampleSpecBuilder:
             "aggregate_data",
             "answer_question",
         ]
-        if any(
-            str(source).lower().endswith(".csv") for source in corpus_package.sources
-        ):
-            capability_names.append("answer_csv_question")
         return ExecutionSpec(
             intent=intent,
             objective=query.text,
-            data_requirements=list(corpus_package.sources),
             capability_requirements=[
                 CapabilityRequirement(name=name) for name in capability_names
             ],
@@ -385,11 +343,10 @@ class ExampleSpecBuilder:
         user_feedback: str,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
-        del query, corpus_package, session_context, user_context
+        del query, session_context, user_context
         return ExecutionSpec(
             intent=intent,
             objective=f"{previous_spec.objective}\nRevision: {user_feedback}",

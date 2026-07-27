@@ -254,7 +254,6 @@ def execute_prepared_markdown_workflow(
         prepared_execution = PreparedExecution(
             query=prepared.query,
             intent=spec.intent,
-            corpus_package=DataCorpusPackage(),
             spec=spec,
             session_context=prepared.session_context,
             user_context=prepared.user_context,
@@ -349,7 +348,6 @@ def prepared_to_payload(prepared: PreparedExecution) -> dict:
         "version": 1,
         "query": asdict(prepared.query),
         "intent": prepared.intent,
-        "corpus_package": asdict(prepared.corpus_package),
         "session_context": (
             asdict(prepared.session_context)
             if prepared.session_context is not None
@@ -374,7 +372,6 @@ def prepared_from_payload(payload: dict, spec: ExecutionSpec) -> PreparedExecuti
     return PreparedExecution(
         query=UserQuery(**payload["query"]),
         intent=payload["intent"],
-        corpus_package=DataCorpusPackage(**payload["corpus_package"]),
         spec=spec,
         session_context=(
             SessionContext(**session_payload) if session_payload is not None else None

@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-from data_intelligence_sdk.core.types import DataCorpusPackage, UserQuery
+from data_intelligence_sdk.core.types import UserQuery
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 
 
@@ -41,7 +41,6 @@ class ArtifactConcurrencyTests(unittest.TestCase):
                 run_id="00000000-0000-0000-0000-000000000003",
                 root=Path(directory) / "run",
                 query=UserQuery(text="test"),
-                corpus_package=DataCorpusPackage(),
             )
 
             css = session.record_rendered_report(
@@ -75,7 +74,6 @@ class ArtifactConcurrencyTests(unittest.TestCase):
                 run_id="00000000-0000-0000-0000-000000000002",
                 root=Path(directory) / "run",
                 query=UserQuery(text="test"),
-                corpus_package=DataCorpusPackage(),
             )
 
             def record_event(index):

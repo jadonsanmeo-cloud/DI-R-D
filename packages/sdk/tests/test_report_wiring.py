@@ -420,7 +420,6 @@ def load_rows(path: str) -> list[dict]:
             include_evidence=False,
         )
         query = UserQuery(text="Create a report")
-        corpus = DataCorpusPackage(sources=["sales.csv"])
         spec = ExecutionSpec(
             intent="report",
             objective=query.text,
@@ -431,7 +430,6 @@ def load_rows(path: str) -> list[dict]:
         prepared = PreparedExecution(
             query=query,
             intent="report",
-            corpus_package=corpus,
             spec=spec,
         )
 
@@ -453,7 +451,6 @@ def load_rows(path: str) -> list[dict]:
             engine_registry=_FakeRegistry(engine),
         )
         query = UserQuery(text="Create a report")
-        corpus = DataCorpusPackage(sources=["sales.csv"])
         spec = ExecutionSpec(
             intent="report",
             objective=query.text,
@@ -463,7 +460,6 @@ def load_rows(path: str) -> list[dict]:
         prepared = PreparedExecution(
             query=query,
             intent="report",
-            corpus_package=corpus,
             spec=spec,
         )
 
@@ -1033,7 +1029,6 @@ def load_rows(path: str) -> list[dict]:
                 run_id="00000000-0000-0000-0000-000000000001",
                 root=Path(directory) / "run",
                 query=UserQuery(text="test"),
-                corpus_package=DataCorpusPackage(),
             )
             sandbox = _RuntimeSandbox()
             runtime = EngineRuntimeContext(

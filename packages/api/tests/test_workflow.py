@@ -77,7 +77,6 @@ class BackendWorkflowTests(unittest.TestCase):
         prepared = PreparedExecution(
             query=UserQuery(text="Inspect orders"),
             intent="reason",
-            corpus_package=DataCorpusPackage(sources=["orders.csv"]),
             spec=spec,
             intent_analysis=IntentAnalysis(
                 intent="reason",
@@ -282,7 +281,6 @@ class BackendWorkflowTests(unittest.TestCase):
         self.assertEqual(pipeline.confirmed_spec.objective, markdown)
         self.assertTrue(pipeline.confirmed_spec.confirmed)
         self.assertEqual(pipeline.confirmed_spec.engine_hint, "general_purpose")
-        self.assertEqual(pipeline.prepared_execution.corpus_package, DataCorpusPackage())
 
     def test_example_intent_analyzer_does_not_infer_intent_from_datahub(self) -> None:
         intent = ExampleIntentAnalyzer().analyze(

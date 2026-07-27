@@ -211,7 +211,6 @@ class TracingSpecBuilder:
         self,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -220,7 +219,6 @@ class TracingSpecBuilder:
             {
                 "query": query,
                 "intent": intent,
-                "corpus_package": corpus_package,
                 "session_context": session_context,
                 "user_context": user_context,
             }
@@ -228,7 +226,6 @@ class TracingSpecBuilder:
         result = self.inner.build(
             query,
             intent,
-            corpus_package,
             session_context,
             user_context,
         )
@@ -243,7 +240,6 @@ class TracingSpecBuilder:
         user_feedback: str,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -254,7 +250,6 @@ class TracingSpecBuilder:
                 "user_feedback": user_feedback,
                 "query": query,
                 "intent": intent,
-                "corpus_package": corpus_package,
                 "session_context": session_context,
                 "user_context": user_context,
             }
@@ -264,7 +259,6 @@ class TracingSpecBuilder:
             user_feedback=user_feedback,
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
             session_context=session_context,
             user_context=user_context,
         )

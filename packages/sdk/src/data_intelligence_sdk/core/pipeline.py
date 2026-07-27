@@ -7,11 +7,11 @@ from dataclasses import asdict
 from typing import Any
 
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     EngineInput,
     EngineOutput,
     ExecutionSpec,
     FinalResponse,
+    Intent,
     IntentAnalysis,
     PreparedExecution,
     PreparedMarkdownExecution,
@@ -174,19 +174,12 @@ class DataIntelligencePipeline:
     ) -> PreparedExecution:
         """Analyze intent and build a draft spec without selecting an engine."""
 
-        corpus_package = DataCorpusPackage()
-        create_run = getattr(self.artifact_store, "create_run", None)
-        run_artifact = (
-            create_run(query, corpus_package) if callable(create_run) else None
-        )
+        run_artifact = self._create_run_artifact(query)
         try:
             self._log(
                 "pipeline.start",
                 {
                     "query": query.text,
-                    "source_count": len(corpus_package.sources),
-                    "has_schema": bool(corpus_package.schemas),
-                    "has_metadata": bool(corpus_package.metadata),
                     "artifact_ref": (
                         run_artifact.artifact_ref if run_artifact is not None else None
                     ),
@@ -212,23 +205,13 @@ class DataIntelligencePipeline:
                 event_type="intent.analyzed",
                 payload=intent_payload,
             )
-            build_with_intent_analysis = getattr(
-                self.spec_builder,
-                "build_with_intent_analysis",
-                None,
+            spec = self._build_spec(
+                query=query,
+                intent=intent,
+                intent_analysis=builder_intent_analysis,
+                session_context=session_context,
+                user_context=user_context,
             )
-            if intent_analysis is not None and callable(build_with_intent_analysis):
-                spec = build_with_intent_analysis(
-                    query,
-                    builder_intent_analysis,
-                    corpus_package,
-                    session_context,
-                    user_context,
-                )
-            else:
-                spec = self.spec_builder.build(
-                    query, intent, corpus_package, session_context, user_context
-                )
             spec.preprocessing_steps = list(intent_analysis.preprocessing_steps)
             self._log(
                 "pipeline.spec_built",
@@ -256,7 +239,6 @@ class DataIntelligencePipeline:
         return PreparedExecution(
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
             spec=spec,
             session_context=session_context,
             user_context=user_context,
@@ -307,7 +289,6 @@ class DataIntelligencePipeline:
                 user_feedback=feedback,
                 query=prepared.query,
                 intent_analysis=prepared.intent_analysis,
-                corpus_package=prepared.corpus_package,
                 session_context=prepared.session_context,
                 user_context=prepared.user_context,
             )
@@ -317,7 +298,6 @@ class DataIntelligencePipeline:
                 user_feedback=feedback,
                 query=prepared.query,
                 intent=prepared.intent,
-                corpus_package=prepared.corpus_package,
                 session_context=prepared.session_context,
                 user_context=prepared.user_context,
             )
@@ -461,7 +441,7 @@ class DataIntelligencePipeline:
             )
             phase = "sandbox_provisioning"
             sandbox_context = (
-                self.sandbox_provider.open(prepared.corpus_package)
+                self.sandbox_provider.open()
                 if self.sandbox_provider is not None
                 else nullcontext(None)
             )
@@ -494,7 +474,6 @@ class DataIntelligencePipeline:
                         query=prepared.query,
                         spec=confirmed_spec,
                         runtime=runtime,
-                        corpus_package=prepared.corpus_package,
                         user_context=prepared.user_context,
                     )
                 )
@@ -564,6 +543,41 @@ class DataIntelligencePipeline:
             )
         prepared.run_artifact = open_run(prepared.run_artifact_id)
         return prepared.run_artifact
+
+    def _create_run_artifact(self, query: UserQuery) -> RunArtifactSession | None:
+        create_run = getattr(self.artifact_store, "create_run", None)
+        if not callable(create_run):
+            return None
+        return create_run(query)
+
+    def _build_spec(
+        self,
+        *,
+        query: UserQuery,
+        intent: Intent,
+        intent_analysis: object,
+        session_context: SessionContext | None,
+        user_context: UserContext | None,
+    ) -> ExecutionSpec:
+        build_with_intent_analysis = getattr(
+            self.spec_builder,
+            "build_with_intent_analysis",
+            None,
+        )
+        if callable(build_with_intent_analysis):
+            return build_with_intent_analysis(
+                query=query,
+                intent_analysis=intent_analysis,
+                session_context=session_context,
+                user_context=user_context,
+            )
+
+        return self.spec_builder.build(
+            query=query,
+            intent=intent,
+            session_context=session_context,
+            user_context=user_context,
+        )
 
     def _analyze_intent(
         self,

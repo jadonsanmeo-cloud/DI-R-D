@@ -8,15 +8,14 @@ from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     create_example_pipeline,
 )
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     ExecutionSpec,
     UserQuery,
 )
 
 
 class _SpecBuilder:
-    def build(self, query, intent, corpus_package, session_context, user_context):
-        del corpus_package, session_context, user_context
+    def build(self, query, intent, session_context, user_context):
+        del session_context, user_context
         return ExecutionSpec(intent=intent, objective=query.text)
 
     def revise(
@@ -26,14 +25,12 @@ class _SpecBuilder:
         user_feedback,
         query,
         intent,
-        corpus_package,
         session_context,
         user_context,
     ):
         del (
             previous_spec,
             user_feedback,
-            corpus_package,
             session_context,
             user_context,
         )
@@ -71,7 +68,6 @@ class ReportPipelineFactoryTests(unittest.TestCase):
         spec = builder.build(
             UserQuery(text="Create a report"),
             "report",
-            DataCorpusPackage(sources=["sales.csv"]),
         )
 
         self.assertEqual(spec.engine_hint, "report")

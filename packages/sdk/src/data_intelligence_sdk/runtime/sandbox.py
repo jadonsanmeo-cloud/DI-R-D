@@ -8,7 +8,6 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
-from data_intelligence_sdk.core.types import DataCorpusPackage
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 
 RESULT_MARKER = "__AXIOM_RESULT__"
@@ -108,7 +107,6 @@ class SandboxSessionProvider(Protocol):
 
     def open(
         self,
-        corpus_package: DataCorpusPackage,
     ) -> AbstractContextManager["EngineSandboxSession"]:
         """Open a staged request sandbox and clean it up on exit."""
 
