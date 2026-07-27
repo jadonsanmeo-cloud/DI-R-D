@@ -59,6 +59,7 @@
         {
           "block_id": "executive-summary",
           "type": "narrative",
+          "content_role": "executive_summary",
           "title": "Executive Summary",
           "required": true,
           "layout": {"span": 7, "emphasis": "featured"},
@@ -72,6 +73,7 @@
         {
           "block_id": "key-findings",
           "type": "recommendations",
+          "content_role": "key_findings",
           "title": "Key Findings",
           "required": true,
           "layout": {"span": 5, "emphasis": "supporting"},
@@ -93,6 +95,7 @@
         {
           "block_id": "dynamic-kpis",
           "type": "kpi_group",
+          "content_role": "metrics",
           "title": "Overview",
           "required": true,
           "layout": {"span": 12, "emphasis": "featured"},
@@ -114,6 +117,7 @@
         {
           "block_id": "primary-analysis-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Primary Comparison",
           "required": false,
           "layout": {"span": 8, "emphasis": "featured"},
@@ -138,6 +142,7 @@
         {
           "block_id": "analysis-interpretation",
           "type": "narrative",
+          "content_role": "implication",
           "title": "Interpretation",
           "required": false,
           "layout": {"span": 4, "emphasis": "supporting"},
@@ -159,6 +164,7 @@
         {
           "block_id": "quality-evidence-table",
           "type": "table",
+          "content_role": "table",
           "title": "Material Data Issues",
           "required": false,
           "layout": {"span": 7, "emphasis": "standard"},
@@ -168,6 +174,7 @@
         {
           "block_id": "limitations",
           "type": "recommendations",
+          "content_role": "limitation",
           "title": "Limitations and Next Checks",
           "required": false,
           "layout": {"span": 5, "emphasis": "supporting"},

@@ -15,6 +15,38 @@ from data_intelligence_api.infrastructure.intent.axiom_intent_service import (
 
 
 class AxiomIntentServiceAnalyzerTests(unittest.TestCase):
+    def test_catalog_failure_uses_configured_local_fallback(self) -> None:
+        class FallbackAnalyzer:
+            def analyze(
+                self,
+                query,
+                corpus_package,
+                session_context=None,
+                user_context=None,
+            ):
+                del query, corpus_package, session_context, user_context
+                return "report"
+
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(500, json={"detail": "unavailable"})
+            )
+        )
+        analyzer = AxiomIntentServiceAnalyzer(
+            base_url="http://intent-service.local",
+            client=client,
+            fallback_analyzer=FallbackAnalyzer(),
+        )
+
+        analysis = analyzer.analyze_details(
+            UserQuery(text="Create a report."),
+            DataCorpusPackage(sources=["report.html"]),
+        )
+
+        self.assertEqual(analysis.intent, "report")
+        self.assertEqual(analysis.source, "local_intent_fallback")
+        self.assertIsNone(analysis.catalog_intent)
+
     def test_analyze_details_keeps_processing_steps_from_top_catalog_intent(
         self,
     ) -> None:

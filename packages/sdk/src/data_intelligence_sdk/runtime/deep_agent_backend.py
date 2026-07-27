@@ -50,7 +50,7 @@ class DeepAgentSandboxBackend(BackendProtocol):
     def write(self, file_path: str, content: str) -> WriteResult:
         try:
             relative_path = self.generated_path(file_path)
-            self.session.sandbox.write(relative_path, content)
+            self.session.write(relative_path, content)
         except Exception as exc:
             return WriteResult(error=f"Error writing file '{file_path}': {exc}")
         return WriteResult(path=file_path)

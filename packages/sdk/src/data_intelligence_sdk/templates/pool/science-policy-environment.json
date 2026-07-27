@@ -1,0 +1,22 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "science-policy-environment",
+  "extends": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Science, Policy and Environment",
+  "description": "An evidence-centered blueprint for research, public policy, institutions, scientific claims, and environmental systems.",
+  "tags": ["science", "research", "policy", "government", "environment", "evidence"],
+  "selection": {
+    "report_intents": ["research_analysis", "policy_report", "science_review", "environment_analysis"],
+    "keywords": ["science", "research", "evidence", "policy", "government", "institution", "environment", "climate", "method"],
+    "data_signals": ["goal_evidence", "method", "finding", "population", "policy_option"]
+  },
+  "adaptation": {
+    "guidance": [
+      "Organize sections around the problem, methods or evidence base, findings, mechanisms, implications, and uncertainty only when supported.",
+      "Separate empirical findings, model assumptions, policy values, and recommendations.",
+      "Use charts only when scales, units, coverage, and comparison bases are defensible."
+    ]
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Adaptive Raw Report",
+  "description": "A broad content-neutral blueprint that adapts its analytical structure to the actual source and plan when no domain candidate is sufficiently confident.",
+  "tags": ["raw", "generic", "adaptive", "fallback", "cross-domain"],
+  "selection": {
+    "report_intents": ["adaptive_report", "cross_domain_analysis", "raw_fallback"],
+    "keywords": ["analyze", "explain", "summarize", "investigate", "report"],
+    "data_signals": ["goal_evidence", "source_content", "analysis_data"]
+  },
+  "adaptation": {
+    "min_sections": 3,
+    "max_sections": 8,
+    "allowed_content_roles": ["data_profile", "executive_summary", "key_findings", "supporting_evidence", "implication", "limitation", "recommendation", "narrative", "metrics", "chart", "table"],
+    "required_content_roles": ["data_profile", "executive_summary", "key_findings", "supporting_evidence", "limitation"],
+    "guidance": [
+      "Build sections from the actual subject and plan rather than a predefined domain taxonomy.",
+      "Keep charts optional and prefer insight grids, evidence lists, or process flows for qualitative structure.",
+      "End with synthesis, deficiencies, limitations, and evidence."
+    ]
+  },
+  "defaults": {
+    "locale": "en-US",
+    "max_narrative_sentences": 12,
+    "chart_library": "echarts"
+  },
+  "data_requirements": [
+    {
+      "requirement_id": "goal-evidence",
+      "description": "Materialize objective-relevant content or values with enough context and source lineage for deep analysis.",
+      "required": true,
+      "semantic_roles": {"measures": ["goal_evidence"]},
+      "calculation_hints": [
+        "Preserve substantive content and source locations.",
+        "Preserve values and dimensions needed for honest comparisons when present.",
+        "Do not replace subject evidence with structural counts."
+      ],
+      "expected_output": {"shape": "table", "max_rows": 300},
+      "fallback": {"action": "message", "message": "Explain which objective-relevant evidence could not be materialized."}
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "source-and-content-overview",
+      "title": "Source and Content Overview",
+      "purpose": "Profile the source and immediately explain what it contains and why it matters.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "data-profile",
+          "type": "profile",
+          "content_role": "data_profile",
+          "title": "Data Profile",
+          "required": true,
+          "layout": {"span": 4, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Show file type, source size or record coverage, fields, and material missingness as a compact one-column profile."]
+        },
+        {
+          "block_id": "content-summary",
+          "type": "narrative",
+          "content_role": "executive_summary",
+          "title": "Content Summary",
+          "required": true,
+          "layout": {"span": 8, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Directly summarize the subject, purpose, major ideas, and objective-relevant answer in detailed prose."]
+        },
+        {
+          "block_id": "key-findings",
+          "type": "insight_grid",
+          "content_role": "key_findings",
+          "title": "Key Findings",
+          "required": true,
+          "layout": {"span": 12, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Surface distinct findings; use numbers only when they carry analytical meaning."]
+        }
+      ]
+    },
+    {
+      "section_id": "deep-analysis",
+      "title": "Deep Analysis",
+      "purpose": "Develop the most important themes, comparisons, mechanisms, or arguments found in the evidence.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {
+          "block_id": "analysis-narrative",
+          "type": "narrative",
+          "content_role": "narrative",
+          "title": "Analytical Interpretation",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Write several well-separated paragraphs that explain patterns, relationships, tensions, and context without repeating the overview."]
+        },
+        {
+          "block_id": "concept-flow",
+          "type": "process_flow",
+          "content_role": "implication",
+          "title": "How the Evidence Connects",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Use a short ordered flow only when the evidence supports a mechanism, sequence, or dependency."]
+        }
+      ]
+    },
+    {
+      "section_id": "visual-evidence",
+      "title": "Visual Evidence",
+      "purpose": "Use the most honest visual form to support the preceding analysis.",
+      "required": false,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "evidence-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Evidence View",
+          "required": false,
+          "layout": {"span": 7, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "evidence-chart",
+            "intent": "Prove one material analytical claim with an honest quantitative comparison, distribution, relationship, or trend.",
+            "suggested_type": "bar",
+            "allowed_types": ["line", "bar", "stacked_bar", "area", "scatter", "pie", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {"title": "Evidence view", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No quantitative visual would materially improve the analysis."}
+          },
+          "instructions": ["Omit this block if the available values do not prove a meaningful claim."]
+        },
+        {
+          "block_id": "evidence-list",
+          "type": "evidence_list",
+          "content_role": "supporting_evidence",
+          "title": "Evidence Trail",
+          "required": true,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Connect findings to specific source locations, values, excerpts, or records."]
+        }
+      ]
+    },
+    {
+      "section_id": "synthesis-and-limitations",
+      "title": "Synthesis, Evidence Gaps and Limitations",
+      "purpose": "Integrate the findings, explain their significance, and state what the evidence cannot establish.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {
+          "block_id": "synthesis",
+          "type": "narrative",
+          "content_role": "implication",
+          "title": "Synthesis",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Integrate the strongest findings into a final answer without merely recapping section headings."]
+        },
+        {
+          "block_id": "limitations",
+          "type": "recommendations",
+          "content_role": "limitation",
+          "title": "Deficiencies and Limitations",
+          "required": true,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["State only real coverage, quality, extraction, method, or evidence limitations and distinguish unknowns from contradictions."]
+        }
+      ]
+    }
+  ]
+}

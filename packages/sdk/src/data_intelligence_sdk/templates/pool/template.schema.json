@@ -10,14 +10,13 @@
     "version",
     "name",
     "description",
-    "selection",
-    "data_requirements",
-    "sections"
+    "selection"
   ],
   "properties": {
     "$schema": {"type": "string"},
     "schema_version": {"const": "1.0"},
     "template_id": {"$ref": "#/$defs/identifier"},
+    "extends": {"$ref": "#/$defs/identifier"},
     "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "name": {"type": "string", "minLength": 1},
     "description": {"type": "string", "minLength": 1},
@@ -27,6 +26,7 @@
       "uniqueItems": true
     },
     "selection": {"$ref": "#/$defs/selection"},
+    "adaptation": {"$ref": "#/$defs/adaptation"},
     "defaults": {
       "type": "object",
       "additionalProperties": false,
@@ -47,6 +47,10 @@
       "items": {"$ref": "#/$defs/section"}
     }
   },
+  "anyOf": [
+    {"required": ["extends"]},
+    {"required": ["data_requirements", "sections"]}
+  ],
   "$defs": {
     "identifier": {
       "type": "string",
@@ -74,6 +78,49 @@
           "uniqueItems": true
         }
       }
+    },
+    "adaptation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_sections",
+        "max_sections",
+        "allowed_content_roles",
+        "required_content_roles"
+      ],
+      "properties": {
+        "min_sections": {"type": "integer", "minimum": 1},
+        "max_sections": {"type": "integer", "minimum": 1},
+        "allowed_content_roles": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/contentRole"},
+          "uniqueItems": true
+        },
+        "required_content_roles": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/contentRole"},
+          "uniqueItems": true
+        },
+        "guidance": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "contentRole": {
+      "enum": [
+        "data_profile",
+        "executive_summary",
+        "key_findings",
+        "supporting_evidence",
+        "implication",
+        "limitation",
+        "recommendation",
+        "narrative",
+        "metrics",
+        "chart",
+        "table"
+      ]
     },
     "semanticRoles": {
       "type": "object",
@@ -237,10 +284,23 @@
     "block": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["block_id", "type", "required", "data_requirement_refs"],
+      "required": ["block_id", "type", "content_role", "required", "data_requirement_refs"],
       "properties": {
         "block_id": {"$ref": "#/$defs/identifier"},
-        "type": {"enum": ["narrative", "kpi_group", "chart", "table", "recommendations"]},
+        "type": {
+          "enum": [
+            "narrative",
+            "kpi_group",
+            "chart",
+            "table",
+            "recommendations",
+            "profile",
+            "insight_grid",
+            "evidence_list",
+            "process_flow"
+          ]
+        },
+        "content_role": {"$ref": "#/$defs/contentRole"},
         "title": {"type": "string"},
         "required": {"type": "boolean"},
         "layout": {"$ref": "#/$defs/blockLayout"},

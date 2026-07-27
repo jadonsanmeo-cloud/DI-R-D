@@ -42,10 +42,12 @@ class AxiomIntentServiceAnalyzer:
         base_url: str,
         client: httpx.Client | None = None,
         timeout_seconds: float = 30.0,
+        fallback_analyzer: object | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._client = client
         self.timeout_seconds = timeout_seconds
+        self.fallback_analyzer = fallback_analyzer
 
     def analyze(
         self,
@@ -72,36 +74,85 @@ class AxiomIntentServiceAnalyzer:
     ) -> IntentAnalysis:
         """Return AXIOM catalog classification plus its normalized SDK intent."""
 
-        del corpus_package, session_context, user_context
         payload = {
             "query": query.text,
             "search_type": "hybrid",
             "limit": 1,
         }
-        response_payload = self._search_catalog(payload)
-        raw_results = response_payload.get("results")
-        if not isinstance(raw_results, list) or not raw_results:
-            raise RuntimeError("Intent Service catalog search returned no matches.")
-        top_match = raw_results[0]
-        if not isinstance(top_match, dict):
-            raise RuntimeError("Intent Service catalog match must be an object.")
-        definition = top_match.get("intent")
-        if not isinstance(definition, dict):
-            raise RuntimeError("Intent Service catalog match is missing its intent.")
-        catalog_intent = str(definition.get("intent_id") or "").strip()
-        if not catalog_intent:
-            raise RuntimeError("Intent Service catalog match has no intent id.")
-        score = top_match.get("score")
-        raw_processing_steps = definition.get("processing_steps")
-        processing_steps = (
-            dict(raw_processing_steps) if isinstance(raw_processing_steps, dict) else {}
+        try:
+            response_payload = self._search_catalog(payload)
+            raw_results = response_payload.get("results")
+            if not isinstance(raw_results, list) or not raw_results:
+                raise RuntimeError("Intent Service catalog search returned no matches.")
+            top_match = raw_results[0]
+            if not isinstance(top_match, dict):
+                raise RuntimeError("Intent Service catalog match must be an object.")
+            definition = top_match.get("intent")
+            if not isinstance(definition, dict):
+                raise RuntimeError(
+                    "Intent Service catalog match is missing its intent."
+                )
+            catalog_intent = str(definition.get("intent_id") or "").strip()
+            if not catalog_intent:
+                raise RuntimeError("Intent Service catalog match has no intent id.")
+            score = top_match.get("score")
+            raw_processing_steps = definition.get("processing_steps")
+            processing_steps = (
+                dict(raw_processing_steps)
+                if isinstance(raw_processing_steps, dict)
+                else {}
+            )
+            return IntentAnalysis(
+                intent=_map_catalog_intent(catalog_intent),
+                source="axiom_intent_service",
+                catalog_intent=catalog_intent or None,
+                score=float(score) if isinstance(score, (int, float)) else None,
+                processing_steps=processing_steps,
+            )
+        except RuntimeError:
+            if self.fallback_analyzer is None:
+                raise
+            return self._fallback_analysis(
+                query,
+                corpus_package,
+                session_context,
+                user_context,
+            )
+
+    def _fallback_analysis(
+        self,
+        query: UserQuery,
+        corpus_package: DataCorpusPackage,
+        session_context: SessionContext | None,
+        user_context: UserContext | None,
+    ) -> IntentAnalysis:
+        analyze_details = getattr(
+            self.fallback_analyzer,
+            "analyze_details",
+            None,
         )
+        if callable(analyze_details):
+            details = analyze_details(
+                query,
+                corpus_package,
+                session_context,
+                user_context,
+            )
+            if isinstance(details, IntentAnalysis):
+                return details
+        analyze = getattr(self.fallback_analyzer, "analyze", None)
+        if not callable(analyze):
+            raise RuntimeError(
+                "Intent Service failed and its fallback analyzer is invalid."
+            )
         return IntentAnalysis(
-            intent=_map_catalog_intent(catalog_intent),
-            source="axiom_intent_service",
-            catalog_intent=catalog_intent or None,
-            score=float(score) if isinstance(score, (int, float)) else None,
-            processing_steps=processing_steps,
+            intent=analyze(
+                query,
+                corpus_package,
+                session_context,
+                user_context,
+            ),
+            source="local_intent_fallback",
         )
 
     def _search_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:

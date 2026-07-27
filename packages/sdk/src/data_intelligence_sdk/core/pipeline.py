@@ -8,6 +8,7 @@ from typing import Any
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
+    EngineInput,
     EngineOutput,
     ExecutionSpec,
     FinalResponse,
@@ -407,10 +408,13 @@ class DataIntelligencePipeline:
                     run_artifact=run_artifact,
                 )
                 output = engine.run(
-                    confirmed_spec,
-                    prepared.corpus_package,
-                    runtime,
-                    prepared.user_context,
+                    EngineInput(
+                        query=prepared.query,
+                        spec=confirmed_spec,
+                        runtime=runtime,
+                        corpus_package=prepared.corpus_package,
+                        user_context=prepared.user_context,
+                    )
                 )
         except Exception as exc:
             if run_artifact is not None:

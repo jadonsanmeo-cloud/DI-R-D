@@ -1,0 +1,22 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "technology-engineering",
+  "extends": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Technology and Engineering",
+  "description": "A systematic blueprint for software, architecture, engineering decisions, technical systems, and innovation.",
+  "tags": ["technology", "software", "engineering", "architecture", "system", "innovation"],
+  "selection": {
+    "report_intents": ["technical_analysis", "architecture_report", "engineering_review", "technology_report"],
+    "keywords": ["software", "technology", "engineering", "architecture", "system", "component", "design", "infrastructure", "algorithm"],
+    "data_signals": ["goal_evidence", "component", "dependency", "tradeoff", "quality_attribute"]
+  },
+  "adaptation": {
+    "guidance": [
+      "Organize deep sections around principles, components, interactions, design choices, trade-offs, quality attributes, and application only when supported.",
+      "Prefer architecture layers, concept grids, dependency flows, or trade-off views for structural evidence.",
+      "Make limitations distinguish conceptual guidance from measured system behavior."
+    ]
+  }
+}

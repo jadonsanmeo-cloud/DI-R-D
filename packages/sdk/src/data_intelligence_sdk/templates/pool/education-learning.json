@@ -1,0 +1,22 @@
+{
+  "$schema": "template.schema.json",
+  "schema_version": "1.0",
+  "template_id": "education-learning",
+  "extends": "adaptive-raw-report",
+  "version": "1.0.0",
+  "name": "Education and Learning",
+  "description": "A flexible blueprint for learning material, curricula, pedagogy, competencies, assessment, and educational outcomes.",
+  "tags": ["education", "learning", "training", "curriculum", "pedagogy", "skills"],
+  "selection": {
+    "report_intents": ["education_analysis", "learning_report", "curriculum_review"],
+    "keywords": ["education", "learning", "student", "course", "curriculum", "teaching", "training", "skill", "assessment"],
+    "data_signals": ["goal_evidence", "learning_outcome", "concept_relationship", "assessment_result"]
+  },
+  "adaptation": {
+    "guidance": [
+      "Organize deep sections around concepts, learning progression, pedagogy, application, and assessment only when supported.",
+      "Distinguish what is taught, why it matters, how ideas connect, and what learners should be able to do.",
+      "Use a concept flow or learning pathway before considering a chart."
+    ]
+  }
+}

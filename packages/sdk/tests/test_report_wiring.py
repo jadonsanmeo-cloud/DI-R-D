@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
+    EngineInput,
     EngineOutput,
     EngineTrace,
     EvidenceBundle,
@@ -20,6 +21,7 @@ from data_intelligence_sdk.engines.report import (
     DataScienceProcessor,
     PlanAgent,
     ReportEngine,
+    ReportFormatRegistry,
     RouterAgent,
     _StepInputResolver,
     _StepOutputRegistry,
@@ -36,8 +38,8 @@ from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 class _FakeEngine:
     name = "report"
 
-    def run(self, spec, corpus_package, runtime, user_context=None):
-        del spec, corpus_package, runtime, user_context
+    def run(self, input):
+        del input
         return EngineOutput(
             engine_name=self.name,
             answer="<html><body>Report</body></html>",
@@ -86,6 +88,30 @@ class _FakeSandboxSession:
             "exit_code": 0,
         }
 
+    def reprovision(self):
+        return False
+
+
+class _ReprovisioningSandboxSession(_FakeSandboxSession):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+        self.reprovision_calls = 0
+
+    def execute_python(self, code, run_artifact, *, timeout_seconds=120):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("sandbox is not running")
+        return super().execute_python(
+            code,
+            run_artifact,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def reprovision(self):
+        self.reprovision_calls += 1
+        return True
+
 
 class _WritableSandbox:
     def __init__(self):
@@ -98,6 +124,9 @@ class _WritableSandbox:
 class _RuntimeSandbox:
     def __init__(self):
         self.sandbox = _WritableSandbox()
+
+    def write(self, path, content):
+        self.sandbox.write(path, content)
 
 
 class _GeneratedRouteAgent:
@@ -236,18 +265,95 @@ class _AlwaysPassValidator:
 
 
 class ReportWiringTests(unittest.TestCase):
+    def test_required_source_content_output_requires_at_least_one_item(self):
+        schema = ReportEngine._step_output_schema(
+            {
+                "step_id": "materialize-document",
+                "required": True,
+                "outputs": [
+                    {
+                        "name": "document-content",
+                        "shape": "table",
+                        "semantic_roles": ["analysis_data", "source_content"],
+                    }
+                ],
+            },
+            {"output_schema": {"type": "array"}},
+        )
+
+        self.assertEqual(schema["minItems"], 1)
+        self.assertIn(
+            "at least 1 item",
+            ReportEngine._output_contract_errors([], schema)[0],
+        )
+
+    def test_optional_analysis_table_may_be_empty(self):
+        schema = ReportEngine._step_output_schema(
+            {
+                "step_id": "optional-analysis",
+                "required": False,
+                "outputs": [
+                    {
+                        "name": "rows",
+                        "shape": "table",
+                        "semantic_roles": ["analysis_data"],
+                    }
+                ],
+            },
+            {"output_schema": {"type": "array"}},
+        )
+
+        self.assertNotIn("minItems", schema)
+        self.assertEqual(ReportEngine._output_contract_errors([], schema), [])
+
+    def test_method_tool_must_consume_required_upstream_output(self):
+        resolved = [
+            {
+                "argument_name": "doc_metadata",
+                "output_name": "doc_metadata",
+                "source_step_id": "extract-metadata",
+            }
+        ]
+
+        self.assertFalse(
+            ReportEngine._tool_accepts_resolved_inputs(
+                {
+                    "type": "object",
+                    "properties": {
+                        "modality": {"type": "string"},
+                        "processing_domain": {"type": "string"},
+                    },
+                },
+                resolved,
+            )
+        )
+        self.assertTrue(
+            ReportEngine._tool_accepts_resolved_inputs(
+                {
+                    "type": "object",
+                    "properties": {"doc_metadata_path": {"type": "string"}},
+                },
+                resolved,
+            )
+        )
+
     def test_report_graph_uses_report_langsmith_run_name(self):
         engine = object.__new__(ReportEngine)
         engine.llm = None
         engine.max_data_concurrency = 1
         engine.max_chart_concurrency = 1
+        engine.format_registry = ReportFormatRegistry()
+        engine.default_locale = "en"
         engine._graph = Mock()
         engine._graph.invoke.return_value = {"final_result": "report"}
 
         engine.run(
-            ExecutionSpec(intent="report", objective="Create a report"),
-            DataCorpusPackage(),
-            EngineRuntimeContext(),
+            EngineInput(
+                query=UserQuery(text="Create a report"),
+                spec=ExecutionSpec(intent="report", objective="Create a report"),
+                corpus_package=DataCorpusPackage(),
+                runtime=EngineRuntimeContext(),
+            )
         )
 
         config = engine._graph.invoke.call_args.kwargs["config"]
@@ -394,6 +500,23 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(result.result, {"count": 3})
         self.assertIn("/workspace/input/sales.csv", session.code)
         self.assertIn("result = __report_tool", session.code)
+
+    def test_request_sandbox_executor_reprovisions_failed_sandbox_once(self):
+        session = _ReprovisioningSandboxSession()
+        executor = RequestSandboxExecutor(session, run_artifact=object())
+        interface = InterfaceDefinition(
+            name="profile_sales",
+            implementation_ref="def profile_sales():\n    return {'count': 3}\n",
+            metadata={
+                "source_code": "def profile_sales():\n    return {'count': 3}\n"
+            },
+        )
+
+        result = executor.run(interface, {})
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(session.calls, 2)
+        self.assertEqual(session.reprovision_calls, 1)
 
     def test_plan_agent_normalizes_scalar_step_contract_fields(self):
         spec = ExecutionSpec(intent="report", objective="Create a report")
@@ -887,7 +1010,7 @@ def load_rows(path: str) -> list[dict]:
             ],
         )
 
-    def test_chart_dataset_has_general_text_fallback(self):
+    def test_chart_dataset_does_not_invent_text_frequency_chart(self):
         chart = DataScienceProcessor._chart_dataset(
             {},
             [
@@ -900,9 +1023,9 @@ def load_rows(path: str) -> list[dict]:
             ],
         )
 
-        self.assertGreaterEqual(len(chart["rows"]), 2)
-        self.assertEqual(chart["rows"][0]["category"], "modularity")
-        self.assertEqual(chart["rows"][0]["value"], 3)
+        self.assertFalse(chart["render"])
+        self.assertFalse(chart["rows"])
+        self.assertIn("did not identify a chart", chart["reason"])
 
     def test_step_output_registry_persists_stages_and_binds_generated_path(self):
         with tempfile.TemporaryDirectory() as directory:

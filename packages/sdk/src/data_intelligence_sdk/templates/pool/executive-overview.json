@@ -64,6 +64,7 @@
         {
           "block_id": "summary-narrative",
           "type": "narrative",
+          "content_role": "executive_summary",
           "required": true,
           "layout": {"span": 12, "emphasis": "standard"},
           "data_requirement_refs": ["headline-metrics"],
@@ -72,6 +73,7 @@
         {
           "block_id": "headline-kpis",
           "type": "kpi_group",
+          "content_role": "metrics",
           "title": "Headline Metrics",
           "required": true,
           "layout": {"span": 12, "emphasis": "featured"},
@@ -90,6 +92,7 @@
         {
           "block_id": "trend-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Primary Trend",
           "required": false,
           "layout": {"span": 12, "emphasis": "featured"},
@@ -119,6 +122,7 @@
         {
           "block_id": "drivers-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Key Drivers",
           "required": false,
           "layout": {"span": 7, "emphasis": "featured"},
@@ -139,6 +143,7 @@
         {
           "block_id": "recommended-actions",
           "type": "recommendations",
+          "content_role": "recommendation",
           "required": false,
           "layout": {"span": 5, "emphasis": "supporting"},
           "data_requirement_refs": ["headline-metrics", "key-drivers"],

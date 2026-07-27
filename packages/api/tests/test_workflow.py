@@ -4,7 +4,10 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from data_intelligence_sdk.core.types import DataCorpusPackage, UserQuery
-from data_intelligence_sdk.runtime.config import MethodHubSettings
+from data_intelligence_sdk.runtime.config import (
+    IntentServiceSettings,
+    MethodHubSettings,
+)
 
 from data_intelligence_api.application.workflow import (
     DEFAULT_QUERY,
@@ -27,6 +30,10 @@ class BackendWorkflowTests(unittest.TestCase):
         sentinel = object()
         manager = Mock()
         manager.method_hub_settings.return_value = MethodHubSettings(enabled=False)
+        manager.intent_service_settings.return_value = IntentServiceSettings(
+            endpoint="http://localhost:8005",
+            enabled=True,
+        )
         with (
             patch.dict(
                 "os.environ",
@@ -50,7 +57,7 @@ class BackendWorkflowTests(unittest.TestCase):
             logger="logger",
             config_manager=manager,
             use_llm_spec_builder=True,
-            intent_service_base_url=None,
+            intent_service_base_url="http://localhost:8005",
             mcp_client=None,
         )
 
@@ -58,6 +65,10 @@ class BackendWorkflowTests(unittest.TestCase):
         sentinel = object()
         manager = Mock()
         manager.method_hub_settings.return_value = MethodHubSettings(enabled=False)
+        manager.intent_service_settings.return_value = IntentServiceSettings(
+            endpoint="http://localhost:8005",
+            enabled=True,
+        )
         with (
             patch.dict(
                 "os.environ",
@@ -103,7 +114,13 @@ class BackendWorkflowTests(unittest.TestCase):
                 sandbox_provider=Mock(),
             )
 
-        analyzer_class.assert_called_once_with(base_url="http://localhost:8005")
+        analyzer_class.assert_called_once()
+        analyzer_kwargs = analyzer_class.call_args.kwargs
+        self.assertEqual(analyzer_kwargs["base_url"], "http://localhost:8005")
+        self.assertIsInstance(
+            analyzer_kwargs["fallback_analyzer"],
+            ExampleIntentAnalyzer,
+        )
         self.assertIs(pipeline.intent_analyzer, analyzer_class.return_value)
 
     def test_example_intent_analyzer_does_not_infer_intent_from_datahub(self) -> None:

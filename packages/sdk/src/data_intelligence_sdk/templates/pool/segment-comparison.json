@@ -66,6 +66,7 @@
         {
           "block_id": "comparison-kpis",
           "type": "kpi_group",
+          "content_role": "metrics",
           "title": "Comparison Metrics",
           "required": true,
           "layout": {"span": 12, "emphasis": "featured"},
@@ -75,6 +76,7 @@
         {
           "block_id": "comparison-narrative",
           "type": "narrative",
+          "content_role": "executive_summary",
           "required": true,
           "layout": {"span": 12, "emphasis": "standard"},
           "data_requirement_refs": ["segment-ranking", "segment-share"],
@@ -92,6 +94,7 @@
         {
           "block_id": "segment-ranking-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Ranked Segments",
           "required": true,
           "layout": {"span": 8, "emphasis": "featured"},
@@ -112,6 +115,7 @@
         {
           "block_id": "segment-share-table",
           "type": "table",
+          "content_role": "table",
           "title": "Segment Contribution",
           "required": false,
           "layout": {"span": 4, "emphasis": "supporting"},
@@ -130,6 +134,7 @@
         {
           "block_id": "composition-chart",
           "type": "chart",
+          "content_role": "chart",
           "title": "Segment Composition",
           "required": false,
           "layout": {"span": 8, "emphasis": "featured"},
@@ -150,6 +155,7 @@
         {
           "block_id": "comparison-actions",
           "type": "recommendations",
+          "content_role": "recommendation",
           "required": false,
           "layout": {"span": 4, "emphasis": "supporting"},
           "data_requirement_refs": ["segment-ranking", "segment-breakdown"],

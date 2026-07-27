@@ -3,35 +3,104 @@
 from __future__ import annotations
 
 import json
+import threading
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from data_intelligence_sdk.core.types import DataCorpusPackage
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 
 RESULT_MARKER = "__AXIOM_RESULT__"
 MAX_COMMAND_LENGTH = 262_144
+DEFAULT_NATURAL_RECORD_SHAPES = (
+    "table_rows",
+    "spreadsheet_rows",
+    "document_pages",
+    "text_chunks",
+    "metadata_records",
+)
 
 
 @dataclass(frozen=True, slots=True)
 class SandboxEnvironment:
     """Capabilities and access policy of one request-scoped sandbox."""
 
+    contract_version: str = "1.0"
     runtime: str = "python"
+    runtime_version: str | None = None
     dependency_management: str = "axiom_sandbox_service"
+    available_packages: tuple[str, ...] = ()
     network_access: bool = False
     source_access: str = "read_only"
+    materialization_format: str = "json_serializable"
+    natural_record_shapes: tuple[str, ...] = DEFAULT_NATURAL_RECORD_SHAPES
 
     def to_prompt_payload(self) -> dict[str, Any]:
         """Return the serializable environment contract exposed to agents."""
 
         return {
+            "contract_version": self.contract_version,
             "runtime": self.runtime,
+            "runtime_version": self.runtime_version,
             "dependency_management": self.dependency_management,
+            "available_packages": list(self.available_packages),
             "network_access": self.network_access,
             "source_access": self.source_access,
+            "materialization_contract": {
+                "format": self.materialization_format,
+                "natural_record_shapes": list(self.natural_record_shapes),
+            },
         }
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "SandboxEnvironment":
+        """Normalize a service capability payload into the versioned contract."""
+
+        if payload is None:
+            return cls()
+        if not isinstance(payload, dict):
+            if hasattr(payload, "model_dump"):
+                payload = payload.model_dump(mode="json")
+            elif hasattr(payload, "__dict__"):
+                payload = vars(payload)
+            else:
+                return cls()
+        materialization = payload.get("materialization_contract", {})
+        if not isinstance(materialization, dict):
+            materialization = {}
+        packages = payload.get("available_packages", ())
+        if isinstance(packages, str):
+            packages = [packages]
+        shapes = materialization.get(
+            "natural_record_shapes",
+            payload.get("natural_record_shapes", DEFAULT_NATURAL_RECORD_SHAPES),
+        )
+        if isinstance(shapes, str):
+            shapes = [shapes]
+        runtime_version = payload.get("runtime_version") or payload.get(
+            "python_version"
+        )
+        return cls(
+            contract_version=str(payload.get("contract_version", "1.0")),
+            runtime=str(payload.get("runtime", "python")),
+            runtime_version=(
+                str(runtime_version) if runtime_version is not None else None
+            ),
+            dependency_management=str(
+                payload.get("dependency_management", "axiom_sandbox_service")
+            ),
+            available_packages=tuple(str(item) for item in packages or ()),
+            network_access=bool(payload.get("network_access", False)),
+            source_access=str(payload.get("source_access", "read_only")),
+            materialization_format=str(
+                materialization.get(
+                    "format",
+                    payload.get("materialization_format", "json_serializable"),
+                )
+            ),
+            natural_record_shapes=tuple(str(item) for item in shapes or ()),
+        )
 
 
 class SandboxSessionProvider(Protocol):
@@ -51,6 +120,45 @@ class EngineSandboxSession:
     sandbox: object
     source_paths: dict[str, str] = field(default_factory=dict)
     environment: SandboxEnvironment = field(default_factory=SandboxEnvironment)
+    sandbox_factory: Callable[[], object] | None = None
+    staged_files: dict[str, bytes] = field(default_factory=dict)
+    _reprovision_lock: threading.RLock = field(
+        default_factory=threading.RLock,
+        repr=False,
+    )
+
+    def write(self, path: str, content: bytes | str) -> None:
+        """Stage a file and retain it for transparent sandbox reprovisioning."""
+
+        payload = content.encode() if isinstance(content, str) else content
+        self.sandbox.write(path, payload)
+        self.staged_files[path] = payload
+
+    def reprovision(self) -> bool:
+        """Replace a failed request sandbox and restore all staged files."""
+
+        if self.sandbox_factory is None:
+            return False
+        with self._reprovision_lock:
+            try:
+                record = self.sandbox.refresh()
+                status = getattr(record, "status", None)
+                status_text = str(getattr(status, "value", status) or "").lower()
+                if status_text == "running":
+                    return True
+            except Exception:
+                pass
+            previous = self.sandbox
+            replacement = self.sandbox_factory()
+            replacement.wait_until_ready()
+            for path, payload in self.staged_files.items():
+                replacement.write(path, payload)
+            self.sandbox = replacement
+            try:
+                previous.delete()
+            except Exception:
+                pass
+            return True
 
     def execute_python(
         self,
