@@ -12,7 +12,7 @@
   "templates": [
     {
       "template_id": "document-analysis",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "path": "document-analysis.json",
       "name": "Document Analysis",
       "description": "Format-oriented document analysis retained for explicit requests and compatibility.",
@@ -23,7 +23,7 @@
     },
     {
       "template_id": "data-profile",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "path": "data-profile.json",
       "name": "Data Analysis",
       "description": "Format-oriented tabular analysis retained for explicit requests and compatibility.",
@@ -67,7 +67,7 @@
     },
     {
       "template_id": "education-learning",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "education-learning.json",
       "name": "Education and Learning",
       "description": "Deep analysis of learning material, curricula, pedagogy, outcomes, skills, and educational evidence.",
@@ -79,7 +79,7 @@
     },
     {
       "template_id": "business-economics-finance",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "business-economics-finance.json",
       "name": "Business, Economics and Finance",
       "description": "Decision-grade analysis of markets, organizations, strategy, operations, economics, and financial evidence.",
@@ -91,7 +91,7 @@
     },
     {
       "template_id": "technology-engineering",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "technology-engineering.json",
       "name": "Technology and Engineering",
       "description": "Systematic analysis of software, architecture, engineering decisions, technical systems, and innovation.",
@@ -103,7 +103,7 @@
     },
     {
       "template_id": "health-wellbeing",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "health-wellbeing.json",
       "name": "Health and Wellbeing",
       "description": "Careful evidence synthesis for health, wellness, behavior, care delivery, and quality-of-life topics.",
@@ -115,7 +115,7 @@
     },
     {
       "template_id": "society-culture-relationships",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "society-culture-relationships.json",
       "name": "Society, Culture and Relationships",
       "description": "Contextual analysis of communities, identity, relationships, family, marriage, norms, and lived experience.",
@@ -127,7 +127,7 @@
     },
     {
       "template_id": "media-arts-entertainment",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "media-arts-entertainment.json",
       "name": "Media, Arts and Entertainment",
       "description": "Interpretive analysis of music, hip-hop, media, narratives, audiences, creative work, and cultural impact.",
@@ -139,7 +139,7 @@
     },
     {
       "template_id": "science-policy-environment",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "science-policy-environment.json",
       "name": "Science, Policy and Environment",
       "description": "Evidence-centered analysis of research, public policy, institutions, scientific claims, and environmental systems.",

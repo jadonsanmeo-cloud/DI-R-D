@@ -3,7 +3,7 @@
   "schema_version": "1.0",
   "template_id": "media-arts-entertainment",
   "extends": "adaptive-raw-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Media, Arts and Entertainment",
   "description": "An interpretive blueprint for music, hip-hop, media, narratives, audiences, creative work, and cultural impact.",
   "tags": ["media", "music", "hip-hop", "art", "entertainment", "audience"],
@@ -14,9 +14,90 @@
   },
   "adaptation": {
     "guidance": [
-      "Organize sections around form, themes, creators, context, audience, influence, and tensions only when supported.",
-      "Ground interpretation in specific works, passages, patterns, or audience evidence.",
-      "Use visual comparison only for meaningful distributions or timelines; prefer concept and evidence cards for interpretation."
+      "Define the works, creators, genres or forms, production and circulation context, audience, period, and interpretive lens.",
+      "Separate formal observation, source statement, interpretation, reception evidence, commercial evidence, and broader cultural claim.",
+      "Analyze form and technique together with themes, voice, representation, context, audience, circulation, and influence.",
+      "Ground interpretation in specific works, passages, scenes, sonic or visual features, patterns, or reception evidence.",
+      "Represent competing readings and avoid treating one critic, fan group, market signal, or platform metric as universal reception.",
+      "Prefer thematic grids, evidence trails, and influence pathways; chart only meaningful timelines, distributions, or comparable audience evidence.",
+      "Respect source wording and attribution while keeping quotations brief and distinguishing influence from simple chronology."
     ]
-  }
+  },
+  "sections": [
+    {
+      "section_id": "creative-orientation",
+      "title": "Creative Context and Interpretive Answer",
+      "purpose": "Identify the creative subject and context, then answer the objective with a grounded interpretive thesis.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "creative-profile", "type": "profile", "content_role": "data_profile", "title": "Works, Context and Evidence Profile", "required": true, "layout": {"span": 4, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify works, creators, forms or genres, period, production or release context, audience evidence, and material coverage gaps."]},
+        {"block_id": "creative-summary", "type": "narrative", "content_role": "executive_summary", "title": "Interpretive Thesis", "required": true, "layout": {"span": 8, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Answer the objective with a clear thesis connecting form, theme, context, and significance using the strongest concrete evidence.", "Distinguish interpretation from documented creator intent and audience reception."]},
+        {"block_id": "creative-findings", "type": "insight_grid", "content_role": "key_findings", "title": "Creative and Cultural Findings", "required": true, "layout": {"span": 12, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Present distinct findings about form, technique, theme, voice, representation, context, audience, circulation, tension, or influence."]}
+      ]
+    },
+    {
+      "section_id": "form-and-meaning",
+      "title": "Form, Technique and Meaning",
+      "purpose": "Explain how specific creative choices produce, complicate, or contest meaning.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "formal-analysis", "type": "narrative", "content_role": "narrative", "title": "Formal and Thematic Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Analyze specific compositional, sonic, visual, narrative, performance, genre, language, or editing choices and connect them to themes.", "Avoid broad thematic claims without a concrete feature, work, passage, or pattern."]},
+        {"block_id": "meaning-pathway", "type": "process_flow", "content_role": "implication", "title": "From Form to Cultural Meaning", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Map one supported chain from creative choice through audience cue or circulation context to interpretation or cultural effect; mark contested links."]}
+      ]
+    },
+    {
+      "section_id": "context-and-reception",
+      "title": "Context, Audience and Reception",
+      "purpose": "Place the creative work in historical, social, industrial, and audience contexts while preserving multiple readings.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "reception-analysis", "type": "narrative", "content_role": "implication", "title": "Context and Reception Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Analyze relevant historical, social, technological, industrial, platform, market, and audience contexts with competing interpretations.", "Do not treat sales, streams, awards, or one response as complete cultural impact."]},
+        {
+          "block_id": "audience-evidence-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Comparable Audience or Circulation Evidence",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "audience-evidence-chart",
+            "intent": "Support one claim with comparable audience, circulation, timeline, catalog, or reception evidence.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "scatter", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {"title": "Comparable audience or circulation evidence", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No comparable quantitative audience or circulation evidence is available."}
+          },
+          "instructions": ["Preserve platform, territory, period, denominator, catalog scope, and metric definition; do not convert popularity into quality or universal reception."]
+        }
+      ]
+    },
+    {
+      "section_id": "creative-evidence",
+      "title": "Works, Passages and Evidence",
+      "purpose": "Make the interpretive basis auditable and identify productive avenues for further creative or cultural inquiry.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "creative-evidence-trail", "type": "evidence_list", "content_role": "supporting_evidence", "title": "Creative Evidence Trail", "required": true, "layout": {"span": 7, "emphasis": "standard"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Tie findings to works, scenes, passages, formal details, performances, interviews, reviews, audience records, or source locations; paraphrase by default."]},
+        {"block_id": "creative-questions", "type": "recommendations", "content_role": "recommendation", "title": "Further Interpretive Questions", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Offer questions or comparative avenues that follow from genuine tensions or gaps; do not prescribe a single authoritative reading."]}
+      ]
+    },
+    {
+      "section_id": "interpretive-limitations",
+      "title": "Interpretive Limits and Missing Perspectives",
+      "purpose": "State which absent works, contexts, voices, audience evidence, or methodological choices constrain the interpretation.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "creative-limitations-list", "type": "recommendations", "content_role": "limitation", "title": "Limitations and Counter-Readings", "required": true, "layout": {"span": 12, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify missing works, versions, production context, creator testimony, audience groups, territories, reception sources, historical context, or plausible counter-readings only when material."]}
+      ]
+    }
+  ]
 }

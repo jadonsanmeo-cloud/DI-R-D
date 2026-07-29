@@ -165,13 +165,15 @@ chạy lại lệnh `docker build`.
 Mở terminal thứ nhất tại thư mục gốc:
 
 ```powershell
-uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8000 --env-file docker/.env
+$env:MODEL_CONFIG_PATH="configs/proxy-openrouter.host.toml"
+$env:DATA_CORPUS_ROOT=(Get-Location).Path
+.\.venv\Scripts\python.exe -m uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8036 --env-file docker/.env
 ```
 
 Kiểm tra:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8036/health
 ```
 
 Kết quả mong đợi:
@@ -182,7 +184,7 @@ status
 ok
 ```
 
-OpenAPI UI có tại `http://127.0.0.1:8000/docs`.
+OpenAPI UI có tại `http://127.0.0.1:8036/docs`.
 
 ### 7. Cài và chạy frontend
 
@@ -191,14 +193,14 @@ Mở terminal thứ hai:
 ```powershell
 cd web
 Copy-Item .env.example .env.local
-npm ci
-npm run dev
+npm.cmd ci
+npm.cmd run dev
 ```
 
 `web/.env.local` cần chứa:
 
 ```env
-API_BASE_URL=http://127.0.0.1:8000
+API_BASE_URL=http://127.0.0.1:8036
 ```
 
 Mở `http://localhost:3000`, upload một file và gửi yêu cầu, ví dụ:
@@ -209,6 +211,24 @@ Create a report about this data file.
 
 Luồng report chạy bất đồng bộ. Frontend sẽ poll response, sau đó hiển thị HTML
 report khi pipeline hoàn tất.
+
+### Chạy bằng F5 trong VS Code
+
+Mở đúng thư mục `Data-Intelligence-SDK` bằng VS Code, chọn cấu hình
+`Data Intelligence: API + Web` rồi nhấn F5.
+
+Cấu hình trong `.vscode/`:
+
+- dùng Python 3.11 tại `.venv`;
+- dùng `configs/proxy-openrouter.host.toml` để gọi AXIOM services qua
+  `localhost:8000`, `localhost:8004` và `localhost:8005`;
+- chạy hoặc tái sử dụng Next.js tại `http://127.0.0.1:3000`;
+- chạy hoặc tái sử dụng API tại `http://127.0.0.1:8036`;
+- ghi artifact vào `artifacts/<ddmmyyyy-hhmm>-<uuid>/`.
+
+Nếu API Docker đang healthy trên port `8036`, F5 sẽ tái sử dụng API đó. Muốn
+debug breakpoint Python trên host, dừng API container trước rồi nhấn F5; launcher
+sẽ tự khởi động Uvicorn dưới debugger.
 
 ### 8. Chạy CLI không cần frontend
 

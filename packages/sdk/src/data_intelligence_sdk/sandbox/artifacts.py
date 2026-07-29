@@ -23,6 +23,9 @@ _SENSITIVE_KEY_PARTS = (
     "secret",
     "token",
 )
+_TIMESTAMPED_RUN_ID = re.compile(
+    r"^(?P<timestamp>\d{8}-\d{4})-(?P<uuid>[0-9a-fA-F-]{36})$"
+)
 
 
 class ArtifactPersistenceError(RuntimeError):
@@ -460,7 +463,7 @@ class FilesystemArtifactStore(ArtifactStore):
         query: UserQuery,
     ) -> RunArtifactSession:
         self.root.mkdir(parents=True, exist_ok=True)
-        run_id = str(uuid4())
+        run_id = new_artifact_run_id()
         return RunArtifactSession.create(
             run_id=run_id,
             root=self.root / run_id,
@@ -471,7 +474,7 @@ class FilesystemArtifactStore(ArtifactStore):
         """Reopen a non-terminal artifact bundle after workflow persistence."""
 
         try:
-            normalized_run_id = str(UUID(run_id))
+            normalized_run_id = normalize_artifact_run_id(run_id)
         except (TypeError, ValueError, AttributeError) as exc:
             raise ArtifactPersistenceError("Invalid runtime artifact ID.") from exc
         root = (self.root / normalized_run_id).resolve()
@@ -525,6 +528,25 @@ class FilesystemArtifactStore(ArtifactStore):
             raise ArtifactPersistenceError(
                 f"Could not append legacy artifact reference: {exc}"
             ) from exc
+
+
+def new_artifact_run_id(now: datetime | None = None) -> str:
+    """Return a human-readable run ID with a collision-safe UUID suffix."""
+
+    timestamp = (now or datetime.now().astimezone()).strftime("%d%m%Y-%H%M")
+    return f"{timestamp}-{uuid4()}"
+
+
+def normalize_artifact_run_id(run_id: object) -> str:
+    """Validate timestamped run IDs while retaining legacy UUID support."""
+
+    value = str(run_id)
+    match = _TIMESTAMPED_RUN_ID.fullmatch(value)
+    if match is not None:
+        datetime.strptime(match.group("timestamp"), "%d%m%Y-%H%M")
+        normalized_uuid = str(UUID(match.group("uuid")))
+        return f"{match.group('timestamp')}-{normalized_uuid}"
+    return str(UUID(value))
 
 
 def _utc_now() -> str:

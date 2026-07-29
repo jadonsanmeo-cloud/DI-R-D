@@ -16,6 +16,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, START, StateGraph
@@ -35,6 +37,9 @@ from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
 from data_intelligence_sdk.engines.reporting.base import _PromptAgent
+from data_intelligence_sdk.engines.reporting.corpus import (
+    CORPUS_MATERIALIZE_OPERATION,
+)
 from data_intelligence_sdk.engines.reporting.policies import (
     CONTENT_ROLES,
     DEFAULT_SOURCE_MATERIALIZATION_REGISTRY,
@@ -64,6 +69,25 @@ from data_intelligence_sdk.engines.reporting.utils import (
     _semantic_role_groups,
     _table_columns,
 )
+
+
+def _ingested_document_metadata(
+    corpus_package: DataCorpusPackage,
+    document_id: str,
+) -> dict[str, Any] | None:
+    documents = corpus_package.metadata.get("ingested_documents", [])
+    if not isinstance(documents, list):
+        return None
+    return next(
+        (
+            item
+            for item in documents
+            if isinstance(item, dict)
+            and str(item.get("document_id")) == str(document_id)
+        ),
+        None,
+    )
+
 
 class PlanAgent(_PromptAgent):
     def __init__(
@@ -117,6 +141,7 @@ class PlanAgent(_PromptAgent):
         scope = _scope_from_spec(spec, corpus_package)
         allowed_tables = set(scope["tables"])
         allowed_vectors = set(scope["vector_collections"])
+        allowed_documents = set(scope["documents"])
         normalized_steps = []
         ignored_steps = []
         seen: set[str] = set()
@@ -140,9 +165,13 @@ class PlanAgent(_PromptAgent):
                 str(item)
                 for item in _list_value(required_data.get("vector_collections"))
             ]
+            documents = [
+                str(item) for item in _list_value(required_data.get("documents"))
+            ]
             if scope["explicit"] and (
                 any(item not in allowed_tables for item in tables)
                 or any(item not in allowed_vectors for item in vectors)
+                or any(item not in allowed_documents for item in documents)
             ):
                 continue
             step_id = _safe_id(raw_step.get("step_id", f"step-{index}"))
@@ -159,6 +188,36 @@ class PlanAgent(_PromptAgent):
             if not isinstance(operation, dict):
                 operation = {"kind": str(operation or "analyze")}
             description = str(raw_step.get("description", ""))
+            if documents:
+                document_metadata = _ingested_document_metadata(
+                    corpus_package,
+                    documents[0],
+                )
+                if document_metadata is not None:
+                    operation = {
+                        "kind": CORPUS_MATERIALIZE_OPERATION,
+                        "parameters": {
+                            "document_id": documents[0],
+                            "organization_id": document_metadata.get(
+                                "organization_id"
+                            ),
+                            "mode": "all",
+                        },
+                    }
+                    description = (
+                        "Materialize extracted contents and indexed chunks from "
+                        f"ingested document `{documents[0]}`."
+                    )
+                    for output in outputs:
+                        roles = [
+                            str(role)
+                            for role in _list_value(output.get("semantic_roles"))
+                        ]
+                        output["semantic_roles"] = list(
+                            dict.fromkeys(
+                                roles + ["source_content", "goal_evidence"]
+                            )
+                        )
             local_sources = [
                 str(source)
                 for source in scope["sources"]
@@ -249,6 +308,7 @@ class PlanAgent(_PromptAgent):
                         **required_data,
                         "tables": tables,
                         "vector_collections": vectors,
+                        "documents": documents,
                         "columns": columns,
                     },
                     "operation": operation,
@@ -581,17 +641,45 @@ class PlanAgent(_PromptAgent):
             None,
         )
         for document in scope["documents"]:
+            document_metadata = _ingested_document_metadata(
+                corpus_package,
+                document,
+            )
+            source_ref = (
+                str(document_metadata.get("source_ref"))
+                if document_metadata is not None
+                and document_metadata.get("source_ref")
+                else f"corpus://{document}"
+            )
+            operation = (
+                {
+                    "kind": CORPUS_MATERIALIZE_OPERATION,
+                    "parameters": {
+                        "document_id": document,
+                        "organization_id": document_metadata.get("organization_id"),
+                        "mode": "all",
+                    },
+                }
+                if document_metadata is not None
+                else {
+                    "kind": (
+                        document_handler.capability_id
+                        if document_handler is not None
+                        else "retrieve_document_content"
+                    )
+                }
+            )
             steps.append(
                 {
                     "step_id": f"retrieve-{_safe_id(document)}",
                     "description": (
-                        f"Retrieve objective-relevant content from document "
-                        f"`{document}`."
+                        "Materialize extracted contents and indexed chunks from "
+                        f"ingested document `{document}`."
                     ),
                     "required": True,
                     "inputs": [
                         {
-                            "ref": f"corpus://{document}",
+                            "ref": source_ref,
                             "kind": "corpus_source",
                             "required": True,
                         }
@@ -603,13 +691,7 @@ class PlanAgent(_PromptAgent):
                         "documents": [document],
                         "columns": [],
                     },
-                    "operation": {
-                        "kind": (
-                            document_handler.capability_id
-                            if document_handler is not None
-                            else "retrieve_document_content"
-                        )
-                    },
+                    "operation": operation,
                     "outputs": [
                         {
                             "name": f"{_safe_id(document)}-content",
@@ -834,13 +916,37 @@ class TemplatePool:
         return TemplateSelectionPolicy.from_manifest(self.manifest())
 
     def selection_candidates(self) -> list[dict[str, Any]]:
-        """Return complete LLM-facing descriptors without exposing file paths."""
+        """Return LLM-facing descriptors and legal reusable archetypes."""
 
         candidates = []
         for descriptor in self.list_templates():
             if descriptor.get("llm_candidate") is not True:
                 continue
             definition = self.get(str(descriptor.get("template_id")))
+            section_archetypes = []
+            for section in definition.get("sections", []):
+                section_archetypes.append(
+                    {
+                        "section_id": section.get("section_id"),
+                        "title": section.get("title"),
+                        "purpose": section.get("purpose"),
+                        "blocks": [
+                            {
+                                "archetype_ref": block.get("block_id"),
+                                "type": block.get("type"),
+                                "content_role": block.get("content_role"),
+                                "required": bool(block.get("required", False)),
+                                "data_requirement_refs": deepcopy(
+                                    block.get("data_requirement_refs", [])
+                                ),
+                                "instructions": deepcopy(
+                                    block.get("instructions", [])
+                                ),
+                            }
+                            for block in section.get("blocks", [])
+                        ],
+                    }
+                )
             candidates.append(
                 {
                     "template_id": descriptor.get("template_id"),
@@ -856,6 +962,7 @@ class TemplatePool:
                     "selection_hint": descriptor.get("selection_hint"),
                     "selection": deepcopy(definition.get("selection", {})),
                     "adaptation": deepcopy(definition.get("adaptation", {})),
+                    "section_archetypes": section_archetypes,
                 }
             )
         return candidates
@@ -889,6 +996,7 @@ class TemplatePool:
                 )
                 payload = self._merge_definition(parent, payload)
             self._apply_legacy_content_roles(payload)
+            self._validate_definition(payload, descriptor)
             self._validate_content_roles(payload)
             return payload
         raise KeyError(f"Unknown report template: {template_id!r} version={version!r}")
@@ -937,6 +1045,42 @@ class TemplatePool:
                         f"{block.get('block_id')!r}."
                     )
 
+    def _validate_definition(
+        self,
+        template: dict[str, Any],
+        descriptor: dict[str, Any],
+    ) -> None:
+        """Validate the fully inherited definition at the pool boundary."""
+
+        descriptor_id = str(descriptor.get("template_id"))
+        descriptor_version = str(descriptor.get("version"))
+        if str(template.get("template_id")) != descriptor_id:
+            raise ValueError(
+                f"Template descriptor {descriptor_id!r} loaded a definition "
+                f"with template_id {template.get('template_id')!r}."
+            )
+        if str(template.get("version")) != descriptor_version:
+            raise ValueError(
+                f"Template {descriptor_id!r} manifest version "
+                f"{descriptor_version!r} does not match definition version "
+                f"{template.get('version')!r}."
+            )
+        schema_path = str(
+            self.manifest().get("template_schema") or "template.schema.json"
+        )
+        schema = json.loads(
+            self._root().joinpath(schema_path).read_text(encoding="utf-8")
+        )
+        try:
+            Draft202012Validator(schema).validate(template)
+        except ValidationError as exc:
+            location = ".".join(str(item) for item in exc.absolute_path)
+            suffix = f" at {location}" if location else ""
+            raise ValueError(
+                f"Invalid report template {descriptor_id!r}{suffix}: "
+                f"{exc.message}"
+            ) from exc
+
 
 class TemplateAgent(_PromptAgent):
     def __init__(self, llm: object | None, template_pool: TemplatePool) -> None:
@@ -956,6 +1100,7 @@ class TemplateAgent(_PromptAgent):
         scoped["content_preview"] = self._content_preview(
             scoped.get("sources", []),
             policy,
+            scoped.get("metadata", {}).get("ingested_documents", []),
         )
         payload = self._invoke_json(
             user_goal=spec.objective,
@@ -976,6 +1121,11 @@ class TemplateAgent(_PromptAgent):
         )
         selected_id = requested_id or previous_id
         confidence = 1.0 if selected_id else 0.0
+        selection_mode = (
+            "explicit"
+            if requested_id
+            else ("previous_instance" if previous_id else "deterministic_fallback")
+        )
         selection_reason = (
             "The template was explicitly requested by the execution spec."
             if requested_id
@@ -998,10 +1148,12 @@ class TemplateAgent(_PromptAgent):
                 and confidence >= policy.minimum_confidence
             ):
                 selected_id = proposed_id
+                selection_mode = "llm"
                 selection_reason = str(
                     payload.get("selection_reason", "Selected by TemplateAgent.")
                 )
             elif proposed_id in candidate_ids:
+                selection_mode = "deterministic_fallback"
                 selection_reason = (
                     f"TemplateAgent confidence {confidence:.2f} was below the "
                     f"pool threshold {policy.minimum_confidence:.2f}; the "
@@ -1009,6 +1161,7 @@ class TemplateAgent(_PromptAgent):
                 )
         if selected_id not in valid_ids:
             selected_id = policy.fallback_template_id
+            selection_mode = "deterministic_fallback"
             if selected_id not in valid_ids:
                 raise ValueError(
                     "The template pool fallback_template_id is not in the manifest."
@@ -1019,9 +1172,28 @@ class TemplateAgent(_PromptAgent):
                     "template pool raw fallback was selected."
                 )
         definition = self.template_pool.get(str(selected_id))
+        # A blueprint is meaningful only for the definition whose archetypes
+        # the model selected. Never apply a rejected, low-confidence, or
+        # different-domain blueprint to an explicit/fallback template.
+        adaptation_payload = (
+            payload
+            if isinstance(payload, dict)
+            and str(payload.get("template_id")) == str(selected_id)
+            else {}
+        )
         sections = self._adapt_sections(
             definition,
-            payload if isinstance(payload, dict) else {},
+            adaptation_payload,
+        )
+        requested_blueprint = (
+            adaptation_payload.get("instance_blueprint", {}).get("sections")
+            if isinstance(adaptation_payload.get("instance_blueprint"), dict)
+            else None
+        )
+        llm_blueprint_applied = bool(
+            isinstance(requested_blueprint, list)
+            and requested_blueprint
+            and sections != definition.get("sections", [])
         )
         return self._materialize_instance(
             definition,
@@ -1041,6 +1213,12 @@ class TemplateAgent(_PromptAgent):
                 if isinstance(payload, dict)
                 else ""
             ),
+            selection_mode=selection_mode,
+            design_source=(
+                "llm_blueprint"
+                if llm_blueprint_applied
+                else "canonical_template"
+            ),
         )
 
     @staticmethod
@@ -1054,10 +1232,56 @@ class TemplateAgent(_PromptAgent):
     def _content_preview(
         sources: list[str],
         policy: TemplateSelectionPolicy,
+        ingested_documents: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         remaining = policy.max_preview_characters
         previews = []
+        ingested_documents = (
+            ingested_documents if isinstance(ingested_documents, list) else []
+        )
+        ingested_by_source = {
+            str(item.get("source_ref")): item
+            for item in ingested_documents
+            if isinstance(item, dict) and item.get("source_ref")
+        }
         for source in sources:
+            ingested = ingested_by_source.get(str(source))
+            if ingested is not None:
+                item = {
+                    "source": str(source),
+                    "name": str(
+                        ingested.get("file_name")
+                        or ingested.get("document_id")
+                        or source
+                    ),
+                    "extension": Path(
+                        str(ingested.get("file_name") or "")
+                    ).suffix.lower(),
+                    "document_id": ingested.get("document_id"),
+                    "content_types": deepcopy(
+                        ingested.get("content_types", [])
+                    ),
+                    "content_profile": deepcopy(
+                        ingested.get("content_profile", {})
+                    ),
+                    "artifact_ref": ingested.get("artifact_ref"),
+                }
+                source_previews = ingested.get("previews")
+                source_previews = (
+                    source_previews if isinstance(source_previews, dict) else {}
+                )
+                content = "\n\n".join(
+                    f"[{content_type}]\n{text}"
+                    for content_type, text in source_previews.items()
+                    if str(text).strip()
+                )
+                sample = content[:remaining]
+                if sample:
+                    item["content"] = sample
+                    item["preview_truncated"] = len(content) > len(sample)
+                    remaining -= len(sample)
+                previews.append(item)
+                continue
             path = Path(str(source))
             item: dict[str, Any] = {
                 "source": str(source),
@@ -1151,11 +1375,14 @@ class TemplateAgent(_PromptAgent):
             for item in adaptation.get("required_content_roles", [])
         }
         archetypes: dict[str, list[dict[str, Any]]] = {}
+        archetypes_by_id: dict[str, dict[str, Any]] = {}
         for section in definition.get("sections", []):
             for block in section.get("blocks", []):
                 archetypes.setdefault(str(block.get("content_role")), []).append(block)
+                archetypes_by_id[str(block.get("block_id"))] = block
         sections = []
         used_ids: set[str] = set()
+        used_section_ids: set[str] = set()
         produced_roles: set[str] = set()
         for section_index, requested_section in enumerate(
             requested_sections,
@@ -1171,10 +1398,28 @@ class TemplateAgent(_PromptAgent):
                 if not isinstance(requested_block, dict):
                     continue
                 role = str(requested_block.get("content_role", ""))
+                archetype_ref = str(
+                    requested_block.get("archetype_ref") or ""
+                ).strip()
                 candidates = archetypes.get(role, [])
-                if role not in allowed_roles or not candidates:
+                if role not in allowed_roles:
                     continue
-                block = deepcopy(candidates[(block_index - 1) % len(candidates)])
+                if archetype_ref:
+                    selected_archetype = archetypes_by_id.get(archetype_ref)
+                    if (
+                        selected_archetype is None
+                        or str(selected_archetype.get("content_role")) != role
+                    ):
+                        continue
+                elif candidates:
+                    # Compatibility for saved blueprints created before
+                    # archetype_ref became part of the contract.
+                    selected_archetype = candidates[
+                        (block_index - 1) % len(candidates)
+                    ]
+                else:
+                    continue
+                block = deepcopy(selected_archetype)
                 block_id = _safe_id(
                     requested_block.get("block_id")
                     or f"{role}-{section_index}-{block_index}"
@@ -1186,20 +1431,28 @@ class TemplateAgent(_PromptAgent):
                 block["title"] = str(
                     requested_block.get("title") or block.get("title") or ""
                 )
-                block["required"] = bool(block.get("required")) and bool(
-                    requested_block.get("required", block.get("required"))
-                )
+                # Requiredness is a canonical policy. The LLM may neither
+                # downgrade required evidence nor promote an optional visual.
+                block["required"] = bool(block.get("required", False))
                 if isinstance(requested_block.get("layout"), dict):
                     block["layout"] = {
                         **deepcopy(block.get("layout", {})),
                         **deepcopy(requested_block["layout"]),
                     }
                 if isinstance(requested_block.get("instructions"), list):
-                    block["instructions"] = [
-                        str(item)
+                    canonical_instructions = [
+                        str(item).strip()
+                        for item in block.get("instructions", [])
+                        if str(item).strip()
+                    ]
+                    run_instructions = [
+                        str(item).strip()
                         for item in requested_block["instructions"]
                         if str(item).strip()
                     ]
+                    block["instructions"] = list(
+                        dict.fromkeys(canonical_instructions + run_instructions)
+                    )
                 if block.get("type") not in REPORT_BLOCK_TYPES:
                     continue
                 if isinstance(block.get("chart_slot"), dict):
@@ -1211,6 +1464,9 @@ class TemplateAgent(_PromptAgent):
             section_id = _safe_id(
                 requested_section.get("section_id") or f"section-{section_index}"
             )
+            if section_id in used_section_ids:
+                section_id = f"{section_id}-{section_index}"
+            used_section_ids.add(section_id)
             section_layout = requested_section.get("layout")
             if not isinstance(section_layout, dict):
                 section_layout = {}
@@ -1234,7 +1490,13 @@ class TemplateAgent(_PromptAgent):
                         requested_section.get("purpose")
                         or "Analyze the available evidence."
                     ),
-                    "required": bool(requested_section.get("required", False)),
+                    "required": (
+                        bool(requested_section.get("required", False))
+                        or any(
+                            bool(block.get("required", False))
+                            for block in blocks
+                        )
+                    ),
                     "layout": {
                         "columns": columns,
                         "density": density,
@@ -1260,6 +1522,8 @@ class TemplateAgent(_PromptAgent):
         confidence: float | None = None,
         content_profile: dict[str, Any] | None = None,
         title_strategy: str = "",
+        selection_mode: str = "deterministic_fallback",
+        design_source: str = "canonical_template",
     ) -> dict[str, Any]:
         outputs: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for step in plan.get("steps", []):
@@ -1348,6 +1612,7 @@ class TemplateAgent(_PromptAgent):
                 "reason": reason,
                 "confidence": confidence,
                 "content_profile": deepcopy(content_profile or {}),
+                "mode": selection_mode,
             },
             "template_instance": {
                 "instance_id": f"template-instance-{_safe_id(definition.get('template_id'))}",
@@ -1359,6 +1624,13 @@ class TemplateAgent(_PromptAgent):
                 "sections": instance_sections,
                 "applied_fallbacks": applied_fallbacks,
                 "title_strategy": title_strategy,
+                "provenance": {
+                    "selection_mode": selection_mode,
+                    "design_source": design_source,
+                    "llm_blueprint_applied": design_source == "llm_blueprint",
+                    "canonical_template_id": definition.get("template_id"),
+                    "canonical_template_version": definition.get("version"),
+                },
                 "warnings": [],
             },
             "missing_data_requests": missing,

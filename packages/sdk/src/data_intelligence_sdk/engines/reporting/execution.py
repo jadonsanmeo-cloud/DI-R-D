@@ -35,6 +35,13 @@ from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
 from data_intelligence_sdk.engines.reporting.base import _PromptAgent
+from data_intelligence_sdk.engines.reporting.corpus import (
+    ingested_data_analysis_records,
+    ingested_data_has_content,
+    ingested_document_route,
+    is_ingested_data_tool,
+    unwrap_ingested_data_result,
+)
 from data_intelligence_sdk.engines.reporting.policies import (
     DEFAULT_SOURCE_MATERIALIZATION_REGISTRY,
     SourceMaterializationRegistry,
@@ -412,6 +419,9 @@ class RouterAgent(_PromptAgent):
         sources: list[str],
         operation_kind: str,
     ) -> dict[str, Any] | None:
+        corpus_route = ingested_document_route(step_request, method_hub)
+        if corpus_route is not None:
+            return corpus_route
         resolved = self.source_registry.resolve_source(sources, operation_kind)
         handler = resolved[0] if resolved is not None else None
         source = resolved[1] if resolved is not None else None
@@ -733,23 +743,51 @@ class ToolExecutor:
             if runtime.mcp_client is None:
                 raise RuntimeError("Method Hub MCP client is unavailable.")
             result = runtime.mcp_client.call_tool(tool_name, arguments)
-            status = "completed_no_data" if not _normalize_rows(result) else "completed"
+            raw_result = result
+            if is_ingested_data_tool(tool_name):
+                payload = unwrap_ingested_data_result(result)
+                if payload.get("error"):
+                    raise RuntimeError(
+                        str(payload.get("message") or payload.get("error"))
+                    )
+                raw_result = ingested_data_analysis_records(payload)
+                status = (
+                    "completed"
+                    if ingested_data_has_content(payload)
+                    else "completed_no_data"
+                )
+                recorded_outputs = {
+                    "result_summary": {
+                        "record_count": len(raw_result),
+                        "content_count": len(payload.get("contents", [])),
+                        "chunk_count": len(payload.get("chunks", [])),
+                        "type": "ingested_document",
+                    },
+                    "provider": "mcp",
+                }
+            else:
+                status = (
+                    "completed_no_data"
+                    if not _normalize_rows(result)
+                    else "completed"
+                )
+                recorded_outputs = {
+                    "result": result,
+                    "result_summary": self._result_summary(result),
+                    "provider": "mcp",
+                }
             runtime.run_context.record_method_call(
                 tool_name,
                 status="completed",
                 inputs=arguments,
-                outputs={
-                    "result": result,
-                    "result_summary": self._result_summary(result),
-                    "provider": "mcp",
-                },
+                outputs=recorded_outputs,
             )
             return {
                 "schema_version": "1.0",
                 "status": status,
                 "tool_name": tool_name,
                 "arguments": arguments,
-                "raw_result": result,
+                "raw_result": raw_result,
                 "error": None,
             }
         except Exception as exc:

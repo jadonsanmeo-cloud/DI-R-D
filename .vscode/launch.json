@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Data Intelligence: API + Web",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/dev_api.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "envFile": "${workspaceFolder}/docker/.env",
+      "env": {
+        "MODEL_CONFIG_PATH": "${workspaceFolder}/configs/proxy-openrouter.host.toml",
+        "DATA_CORPUS_ROOT": "${workspaceFolder}",
+        "PYTHONPATH": "${workspaceFolder}/packages/api/src;${workspaceFolder}/packages/sdk/src",
+        "REPORT_FORCE_CODE_AGENT": "false",
+        "API_PORT": "8036"
+      },
+      "subProcess": true,
+      "justMyCode": false,
+      "preLaunchTask": "web: dev"
+    }
+  ]
+}

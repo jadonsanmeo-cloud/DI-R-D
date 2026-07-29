@@ -261,8 +261,179 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertIn("Education and Learning", llm.prompt)
         self.assertIn("Technology and Engineering", llm.prompt)
         self.assertIn("Unique preview marker", llm.prompt)
+        self.assertIn("technical-profile", llm.prompt)
+        self.assertIn("archetype_ref", llm.prompt)
         self.assertNotIn('"name": "Adaptive Raw Report"', llm.prompt)
         self.assertNotIn('"name": "Document Analysis"', llm.prompt)
+        self.assertEqual(
+            proposal["selection"]["mode"],
+            "llm",
+        )
+        self.assertEqual(
+            proposal["template_instance"]["provenance"]["design_source"],
+            "llm_blueprint",
+        )
+
+    def test_domain_candidates_publish_legal_archetypes(self):
+        candidates = self.pool.selection_candidates()
+
+        self.assertTrue(candidates)
+        for candidate in candidates:
+            sections = candidate.get("section_archetypes", [])
+            self.assertGreaterEqual(len(sections), 5)
+            blocks = [
+                block
+                for section in sections
+                for block in section.get("blocks", [])
+            ]
+            self.assertTrue(blocks)
+            self.assertTrue(all(block.get("archetype_ref") for block in blocks))
+            self.assertTrue(all(block.get("content_role") for block in blocks))
+            self.assertTrue(
+                any(block.get("content_role") == "supporting_evidence" for block in blocks)
+            )
+            self.assertTrue(
+                any(block.get("content_role") == "limitation" for block in blocks)
+            )
+
+    def test_archetype_ref_preserves_guardrails_and_requiredness(self):
+        definition = self.pool.get("technology-engineering")
+        sections = self.agent._adapt_sections(
+            definition,
+            {
+                "instance_blueprint": {
+                    "sections": [
+                        {
+                            "section_id": "opening",
+                            "title": "Opening",
+                            "purpose": "Answer the technical question.",
+                            "required": False,
+                            "blocks": [
+                                {
+                                    "archetype_ref": "technical-profile",
+                                    "content_role": "data_profile",
+                                    "block_id": "profile",
+                                    "required": False,
+                                    "instructions": ["Focus on the selected runtime."],
+                                },
+                                {
+                                    "archetype_ref": "technical-summary",
+                                    "content_role": "executive_summary",
+                                    "block_id": "summary",
+                                    "required": False,
+                                },
+                                {
+                                    "archetype_ref": "engineering-findings",
+                                    "content_role": "key_findings",
+                                    "block_id": "findings",
+                                    "required": False,
+                                },
+                            ],
+                        },
+                        {
+                            "section_id": "evidence",
+                            "title": "Evidence",
+                            "purpose": "Ground the answer.",
+                            "required": False,
+                            "blocks": [
+                                {
+                                    "archetype_ref": "technical-evidence-trail",
+                                    "content_role": "supporting_evidence",
+                                    "block_id": "evidence-list",
+                                    "required": False,
+                                }
+                            ],
+                        },
+                        {
+                            "section_id": "limits",
+                            "title": "Limits",
+                            "purpose": "Bound the conclusion.",
+                            "required": False,
+                            "blocks": [
+                                {
+                                    "archetype_ref": "technical-limitations-list",
+                                    "content_role": "limitation",
+                                    "block_id": "limitations",
+                                    "required": False,
+                                }
+                            ],
+                        },
+                    ]
+                }
+            },
+        )
+
+        profile = sections[0]["blocks"][0]
+        self.assertEqual(profile["type"], "profile")
+        self.assertTrue(profile["required"])
+        self.assertTrue(sections[0]["required"])
+        self.assertIn("Focus on the selected runtime.", profile["instructions"])
+        self.assertTrue(
+            any(
+                "system boundary" in instruction
+                for instruction in profile["instructions"]
+            )
+        )
+
+    def test_explicit_template_rejects_different_domain_blueprint(self):
+        class DifferentDomainLLM:
+            def invoke(self, prompt):
+                del prompt
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "template_id": "education-learning",
+                            "confidence": 0.98,
+                            "selection_reason": "Education vocabulary was present.",
+                            "instance_blueprint": {
+                                "sections": [
+                                    {
+                                        "section_id": "wrong-domain",
+                                        "title": "Wrong Domain",
+                                        "purpose": "This must not be applied.",
+                                        "required": True,
+                                        "blocks": [
+                                            {
+                                                "archetype_ref": "learning-profile",
+                                                "content_role": "data_profile",
+                                                "block_id": "wrong-profile",
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                        }
+                    )
+                )
+
+        agent = TemplateAgent(DifferentDomainLLM(), self.pool)
+        proposal = agent.run(
+            ExecutionSpec(
+                intent="report",
+                objective="Review the service architecture",
+                constraints={"template_id": "technology-engineering"},
+            ),
+            {
+                "steps": [
+                    {
+                        "step_id": "read",
+                        "outputs": [
+                            {
+                                "name": "content",
+                                "shape": "table",
+                                "semantic_roles": ["goal_evidence"],
+                            }
+                        ],
+                    }
+                ]
+            },
+            DataCorpusPackage(),
+        )
+
+        instance = proposal["template_instance"]
+        self.assertEqual(instance["sections"][0]["section_id"], "system-orientation")
+        self.assertEqual(instance["provenance"]["selection_mode"], "explicit")
+        self.assertEqual(instance["provenance"]["design_source"], "canonical_template")
 
     def test_dynamic_instance_normalizes_invalid_section_layouts(self):
         definition = self.pool.get("adaptive-raw-report")
