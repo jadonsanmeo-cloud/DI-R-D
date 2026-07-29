@@ -14,7 +14,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from data_intelligence_sdk.core.types import DataCorpusPackage, UserQuery
+from data_intelligence_sdk.core.types import UserQuery
 
 _SENSITIVE_KEY_PARTS = (
     "api_key",
@@ -81,7 +81,6 @@ class RunArtifactSession:
         run_id: str,
         root: Path,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
     ) -> "RunArtifactSession":
         try:
             root.mkdir(parents=True, exist_ok=False)
@@ -102,7 +101,7 @@ class RunArtifactSession:
                 "text": query.text,
                 "metadata": _redact(query.metadata),
             },
-            "sources": list(corpus_package.sources),
+            "sources": [],
             "attempts": [],
             "rendered_reports": [],
             "event_count": 0,
@@ -119,15 +118,6 @@ class RunArtifactSession:
             phase="run",
             event_type="run.created",
             payload={"created_at": session._manifest["created_at"]},
-        )
-        session.record_event(
-            phase="corpus",
-            event_type="corpus.registered",
-            payload={
-                "sources": list(corpus_package.sources),
-                "schemas": corpus_package.schemas,
-                "metadata": corpus_package.metadata,
-            },
         )
         session.record_event(
             phase="query",
@@ -468,7 +458,6 @@ class FilesystemArtifactStore(ArtifactStore):
     def create_run(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
     ) -> RunArtifactSession:
         self.root.mkdir(parents=True, exist_ok=True)
         run_id = str(uuid4())
@@ -476,7 +465,6 @@ class FilesystemArtifactStore(ArtifactStore):
             run_id=run_id,
             root=self.root / run_id,
             query=query,
-            corpus_package=corpus_package,
         )
 
     def open_run(self, run_id: str) -> RunArtifactSession:

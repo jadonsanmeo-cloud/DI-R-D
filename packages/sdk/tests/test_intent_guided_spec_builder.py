@@ -3,7 +3,6 @@ import unittest
 
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     ExecutionSpec,
     UserQuery,
 )
@@ -46,18 +45,17 @@ class _IntentAwareSpecBuilder:
     def __init__(self) -> None:
         self.analysis = None
 
-    def build(self, query, intent, corpus_package, session_context, user_context):
+    def build(self, query, intent, session_context, user_context):
         raise AssertionError("pipeline dropped detailed intent analysis")
 
     def build_with_intent_analysis(
         self,
         query,
         intent_analysis,
-        corpus_package,
         session_context,
         user_context,
     ):
-        del corpus_package, session_context, user_context
+        del session_context, user_context
         self.analysis = intent_analysis
         return ExecutionSpec(intent=intent_analysis.intent, objective=query.text)
 
@@ -114,7 +112,6 @@ class IntentGuidedSpecBuilderTests(unittest.TestCase):
         builder.build_with_intent_analysis(
             UserQuery(text="How many orders do we have?"),
             self.analysis,
-            DataCorpusPackage(sources=["orders.csv"]),
         )
 
         self.assertEqual(llm_client.stage, "spec-builder")

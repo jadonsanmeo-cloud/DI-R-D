@@ -67,14 +67,13 @@ class LLMSpecBuilder:
         self,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
         return self._build(
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
+            corpus_package=DataCorpusPackage(),
             session_context=session_context,
             user_context=user_context,
         )
@@ -83,7 +82,6 @@ class LLMSpecBuilder:
         self,
         query: UserQuery,
         intent_analysis: IntentAnalysis,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -92,7 +90,7 @@ class LLMSpecBuilder:
         return self._build(
             query=query,
             intent=intent_analysis.intent,
-            corpus_package=corpus_package,
+            corpus_package=DataCorpusPackage(),
             session_context=session_context,
             user_context=user_context,
             intent_analysis=intent_analysis,
@@ -148,7 +146,6 @@ class LLMSpecBuilder:
         user_feedback: str,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -157,7 +154,7 @@ class LLMSpecBuilder:
             user_feedback=user_feedback,
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
+            corpus_package=DataCorpusPackage(),
             session_context=session_context,
             user_context=user_context,
         )
@@ -169,7 +166,6 @@ class LLMSpecBuilder:
         user_feedback: str,
         query: UserQuery,
         intent_analysis: IntentAnalysis,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> ExecutionSpec:
@@ -180,7 +176,7 @@ class LLMSpecBuilder:
             user_feedback=user_feedback,
             query=query,
             intent=intent_analysis.intent,
-            corpus_package=corpus_package,
+            corpus_package=DataCorpusPackage(),
             session_context=session_context,
             user_context=user_context,
             intent_analysis=intent_analysis,

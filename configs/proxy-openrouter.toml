@@ -1,6 +1,6 @@
 [models]
 [[models.llms]]
-name = "deepseek/deepseek-v4-flash"
+name = "poolside/laguna-xs-2.1"
 provider = "proxy/openrouter"
 api_base = "https://openrouter.ai/api/v1"
 api_key = "${env:OPENROUTER_API_KEY}"
