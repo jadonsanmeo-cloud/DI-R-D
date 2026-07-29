@@ -506,6 +506,44 @@ class ReportTemplateTests(unittest.TestCase):
             ["analysis_data", "source_content", "goal_evidence"],
         )
 
+    def test_singular_semantic_role_is_preserved_and_binds_template(self):
+        normalized = PlanAgent(None)._normalize_plan(
+            {
+                "steps": [
+                    {
+                        "step_id": "materialize-evidence",
+                        "description": "Materialize objective-relevant evidence.",
+                        "operation": {"kind": "retrieve"},
+                        "outputs": [
+                            {
+                                "name": "evidence",
+                                "shape": "table",
+                                "semantic_role": "goal_evidence",
+                            }
+                        ],
+                    }
+                ]
+            },
+            ExecutionSpec(intent="report", objective="Analyze ingested evidence"),
+            DataCorpusPackage(),
+            None,
+            [],
+        )
+        output = normalized["steps"][0]["outputs"][0]
+        proposal = self.agent._materialize_instance(
+            self.pool.get("adaptive-raw-report"),
+            normalized,
+            None,
+            "test",
+        )
+
+        self.assertIn("goal_evidence", output["semantic_roles"])
+        self.assertEqual(proposal["status"], "accepted")
+        self.assertEqual(
+            proposal["template_instance"]["bindings"][0]["plan_output_ref"],
+            "step-output://materialize-evidence/evidence",
+        )
+
     def test_optional_template_output_cannot_be_promoted_to_required(self):
         feedback = [
             {

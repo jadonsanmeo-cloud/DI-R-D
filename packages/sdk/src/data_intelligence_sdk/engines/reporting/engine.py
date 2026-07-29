@@ -357,17 +357,23 @@ class ReportEngine:
         organization_id: str,
         runtime: EngineRuntimeContext,
         user_context: UserContext | None = None,
+        user_query: UserQuery | None = None,
     ) -> FinalResponse:
         markdown = spec_markdown.strip()
+        resolved_query = user_query or UserQuery(text=markdown)
+        objective = resolved_query.text.strip() or markdown
         output = self.run(
             EngineInput(
-                query=UserQuery(text=markdown),
+                query=resolved_query,
                 spec=ExecutionSpec(
                     intent="report",
-                    objective=markdown,
+                    objective=objective,
                     confirmed=True,
                     engine_hint=self.name,
-                    constraints={"output_format": "markdown"},
+                    constraints={
+                        "output_format": "markdown",
+                        "confirmed_spec_markdown": markdown,
+                    },
                 ),
                 corpus_package=DataCorpusPackage(
                     metadata={"organization_id": organization_id}

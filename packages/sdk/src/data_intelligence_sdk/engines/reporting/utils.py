@@ -51,16 +51,38 @@ def _to_jsonable(value: Any) -> Any:
 def _extract_message_content(response: Any) -> str:
     content = getattr(response, "content", None)
     if content is not None:
-        return str(content)
+        return _render_message_content(content)
     if isinstance(response, dict):
         if "content" in response:
-            return str(response["content"])
+            return _render_message_content(response["content"])
         if "output" in response:
-            return str(response["output"])
+            return _render_message_content(response["output"])
         messages = response.get("messages")
         if messages:
             return _extract_message_content(messages[-1])
     return str(response)
+
+
+def _render_message_content(content: Any) -> str:
+    """Flatten text from OpenAI/LangChain content blocks without Python reprs."""
+
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple)):
+        parts = [_render_message_content(item) for item in content]
+        return "\n".join(part for part in parts if part.strip())
+    if isinstance(content, dict):
+        for key in ("text", "content", "output_text", "value"):
+            value = content.get(key)
+            if isinstance(value, (str, list, tuple, dict)):
+                rendered = _render_message_content(value)
+                if rendered.strip():
+                    return rendered
+        return ""
+    text = getattr(content, "text", None)
+    if isinstance(text, str):
+        return text
+    return str(content)
 
 
 def _parse_json_payload(text: str) -> Any:
@@ -68,7 +90,17 @@ def _parse_json_payload(text: str) -> Any:
     fenced = re.search(r"```(?:json)?\s*(.*?)```", stripped, flags=re.DOTALL)
     if fenced:
         stripped = fenced.group(1).strip()
-    return json.loads(stripped)
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError as original_error:
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"[\[{]", stripped):
+            try:
+                payload, _ = decoder.raw_decode(stripped[match.start() :])
+            except json.JSONDecodeError:
+                continue
+            return payload
+        raise original_error
 
 
 def _normalize_generated_source(value: Any) -> str:
@@ -210,7 +242,17 @@ def _normalize_plan_outputs(value: Any, step_id: str) -> list[dict[str, Any]]:
                 normalized.get("name") or f"{step_id}-result-{index}"
             )
             normalized.setdefault("shape", "table")
-            normalized.setdefault("semantic_roles", ["analysis_data"])
+            semantic_roles = [
+                str(role)
+                for role in (
+                    _list_value(normalized.get("semantic_roles"))
+                    + _list_value(normalized.get("semantic_role"))
+                )
+                if str(role).strip()
+            ]
+            normalized["semantic_roles"] = list(
+                dict.fromkeys(semantic_roles or ["analysis_data"])
+            )
             normalized.setdefault("consumer_hints", ["analysis", "report"])
             outputs.append(normalized)
         elif item is not None and str(item).strip():
@@ -285,6 +327,7 @@ def _compatible_plan_outputs(
                 str(item)
                 for item in (
                     _list_value(output.get("semantic_roles"))
+                    + _list_value(output.get("semantic_role"))
                     + _list_value(output.get("fields"))
                 )
                 if str(item)

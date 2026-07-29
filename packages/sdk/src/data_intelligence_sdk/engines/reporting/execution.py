@@ -647,8 +647,28 @@ class DataScienceAgent(_PromptAgent):
             template_requirements=template_requirements,
         )
         if isinstance(payload, dict):
+            analysis_summary = self._analysis_summary(payload)
+            if not analysis_summary and self.llm is not None:
+                repaired = self._invoke_json(
+                    user_goal=user_goal or step.get("description", ""),
+                    step=step,
+                    materialized_result=materialized_result,
+                    upstream_step_results=upstream_step_results,
+                    template_requirements=template_requirements,
+                    validation_feedback=(
+                        "The previous response omitted substantive report-facing "
+                        "analysis. Return the complete JSON contract and ensure "
+                        "analysis_summary or report_content.executive_summary "
+                        "directly answers the confirmed objective."
+                    ),
+                )
+                if isinstance(repaired, dict):
+                    payload = repaired
+                    analysis_summary = self._analysis_summary(payload)
+            if not analysis_summary:
+                return self._fallback_analysis(step, materialized_result, raw_data)
             payload.setdefault("status", "completed")
-            payload.setdefault("analysis_summary", "No analysis summary was produced.")
+            payload["analysis_summary"] = analysis_summary
             payload.setdefault("observations", [])
             payload.setdefault("aggregated_data", {})
             payload.setdefault("report_content", {})
@@ -656,6 +676,34 @@ class DataScienceAgent(_PromptAgent):
             payload.setdefault("warnings", [])
             return payload
         return self._fallback_analysis(step, materialized_result, raw_data)
+
+    @staticmethod
+    def _analysis_summary(payload: dict[str, Any]) -> str:
+        summary = payload.get("analysis_summary")
+        if isinstance(summary, str) and summary.strip():
+            return summary.strip()
+        report_content = payload.get("report_content")
+        if not isinstance(report_content, dict):
+            return ""
+        executive_summary = report_content.get("executive_summary")
+        if isinstance(executive_summary, str):
+            return executive_summary.strip()
+        if isinstance(executive_summary, list):
+            parts: list[str] = []
+            for item in executive_summary:
+                if isinstance(item, dict):
+                    rendered = str(
+                        item.get("statement")
+                        or item.get("text")
+                        or item.get("content")
+                        or ""
+                    ).strip()
+                else:
+                    rendered = str(item).strip()
+                if rendered:
+                    parts.append(rendered)
+            return " ".join(parts)
+        return ""
 
     def _fallback_analysis(
         self,
