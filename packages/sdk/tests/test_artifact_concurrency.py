@@ -2,14 +2,72 @@ import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from uuid import UUID
 from unittest.mock import patch
 
 from data_intelligence_sdk.core.types import UserQuery
-from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
+from data_intelligence_sdk.sandbox.artifacts import (
+    FilesystemArtifactStore,
+    RunArtifactSession,
+    new_artifact_run_id,
+    normalize_artifact_run_id,
+)
 
 
 class ArtifactConcurrencyTests(unittest.TestCase):
+    def test_new_run_id_starts_with_local_run_time_and_ends_with_uuid(self):
+        fixed_uuid = UUID("00000000-0000-0000-0000-000000000123")
+        with patch(
+            "data_intelligence_sdk.sandbox.artifacts.uuid4",
+            return_value=fixed_uuid,
+        ):
+            run_id = new_artifact_run_id(
+                datetime(2026, 7, 28, 14, 5, tzinfo=UTC)
+            )
+
+        self.assertEqual(
+            run_id,
+            "28072026-1405-00000000-0000-0000-0000-000000000123",
+        )
+
+    def test_filesystem_store_persists_timestamped_bundle_name(self):
+        fixed_uuid = UUID("00000000-0000-0000-0000-000000000124")
+        with tempfile.TemporaryDirectory() as directory:
+            with patch(
+                "data_intelligence_sdk.sandbox.artifacts.uuid4",
+                return_value=fixed_uuid,
+            ), patch(
+                "data_intelligence_sdk.sandbox.artifacts.datetime"
+            ) as mocked_datetime:
+                mocked_datetime.now.return_value = datetime(
+                    2026,
+                    7,
+                    28,
+                    14,
+                    6,
+                    tzinfo=timezone(timedelta(hours=7)),
+                )
+                session = FilesystemArtifactStore(directory).create_run(
+                    UserQuery(text="test")
+                )
+
+            self.assertEqual(
+                session.root.name,
+                "28072026-1406-00000000-0000-0000-0000-000000000124",
+            )
+            self.assertTrue(session.manifest_path.is_file())
+
+    def test_run_id_normalization_accepts_new_and_legacy_ids(self):
+        legacy = "00000000-0000-0000-0000-000000000125"
+        timestamped = f"28072026-1407-{legacy}"
+
+        self.assertEqual(normalize_artifact_run_id(legacy), legacy)
+        self.assertEqual(normalize_artifact_run_id(timestamped), timestamped)
+        with self.assertRaises(ValueError):
+            normalize_artifact_run_id(f"99072026-1407-{legacy}")
+
     def test_atomic_write_retries_transient_windows_permission_error(self):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "manifest.json"

@@ -13,24 +13,23 @@ api_key = "${env:OPENROUTER_API_KEY}"
 
 [sandbox]
 enabled = true
-endpoint = "http://host.docker.internal:8004"
+endpoint = "http://localhost:8004"
 workspace_id = "00000000-0000-0000-0000-000000000001"
 token = "${env:SANDBOX_TOKEN}"
 
 [method_hub]
 enabled = true
-endpoint = "http://host.docker.internal:8000/mcp"
+endpoint = "http://localhost:8000/mcp"
 
 [intent_service]
 enabled = true
-endpoint = "http://host.docker.internal:8005"
+endpoint = "http://localhost:8005"
 
 [artifacts]
-root = "/app/artifacts"
+root = "artifacts"
 
 [api]
 cors_origins = [
-  "http://SERVER_IP:3000",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ]

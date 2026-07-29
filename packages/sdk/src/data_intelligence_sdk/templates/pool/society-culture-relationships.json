@@ -3,7 +3,7 @@
   "schema_version": "1.0",
   "template_id": "society-culture-relationships",
   "extends": "adaptive-raw-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Society, Culture and Relationships",
   "description": "A contextual blueprint for communities, identity, relationships, family, marriage, norms, and lived experience.",
   "tags": ["society", "culture", "relationships", "marriage", "family", "identity"],
@@ -14,9 +14,90 @@
   },
   "adaptation": {
     "guidance": [
-      "Organize analysis around context, perspectives, norms, relationships, tensions, and consequences only where the evidence supports them.",
-      "Represent multiple perspectives and avoid treating one account as universal.",
-      "Prefer thematic insight cards and evidence trails over artificial quantification."
+      "Define the people, communities, relationships, institutions, place, period, and source perspectives represented.",
+      "Separate participant account, observed pattern, social norm, institutional rule, analyst interpretation, and causal claim.",
+      "Analyze identity, roles, power, norms, practices, relationships, conflict, change, and consequences in context.",
+      "Represent variation within groups and competing perspectives; do not treat one account or majority pattern as universal.",
+      "Attend to voice, positionality, sampling, translation, privacy, stigma, and whose perspective is absent.",
+      "Prefer thematic grids, perspective maps, and evidence trails; chart only comparable population or survey evidence with denominators.",
+      "Avoid deficit framing and unsupported generalization across cultures, genders, families, or communities."
     ]
-  }
+  },
+  "sections": [
+    {
+      "section_id": "social-orientation",
+      "title": "Social Context and Core Interpretation",
+      "purpose": "Define the people, relationships, and context represented, then answer the objective without erasing variation.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "social-profile", "type": "profile", "content_role": "data_profile", "title": "People, Context and Evidence Profile", "required": true, "layout": {"span": 4, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify groups, relationships, institutions, geography, period, source perspectives, method, and absent voices where available."]},
+        {"block_id": "social-summary", "type": "narrative", "content_role": "executive_summary", "title": "Contextual Summary", "required": true, "layout": {"span": 8, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Answer the objective through the central social pattern or tension, variation across perspectives, consequence, and evidence limitation.", "Do not universalize one account, category, or cultural context."]},
+        {"block_id": "social-findings", "type": "insight_grid", "content_role": "key_findings", "title": "Social and Relational Findings", "required": true, "layout": {"span": 12, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Present distinct findings about identity, norm, role, power, relationship, practice, conflict, adaptation, change, or consequence with source perspective."]}
+      ]
+    },
+    {
+      "section_id": "norms-power-and-relationships",
+      "title": "Norms, Power and Relationship Dynamics",
+      "purpose": "Explain how social expectations, roles, resources, and institutions shape interaction and lived experience.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "social-dynamics-analysis", "type": "narrative", "content_role": "narrative", "title": "Dynamics and Context Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Analyze norms, roles, power, resources, institutions, negotiation, conflict, care, belonging, and exclusion only where supported.", "Distinguish participant meaning from analyst interpretation and pattern from causal mechanism."]},
+        {"block_id": "relationship-pathway", "type": "process_flow", "content_role": "implication", "title": "Context-to-Experience Pathway", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Map one supported pathway from norm or institution through interaction or resource condition to lived consequence; mark contested or missing links."]}
+      ]
+    },
+    {
+      "section_id": "perspectives-and-change",
+      "title": "Perspectives, Variation and Social Change",
+      "purpose": "Compare represented perspectives and explain where experiences converge, diverge, or change over time.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "perspective-analysis", "type": "narrative", "content_role": "implication", "title": "Variation and Change", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Compare perspectives across relevant identities, generations, relationships, institutions, places, or periods while preserving within-group variation.", "Do not explain difference through identity alone when structural or contextual evidence is absent."]},
+        {
+          "block_id": "social-evidence-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Comparable Social Evidence",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "social-evidence-chart",
+            "intent": "Support one social claim with comparable population, survey, participation, distribution, or trend evidence.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "stacked_bar", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {"title": "Comparable social evidence", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No comparable quantitative social evidence is available."}
+          },
+          "instructions": ["Require compatible definitions, samples, denominators, periods, and groups; expose representation limits and avoid implying that frequency measures importance."]
+        }
+      ]
+    },
+    {
+      "section_id": "voices-and-evidence",
+      "title": "Voices, Accounts and Evidence",
+      "purpose": "Make represented perspectives auditable and identify evidence-supported implications without speaking for absent groups.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "social-evidence-trail", "type": "evidence_list", "content_role": "supporting_evidence", "title": "Perspective and Evidence Trail", "required": true, "layout": {"span": 7, "emphasis": "standard"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Tie findings to specific accounts, practices, patterns, institutional texts, observations, statistics, and source locations while identifying perspective."]},
+        {"block_id": "social-considerations", "type": "recommendations", "content_role": "recommendation", "title": "Context-Sensitive Considerations", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Frame implications as context-dependent considerations with affected groups, participation needs, risks, and ways to validate impact.", "Avoid imposing a single cultural norm."]}
+      ]
+    },
+    {
+      "section_id": "social-limitations",
+      "title": "Positionality, Missing Voices and Limits",
+      "purpose": "State how sampling, representation, context, method, and analyst position constrain the social interpretation.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "social-limitations-list", "type": "recommendations", "content_role": "limitation", "title": "Limitations and Absent Perspectives", "required": true, "layout": {"span": 12, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify missing groups, self-selection, power in data collection, translation, privacy, stigma, geographic or historical specificity, source positionality, and causal limits only when material."]}
+      ]
+    }
+  ]
 }

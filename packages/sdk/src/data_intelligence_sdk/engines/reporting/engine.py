@@ -42,6 +42,12 @@ from data_intelligence_sdk.engines.reporting.composition import (
     ChartAgent,
     ReportAgent,
 )
+from data_intelligence_sdk.engines.reporting.corpus import (
+    ReportCorpusResolutionError,
+    ReportCorpusResolver,
+    ingested_document_route,
+    is_ingested_data_tool,
+)
 from data_intelligence_sdk.engines.reporting.execution import (
     CodeAgent,
     DataScienceAgent,
@@ -112,8 +118,10 @@ class _DataStepState(TypedDict, total=False):
 
 
 class _ReportGraphState(TypedDict, total=False):
+    query_text: str
     spec: ExecutionSpec
     corpus_package: DataCorpusPackage
+    ingested_evidence_package: dict[str, Any]
     runtime: EngineRuntimeContext
     output_registry: _StepOutputRegistry
     user_context: UserContext | None
@@ -205,6 +213,7 @@ class ReportEngine:
         self.datascience_agent = DataScienceAgent(self.llm)
         self.chart_agent = ChartAgent(self.llm)
         self.report_agent = ReportAgent(self.llm)
+        self.corpus_resolver = ReportCorpusResolver()
         self.tool_executor = ToolExecutor()
         self.input_resolver = _StepInputResolver()
         self.datascience_processor = DataScienceProcessor(
@@ -274,6 +283,7 @@ class ReportEngine:
             },
         )
         initial: _ReportGraphState = {
+            "query_text": input.query.text,
             "spec": spec,
             "corpus_package": corpus_package,
             "runtime": runtime,
@@ -299,7 +309,9 @@ class ReportEngine:
             },
         )
         generation_mode = "langchain" if self.llm is not None else "fallback"
-        scope = _scope_from_spec(spec, corpus_package)
+        resolved_spec = state.get("spec", spec)
+        resolved_corpus = state.get("corpus_package", corpus_package)
+        scope = _scope_from_spec(resolved_spec, resolved_corpus)
         return runtime.run_context.build_output(
             engine_name=self.name,
             result=state.get("final_result"),
@@ -316,7 +328,11 @@ class ReportEngine:
                 "structured_report": state.get("structured_report", {}),
                 "rendered_reports": state.get("rendered_reports", []),
                 "scheduler_warnings": state.get("scheduler_warnings", []),
+                "ingested_evidence_package": state.get(
+                    "ingested_evidence_package", {}
+                ),
                 "workflow": [
+                    "Ingested Corpus Resolver",
                     "Plan Agent",
                     "Template Agent",
                     "DAG Scheduler",
@@ -369,6 +385,7 @@ class ReportEngine:
 
     def _build_graph(self) -> Any:
         graph = StateGraph(_ReportGraphState)
+        graph.add_node("resolve_ingested_data", self._graph_resolve_ingested_data)
         graph.add_node("plan", self._graph_plan)
         graph.add_node("template", self._graph_template)
         graph.add_node("negotiate", self._graph_negotiate)
@@ -379,7 +396,8 @@ class ReportEngine:
         graph.add_node("run_chart", self._graph_run_chart)
         graph.add_node("compose_report", self._graph_compose_report)
         graph.add_node("render", self._graph_render)
-        graph.add_edge(START, "plan")
+        graph.add_edge(START, "resolve_ingested_data")
+        graph.add_edge("resolve_ingested_data", "plan")
         graph.add_edge("plan", "template")
         graph.add_edge("template", "negotiate")
         graph.add_conditional_edges(
@@ -399,6 +417,80 @@ class ReportEngine:
         graph.add_edge("compose_report", "render")
         graph.add_edge("render", END)
         return graph.compile()
+
+    def _graph_resolve_ingested_data(
+        self,
+        state: _ReportGraphState,
+    ) -> dict[str, Any]:
+        resolver = self.corpus_resolver
+        if not resolver.should_resolve(
+            state["spec"],
+            state["corpus_package"],
+            state["runtime"],
+        ):
+            state["runtime"].run_context.record_step(
+                "resolve_ingested_data",
+                status="skipped",
+                description=(
+                    "No report-local ingested corpus selection was requested "
+                    "and the Method Hub ingested-data tool is unavailable."
+                ),
+            )
+            return {"ingested_evidence_package": {}}
+        try:
+            resolution = resolver.resolve(
+                state["spec"],
+                state["corpus_package"],
+                state["runtime"],
+                query_text=state.get("query_text"),
+            )
+        except ReportCorpusResolutionError as exc:
+            state["runtime"].run_context.record_step(
+                "resolve_ingested_data",
+                status="failed",
+                inputs={
+                    "objective": state["spec"].objective,
+                    "organization_id": state["corpus_package"].metadata.get(
+                        "organization_id"
+                    ),
+                },
+                outputs={
+                    "code": exc.code,
+                    "error": str(exc),
+                    "details": exc.details,
+                },
+            )
+            raise
+        documents = resolution.evidence_package.get("documents", [])
+        state["runtime"].run_context.record_step(
+            "resolve_ingested_data",
+            inputs={
+                "selection": resolution.evidence_package.get("selection", {}),
+            },
+            outputs={
+                "document_count": len(documents),
+                "document_ids": [
+                    item.get("document_id")
+                    for item in documents
+                    if isinstance(item, dict)
+                ],
+                "artifact_refs": [
+                    item.get("artifact_ref")
+                    for item in documents
+                    if isinstance(item, dict) and item.get("artifact_ref")
+                ],
+            },
+            artifact_refs=[
+                str(item["artifact_ref"])
+                for item in documents
+                if isinstance(item, dict) and item.get("artifact_ref")
+            ],
+        )
+        return {
+            "spec": resolution.spec,
+            "corpus_package": resolution.corpus_package,
+            "ingested_evidence_package": resolution.evidence_package,
+        }
 
     def _build_data_step_graph(self) -> Any:
         graph = StateGraph(_DataStepState)
@@ -1074,7 +1166,10 @@ class ReportEngine:
     def _data_route(self, state: _DataStepState) -> dict[str, Any]:
         scope = _scope_from_spec(state["spec"], state["corpus_package"])
         inventory = _method_hub_payload(state["runtime"])
-        if self.force_code_agent:
+        corpus_route = ingested_document_route(state["step"], inventory)
+        if corpus_route is not None:
+            route = corpus_route
+        elif self.force_code_agent:
             route = {
                 "route": "generate_tool",
                 "tool_name": None,
@@ -1202,6 +1297,10 @@ class ReportEngine:
         return {"execution_result": result}
 
     def _existing_execution_choice(self, state: _DataStepState) -> str:
+        if is_ingested_data_tool(
+            state.get("execution_result", {}).get("tool_name")
+        ):
+            return "analyze"
         if (
             state.get("execution_result", {}).get("status") == "failed"
             and self.fallback_to_generation_on_tool_error

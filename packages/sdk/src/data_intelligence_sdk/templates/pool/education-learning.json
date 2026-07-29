@@ -3,7 +3,7 @@
   "schema_version": "1.0",
   "template_id": "education-learning",
   "extends": "adaptive-raw-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Education and Learning",
   "description": "A flexible blueprint for learning material, curricula, pedagogy, competencies, assessment, and educational outcomes.",
   "tags": ["education", "learning", "training", "curriculum", "pedagogy", "skills"],
@@ -14,9 +14,90 @@
   },
   "adaptation": {
     "guidance": [
-      "Organize deep sections around concepts, learning progression, pedagogy, application, and assessment only when supported.",
-      "Distinguish what is taught, why it matters, how ideas connect, and what learners should be able to do.",
-      "Use a concept flow or learning pathway before considering a chart."
+      "Define the learner, setting, prerequisites, intended outcomes, and assessment context before judging quality.",
+      "Distinguish curriculum intent, instructional method, learner activity, assessment evidence, and demonstrated outcome.",
+      "Trace concept and skill progression from prerequisites through practice, feedback, transfer, and mastery.",
+      "Evaluate alignment among outcomes, content, pedagogy, and assessment; do not infer learning from content coverage alone.",
+      "Represent accessibility, inclusion, cognitive demand, and learner variability where the evidence supports them.",
+      "Prefer concept maps and learning pathways for qualitative structure; chart only comparable outcomes or participation evidence.",
+      "State transfer limits, measurement validity, selection effects, and missing learner evidence explicitly."
     ]
-  }
+  },
+  "sections": [
+    {
+      "section_id": "learning-orientation",
+      "title": "Learning Context and Core Answer",
+      "purpose": "Define who is learning what, under which conditions, and answer the educational objective directly.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "learning-profile", "type": "profile", "content_role": "data_profile", "title": "Learning and Evidence Profile", "required": true, "layout": {"span": 4, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify learners, setting, level, prerequisites, duration, delivery mode, outcomes, assessments, and coverage gaps when available."]},
+        {"block_id": "learning-summary", "type": "narrative", "content_role": "executive_summary", "title": "Educational Summary", "required": true, "layout": {"span": 8, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Answer the objective through intended learning, instructional approach, evidence of alignment or outcome, and the most consequential gap.", "Do not equate exposure, completion, or satisfaction with learning."]},
+        {"block_id": "learning-findings", "type": "insight_grid", "content_role": "key_findings", "title": "Learning Design Findings", "required": true, "layout": {"span": 12, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Present distinct findings about outcomes, sequence, pedagogy, practice, feedback, assessment, inclusion, or transfer."]}
+      ]
+    },
+    {
+      "section_id": "concept-and-skill-progression",
+      "title": "Concept and Skill Progression",
+      "purpose": "Explain how knowledge and capability are expected to develop and where the progression is strong or discontinuous.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "progression-analysis", "type": "narrative", "content_role": "narrative", "title": "Progression Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Analyze prerequisites, conceptual dependencies, scaffolding, practice, feedback, increasing cognitive demand, and opportunities for transfer.", "Do not invent learner mastery where only curriculum sequence is documented."]},
+        {"block_id": "learning-pathway", "type": "process_flow", "content_role": "implication", "title": "Learning Pathway", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Map an evidence-backed path from prerequisite through instruction and practice to assessment or application; mark optional or missing stages."]}
+      ]
+    },
+    {
+      "section_id": "alignment-and-evidence",
+      "title": "Outcome, Pedagogy and Assessment Alignment",
+      "purpose": "Test whether the learning outcomes, instructional experiences, and assessments measure the same intended capability.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "alignment-analysis", "type": "narrative", "content_role": "implication", "title": "Alignment and Learner Implications", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Compare intended outcomes with taught content, learning activities, feedback, and assessment demands.", "Separate design alignment from empirical effectiveness and discuss accessibility or learner variability only with evidence."]},
+        {
+          "block_id": "learning-evidence-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Comparable Learning Evidence",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "learning-evidence-chart",
+            "intent": "Support one educational claim with comparable outcomes, participation, progression, or assessment evidence.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "scatter", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {"title": "Comparable learning evidence", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No comparable quantitative learning evidence is available."}
+          },
+          "instructions": ["Use consistent learner populations, assessment constructs, scales, and time windows; do not chart qualitative judgments as outcomes."]
+        }
+      ]
+    },
+    {
+      "section_id": "educational-evidence",
+      "title": "Educational Evidence and Improvement",
+      "purpose": "Ground conclusions in curriculum, learner, assessment, or implementation evidence and identify conditional improvements.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "learning-evidence-trail", "type": "evidence_list", "content_role": "supporting_evidence", "title": "Educational Evidence Trail", "required": true, "layout": {"span": 7, "emphasis": "standard"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Tie findings to stated outcomes, activities, examples, assessments, learner results, feedback, or source locations."]},
+        {"block_id": "learning-improvements", "type": "recommendations", "content_role": "recommendation", "title": "Improvement Hypotheses", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Frame improvements as testable hypotheses with the affected learner need, design change, implementation dependency, and evaluation signal."]}
+      ]
+    },
+    {
+      "section_id": "learning-limitations",
+      "title": "Learning Evidence Limits and Open Questions",
+      "purpose": "State what the available material cannot establish about learning quality, effectiveness, equity, or transfer.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "learning-limitations-list", "type": "recommendations", "content_role": "limitation", "title": "Limitations and Unanswered Questions", "required": true, "layout": {"span": 12, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify missing learner characteristics, baseline, comparison group, assessment validity, implementation fidelity, retention, transfer, accessibility, or outcome evidence only when material."]}
+      ]
+    }
+  ]
 }

@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-from uuid import UUID
 
 from data_intelligence_sdk.runtime.event_payload import runtime_event_payload
+from data_intelligence_sdk.sandbox.artifacts import normalize_artifact_run_id
 
 _STAGE_EVENT_TYPES = {
     "run.created": "pipeline.start",
@@ -188,6 +188,6 @@ class ArtifactHistoryReader:
         if parsed.scheme != "artifact" or parsed.path not in {"", "/"}:
             return None
         try:
-            return str(UUID(parsed.netloc))
+            return normalize_artifact_run_id(parsed.netloc)
         except (TypeError, ValueError, AttributeError):
             return None

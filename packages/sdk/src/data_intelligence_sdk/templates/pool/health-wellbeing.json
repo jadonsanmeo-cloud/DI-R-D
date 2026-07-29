@@ -3,7 +3,7 @@
   "schema_version": "1.0",
   "template_id": "health-wellbeing",
   "extends": "adaptive-raw-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Health and Wellbeing",
   "description": "A careful evidence-synthesis blueprint for health, wellness, behavior, care delivery, and quality of life.",
   "tags": ["health", "wellbeing", "medical", "care", "wellness", "behavior"],
@@ -14,9 +14,90 @@
   },
   "adaptation": {
     "guidance": [
-      "Organize sections around population or context, observed outcomes, contributing factors, interventions, and evidence quality only when supported.",
-      "Clearly separate association, reported experience, and causal evidence.",
-      "Avoid diagnostic or treatment claims beyond the source and foreground uncertainty and coverage."
+      "Define population, setting, exposure or intervention, comparator, outcome, follow-up period, and evidence type where available.",
+      "Separate source-reported claims, observed association, clinical significance, statistical uncertainty, lived experience, and causal evidence.",
+      "Organize analysis around burden or context, outcomes, contributing factors, care or intervention pathways, equity, and evidence quality.",
+      "Preserve denominators, absolute and relative effects, baseline risk, units, time horizon, and adverse outcomes in comparisons.",
+      "Do not provide diagnosis or treatment instruction beyond the source; surface uncertainty, contraindications, and applicability limits.",
+      "Use charts only for comparable populations and outcome definitions; never visualize isolated percentages without denominator context.",
+      "Recommendations must be framed as evidence-supported considerations, not individualized medical advice."
     ]
-  }
+  },
+  "sections": [
+    {
+      "section_id": "health-orientation",
+      "title": "Health Context and Evidence-Supported Answer",
+      "purpose": "Define the health question and population, then answer the objective at the level justified by the evidence.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "health-profile", "type": "profile", "content_role": "data_profile", "title": "Population and Evidence Profile", "required": true, "layout": {"span": 4, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["State population, setting, intervention or exposure, comparator, outcomes, follow-up, evidence type, and material missing context when available."]},
+        {"block_id": "health-summary", "type": "narrative", "content_role": "executive_summary", "title": "Evidence-Supported Summary", "required": true, "layout": {"span": 8, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Answer the objective with the principal outcome, magnitude or direction, applicability, important harm or trade-off, and uncertainty.", "Do not imply diagnosis, individualized treatment, or causality beyond the source design."]},
+        {"block_id": "health-findings", "type": "insight_grid", "content_role": "key_findings", "title": "Health and Wellbeing Findings", "required": true, "layout": {"span": 12, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Present distinct findings about population, outcomes, determinants, experience, care, equity, benefits, harms, or uncertainty with denominators and locations where available."]}
+      ]
+    },
+    {
+      "section_id": "outcomes-and-determinants",
+      "title": "Outcomes, Determinants and Lived Context",
+      "purpose": "Explain the observed health or wellbeing pattern and the evidenced factors associated with differences in outcome.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "outcome-analysis", "type": "narrative", "content_role": "narrative", "title": "Outcome and Determinant Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Analyze outcomes, symptoms, function, quality of life, behavior, access, social context, and heterogeneity only where evidenced.", "Separate association, reported experience, and causal inference."]},
+        {"block_id": "care-pathway", "type": "process_flow", "content_role": "implication", "title": "Care or Influence Pathway", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Map one supported pathway from need or exposure through access, intervention, behavior, or mechanism to outcome; label uncertain links."]}
+      ]
+    },
+    {
+      "section_id": "intervention-and-equity",
+      "title": "Intervention, Access and Equity",
+      "purpose": "Assess whom an intervention or care model reaches, what outcomes are observed, and where benefits, burdens, or access differ.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "intervention-analysis", "type": "narrative", "content_role": "implication", "title": "Benefits, Harms and Applicability", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Compare benefit, harm, burden, feasibility, access, and subgroup applicability using absolute quantities and time horizons when available.", "Do not generalize beyond studied or described populations."]},
+        {
+          "block_id": "health-evidence-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Comparable Outcome Evidence",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "health-evidence-chart",
+            "intent": "Support one health claim with comparable outcome, access, burden, or subgroup evidence.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "scatter", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {"title": "Comparable outcome evidence", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No comparable quantitative health evidence is available."}
+          },
+          "instructions": ["Require compatible outcome definitions, populations, denominators, units, and follow-up; show uncertainty when supplied and avoid causal visual framing for observational evidence."]
+        }
+      ]
+    },
+    {
+      "section_id": "health-evidence",
+      "title": "Evidence Basis and Practical Considerations",
+      "purpose": "Make the source basis auditable and identify evidence-supported considerations without giving individualized medical advice.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "health-evidence-trail", "type": "evidence_list", "content_role": "supporting_evidence", "title": "Clinical and Lived-Evidence Trail", "required": true, "layout": {"span": 7, "emphasis": "standard"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Tie findings to population, outcome definition, effect or account, timeframe, study or source context, and location."]},
+        {"block_id": "health-considerations", "type": "recommendations", "content_role": "recommendation", "title": "Evidence-Supported Considerations", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Frame considerations for policy, service design, research, or informed discussion with prerequisites and monitoring signals.", "Do not prescribe or diagnose."]}
+      ]
+    },
+    {
+      "section_id": "health-limitations",
+      "title": "Uncertainty, Safety and Evidence Limits",
+      "purpose": "State limitations that constrain interpretation, safety, applicability, equity, or causal conclusions.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "health-limitations-list", "type": "recommendations", "content_role": "limitation", "title": "Limitations and Safety Caveats", "required": true, "layout": {"span": 12, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify missing denominators, comparator, baseline risk, confounding control, uncertainty, harms, follow-up, subgroup representation, outcome validity, or implementation context only when material."]}
+      ]
+    }
+  ]
 }

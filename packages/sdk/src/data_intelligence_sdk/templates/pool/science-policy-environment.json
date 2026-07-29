@@ -3,7 +3,7 @@
   "schema_version": "1.0",
   "template_id": "science-policy-environment",
   "extends": "adaptive-raw-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Science, Policy and Environment",
   "description": "An evidence-centered blueprint for research, public policy, institutions, scientific claims, and environmental systems.",
   "tags": ["science", "research", "policy", "government", "environment", "evidence"],
@@ -14,9 +14,90 @@
   },
   "adaptation": {
     "guidance": [
-      "Organize sections around the problem, methods or evidence base, findings, mechanisms, implications, and uncertainty only when supported.",
-      "Separate empirical findings, model assumptions, policy values, and recommendations.",
-      "Use charts only when scales, units, coverage, and comparison bases are defensible."
+      "Define the scientific or policy question, system boundary, population or geography, time horizon, stakeholders, and decision criterion.",
+      "Separate empirical observations, experimental or model results, assumptions, expert judgment, institutional position, value choice, and recommendation.",
+      "Evaluate methods, measurement, sampling, uncertainty, sensitivity, replication, and external validity before interpreting findings.",
+      "For policy, distinguish goals, instruments, implementation mechanisms, distributional effects, trade-offs, and evaluation criteria.",
+      "For environmental systems, preserve spatial scale, temporal scale, baselines, units, feedbacks, thresholds, and scenario assumptions.",
+      "Use charts only when scales, units, populations, and comparison bases are defensible; show uncertainty when supplied.",
+      "State contested evidence, knowledge gaps, governance constraints, and who bears costs or benefits."
     ]
-  }
+  },
+  "sections": [
+    {
+      "section_id": "question-and-answer",
+      "title": "Question, Scope and Evidence-Supported Answer",
+      "purpose": "Define the research or policy question and answer it at the level supported by the available evidence.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "science-policy-profile", "type": "profile", "content_role": "data_profile", "title": "Study, System and Policy Profile", "required": true, "layout": {"span": 4, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["State question, system boundary, population or geography, period, method or policy setting, evidence types, and material scope gaps."]},
+        {"block_id": "science-policy-summary", "type": "narrative", "content_role": "executive_summary", "title": "Evidence-Supported Answer", "required": true, "layout": {"span": 8, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Answer the objective with the central finding, confidence, mechanism or policy relevance, key trade-off, and most important uncertainty.", "Distinguish observed result, modeled result, institutional claim, and normative judgment."]},
+        {"block_id": "science-policy-findings", "type": "insight_grid", "content_role": "key_findings", "title": "Key Findings and Policy Signals", "required": true, "layout": {"span": 12, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Present distinct findings about magnitude, mechanism, heterogeneity, threshold, implementation, distribution, or uncertainty with scale and evidence locations."]}
+      ]
+    },
+    {
+      "section_id": "methods-and-evidence",
+      "title": "Methods, Evidence Quality and Mechanisms",
+      "purpose": "Explain how the evidence was produced, what mechanism it supports, and how design choices affect confidence.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "methods-analysis", "type": "narrative", "content_role": "narrative", "title": "Method and Mechanism Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Analyze design, measurement, sampling, model structure, assumptions, uncertainty, sensitivity, causal identification, and external validity where available.", "Do not upgrade correlation, simulation, or expert judgment into experimental evidence."]},
+        {"block_id": "evidence-to-impact-flow", "type": "process_flow", "content_role": "implication", "title": "Evidence-to-Impact Pathway", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Map one supported pathway from driver or intervention through mechanism and implementation to outcome; mark modeled, assumed, and observed links."]}
+      ]
+    },
+    {
+      "section_id": "options-and-tradeoffs",
+      "title": "Policy Options, System Effects and Trade-offs",
+      "purpose": "Compare plausible actions or interpretations across effectiveness, feasibility, distribution, timing, and unintended effects.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "policy-analysis", "type": "narrative", "content_role": "implication", "title": "Options and System Trade-offs", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Compare goals, instruments, mechanisms, stakeholders, implementation constraints, costs, benefits, time horizons, feedbacks, and distributional effects only where evidenced.", "Separate empirical prediction from value choice."]},
+        {
+          "block_id": "science-policy-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Comparable Scientific or Policy Evidence",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "science-policy-chart",
+            "intent": "Support one scientific or policy claim with comparable observations, scenarios, distributions, or trends.",
+            "suggested_type": "line",
+            "allowed_types": ["line", "bar", "area", "scatter", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 60, "sort": "none"},
+            "presentation": {"title": "Comparable scientific or policy evidence", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No comparable quantitative scientific or policy evidence is available."}
+          },
+          "instructions": ["Preserve units, spatial and temporal scales, baselines, population, scenario labels, and uncertainty; never mix observed and modeled series without explicit distinction."]
+        }
+      ]
+    },
+    {
+      "section_id": "source-and-decision-evidence",
+      "title": "Evidence Trail and Decision Implications",
+      "purpose": "Make claims auditable and translate the evidence into conditional, monitorable implications.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "science-policy-evidence-trail", "type": "evidence_list", "content_role": "supporting_evidence", "title": "Evidence and Assumption Trail", "required": true, "layout": {"span": 7, "emphasis": "standard"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Tie findings to methods, measurements, estimates, assumptions, scenarios, policy texts, stakeholder evidence, and exact locations."]},
+        {"block_id": "policy-considerations", "type": "recommendations", "content_role": "recommendation", "title": "Conditional Policy or Research Options", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["State the objective served, evidence basis, prerequisites, implementation risk, distributional concern, and evaluation indicator for each option."]}
+      ]
+    },
+    {
+      "section_id": "uncertainty-and-gaps",
+      "title": "Uncertainty, Contestation and Knowledge Gaps",
+      "purpose": "State which methodological, system, governance, or value uncertainties could alter the conclusion.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "science-policy-limitations", "type": "recommendations", "content_role": "limitation", "title": "Limitations and Open Questions", "required": true, "layout": {"span": 12, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Identify material gaps in methods, measurement, uncertainty, sensitivity, external validity, spatial or temporal coverage, model assumptions, stakeholder representation, implementation, governance, or normative criteria."]}
+      ]
+    }
+  ]
 }

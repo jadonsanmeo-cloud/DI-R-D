@@ -407,6 +407,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "langsmith" },
+    { name = "jsonschema" },
     { name = "mcp", extra = ["cli"] },
 ]
 
@@ -419,6 +420,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.3.3" },
     { name = "langgraph", specifier = ">=1.2.7" },
     { name = "langsmith", specifier = ">=0.9.5" },
+    { name = "jsonschema", specifier = ">=4.21" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.28.1" },
 ]
 

@@ -3,7 +3,7 @@
   "schema_version": "1.0",
   "template_id": "technology-engineering",
   "extends": "adaptive-raw-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Technology and Engineering",
   "description": "A systematic blueprint for software, architecture, engineering decisions, technical systems, and innovation.",
   "tags": ["technology", "software", "engineering", "architecture", "system", "innovation"],
@@ -14,9 +14,171 @@
   },
   "adaptation": {
     "guidance": [
-      "Organize deep sections around principles, components, interactions, design choices, trade-offs, quality attributes, and application only when supported.",
-      "Prefer architecture layers, concept grids, dependency flows, or trade-off views for structural evidence.",
-      "Make limitations distinguish conceptual guidance from measured system behavior."
+      "Frame the report around the system purpose, operating context, constraints, and the technical question the reader must decide.",
+      "Separate stated architecture from measured runtime behavior and distinguish design intent from implementation evidence.",
+      "Trace components, interfaces, dependencies, data movement, and failure boundaries before evaluating quality attributes.",
+      "Evaluate trade-offs against explicit quality attributes such as reliability, security, scalability, maintainability, latency, and cost only when evidenced.",
+      "Use a dependency or decision flow for structural evidence; use a chart only for measured quantities with known units and coverage.",
+      "Treat recommendations as conditional engineering options with prerequisites, risks, and verification criteria.",
+      "Call out missing benchmarks, workload assumptions, threat models, operational evidence, and version context as limitations."
     ]
-  }
+  },
+  "sections": [
+    {
+      "section_id": "system-orientation",
+      "title": "System Orientation and Technical Answer",
+      "purpose": "Establish what the system is intended to do, its operating context, and the direct answer to the technical objective.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "technical-profile",
+          "type": "profile",
+          "content_role": "data_profile",
+          "title": "Evidence and System Profile",
+          "required": true,
+          "layout": {"span": 4, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Identify source coverage, system boundary, versions, environments, and material missing technical context; do not treat file statistics as system metrics."]
+        },
+        {
+          "block_id": "technical-summary",
+          "type": "narrative",
+          "content_role": "executive_summary",
+          "title": "Technical Executive Summary",
+          "required": true,
+          "layout": {"span": 8, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Answer the objective using the system purpose, principal design approach, most consequential trade-off, and strongest evidence.", "Distinguish documented intent from observed implementation or measured behavior."]
+        },
+        {
+          "block_id": "engineering-findings",
+          "type": "insight_grid",
+          "content_role": "key_findings",
+          "title": "Engineering Findings",
+          "required": true,
+          "layout": {"span": 12, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Surface distinct findings about boundaries, dependencies, decisions, quality attributes, and risks; attach evidence locations where available."]
+        }
+      ]
+    },
+    {
+      "section_id": "architecture-and-dependencies",
+      "title": "Architecture, Interfaces and Dependencies",
+      "purpose": "Explain how responsibilities are partitioned and how control, data, and failure propagate through the system.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {
+          "block_id": "architecture-analysis",
+          "type": "narrative",
+          "content_role": "narrative",
+          "title": "Architecture Analysis",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Analyze component responsibilities, interfaces, dependency direction, state ownership, and failure boundaries.", "Do not infer deployed topology or runtime behavior from conceptual diagrams alone."]
+        },
+        {
+          "block_id": "dependency-flow",
+          "type": "process_flow",
+          "content_role": "implication",
+          "title": "Critical Dependency Flow",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Show one evidence-backed request, data, build, or failure path with explicit hand-offs and constraints; omit if no sequence is supported."]
+        }
+      ]
+    },
+    {
+      "section_id": "decisions-and-quality",
+      "title": "Design Decisions and Quality Trade-offs",
+      "purpose": "Evaluate why documented choices matter and which quality attributes they improve or weaken.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {
+          "block_id": "tradeoff-analysis",
+          "type": "narrative",
+          "content_role": "implication",
+          "title": "Trade-off Analysis",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "featured"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["For each material choice, connect the chosen mechanism to benefits, costs, constraints, and affected quality attributes.", "Avoid declaring a technology universally superior without workload and operating assumptions."]
+        },
+        {
+          "block_id": "measured-evidence-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Measured Technical Evidence",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "measured-evidence-chart",
+            "intent": "Support one stated engineering claim with comparable measured technical evidence.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "scatter", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {"title": "Measured technical evidence", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No comparable measured technical evidence is available."}
+          },
+          "instructions": ["Use only measurements with explicit units, workload or test context, and comparable populations; never chart qualitative ratings as measured performance."]
+        }
+      ]
+    },
+    {
+      "section_id": "evidence-and-assurance",
+      "title": "Evidence, Assurance and Operational Reality",
+      "purpose": "Ground technical conclusions in concrete implementation, test, operational, or source evidence.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {
+          "block_id": "technical-evidence-trail",
+          "type": "evidence_list",
+          "content_role": "supporting_evidence",
+          "title": "Technical Evidence Trail",
+          "required": true,
+          "layout": {"span": 7, "emphasis": "standard"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Connect each consequential conclusion to a specification, interface, implementation detail, test, benchmark, incident, or operational observation."]
+        },
+        {
+          "block_id": "engineering-options",
+          "type": "recommendations",
+          "content_role": "recommendation",
+          "title": "Engineering Options and Verification",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["State conditional options with prerequisites, expected trade-offs, risks, and a concrete verification signal; do not invent priorities absent from the objective."]
+        }
+      ]
+    },
+    {
+      "section_id": "technical-limitations",
+      "title": "Technical Limitations and Open Questions",
+      "purpose": "State what cannot be concluded and which missing evidence could change the engineering assessment.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {
+          "block_id": "technical-limitations-list",
+          "type": "recommendations",
+          "content_role": "limitation",
+          "title": "Limitations and Unknowns",
+          "required": true,
+          "layout": {"span": 12, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Identify missing workload, scale, security, reliability, cost, version, deployment, test, and operational evidence only where it affects a conclusion.", "Separate absence of evidence from evidence of absence."]
+        }
+      ]
+    }
+  ]
 }

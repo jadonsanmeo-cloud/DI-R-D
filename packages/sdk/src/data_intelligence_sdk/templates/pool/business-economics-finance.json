@@ -3,7 +3,7 @@
   "schema_version": "1.0",
   "template_id": "business-economics-finance",
   "extends": "adaptive-raw-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Business, Economics and Finance",
   "description": "A decision-grade blueprint for markets, organizations, strategy, operations, economics, and financial evidence.",
   "tags": ["business", "economics", "finance", "market", "strategy", "operations"],
@@ -14,9 +14,90 @@
   },
   "adaptation": {
     "guidance": [
-      "Organize analysis around context, performance, drivers, trade-offs, risks, and decision implications only where evidence exists.",
-      "Separate observed results from inferred causes and recommendations.",
-      "Use charts for real trends, segment comparisons, distributions, or relationships—not generic dashboards."
+      "Start from the decision, stakeholder, time horizon, unit of analysis, and comparison baseline.",
+      "Separate reported performance, calculated results, management interpretation, external context, and recommendation.",
+      "Reconcile metric definitions, currency, nominal versus real values, period coverage, population, and denominator before comparison.",
+      "Organize analysis around performance, drivers, operating model, market context, risks, scenarios, and decision implications only where supported.",
+      "Do not infer causality from movement, ranking, or correlation; label hypotheses and competing explanations.",
+      "Use charts for comparable trends, segments, distributions, bridges, or relationships with explicit units and coverage.",
+      "Recommendations must name rationale, dependency, risk, time horizon, and a measurable validation signal."
     ]
-  }
+  },
+  "sections": [
+    {
+      "section_id": "decision-overview",
+      "title": "Decision Context and Executive Answer",
+      "purpose": "Orient the decision-maker, define the evidence perimeter, and answer the objective with the most material business implications.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "business-profile", "type": "profile", "content_role": "data_profile", "title": "Decision and Evidence Profile", "required": true, "layout": {"span": 4, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["State entity, market, period, currency or units, population, source coverage, and material comparability gaps."]},
+        {"block_id": "business-summary", "type": "narrative", "content_role": "executive_summary", "title": "Executive Answer", "required": true, "layout": {"span": 8, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Answer the objective with the strongest performance signal, primary driver or constraint, decision implication, and uncertainty.", "Distinguish verified results from source assertions and interpretation."]},
+        {"block_id": "business-findings", "type": "insight_grid", "content_role": "key_findings", "title": "Decision-Critical Findings", "required": true, "layout": {"span": 12, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Present non-overlapping findings about magnitude, direction, segment, economics, operations, risk, or opportunity with baselines and units where available."]}
+      ]
+    },
+    {
+      "section_id": "performance-and-drivers",
+      "title": "Performance, Drivers and Operating Context",
+      "purpose": "Explain what changed or differs, the scale of the result, and which evidenced factors are associated with it.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "performance-analysis", "type": "narrative", "content_role": "narrative", "title": "Performance and Driver Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Compare against the correct prior period, plan, peer, or segment baseline and preserve currency, unit, denominator, and scope.", "Treat proposed drivers as hypotheses unless the evidence supports attribution."]},
+        {"block_id": "value-driver-flow", "type": "process_flow", "content_role": "implication", "title": "Value Driver Chain", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Map one supported chain from input or market condition through operating mechanism to outcome; label unverified links."]}
+      ]
+    },
+    {
+      "section_id": "market-and-scenarios",
+      "title": "Market Context, Scenarios and Trade-offs",
+      "purpose": "Place internal evidence in its relevant external context and test which assumptions could change the conclusion.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "scenario-analysis", "type": "narrative", "content_role": "implication", "title": "Context and Scenario Analysis", "required": true, "layout": {"span": 7, "emphasis": "featured"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Explain relevant market, policy, competitor, customer, or macro conditions and distinguish observed conditions from modeled scenarios.", "Identify assumptions, sensitivities, trade-offs, and break points without inventing forecasts."]},
+        {
+          "block_id": "business-evidence-chart",
+          "type": "chart",
+          "content_role": "chart",
+          "title": "Comparable Performance Evidence",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "chart_slot": {
+            "chart_slot_id": "business-evidence-chart",
+            "intent": "Support one decision-critical claim with comparable trend, segment, distribution, or relationship evidence.",
+            "suggested_type": "bar",
+            "allowed_types": ["bar", "line", "area", "scatter", "stacked_bar", "heatmap"],
+            "data_requirement_refs": ["goal-evidence"],
+            "encoding": {"x_role": "comparison_dimension", "y_roles": ["primary_measure"]},
+            "constraints": {"max_points": 40, "sort": "none"},
+            "presentation": {"title": "Comparable performance evidence", "value_format": "compact_number", "show_legend": true},
+            "fallback": {"action": "omit", "message": "No comparable quantitative business evidence is available."}
+          },
+          "instructions": ["Chart only values sharing compatible definitions, units, periods, and populations; expose bounded coverage and exclude decorative KPIs."]
+        }
+      ]
+    },
+    {
+      "section_id": "decision-evidence",
+      "title": "Decision Evidence and Actions",
+      "purpose": "Make the evidentiary basis auditable and translate supported findings into conditional action.",
+      "required": true,
+      "layout": {"columns": 12, "density": "comfortable"},
+      "blocks": [
+        {"block_id": "business-evidence-trail", "type": "evidence_list", "content_role": "supporting_evidence", "title": "Evidence Trail", "required": true, "layout": {"span": 7, "emphasis": "standard"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["Tie claims to exact values, periods, segments, source statements, assumptions, and source locations."]},
+        {"block_id": "decision-options", "type": "recommendations", "content_role": "recommendation", "title": "Decision Options", "required": false, "layout": {"span": 5, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["For each option state rationale, prerequisite, risk, horizon, owner or stakeholder when known, and a measurable validation signal.", "Do not convert descriptive evidence into prescriptive certainty."]}
+      ]
+    },
+    {
+      "section_id": "business-limitations",
+      "title": "Risks, Limitations and Missing Evidence",
+      "purpose": "Identify the uncertainties, comparability issues, and omitted evidence that could alter the decision.",
+      "required": true,
+      "layout": {"columns": 12, "density": "detailed"},
+      "blocks": [
+        {"block_id": "business-limitations-list", "type": "recommendations", "content_role": "limitation", "title": "Material Risks and Evidence Gaps", "required": true, "layout": {"span": 12, "emphasis": "supporting"}, "data_requirement_refs": ["goal-evidence"], "instructions": ["State only material gaps in definitions, periods, denominators, currency, inflation treatment, population, forecast assumptions, external validation, or causal evidence.", "Separate decision risk from data-quality limitation."]}
+      ]
+    }
+  ]
 }
