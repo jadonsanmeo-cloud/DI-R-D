@@ -60,6 +60,10 @@ from data_intelligence_api.application.workflow import (
     prepared_markdown_to_payload,
     revise_markdown_workflow,
 )
+from data_intelligence_api.application.query_orchestrator import (
+    DelegateToDataFlow,
+    DirectGeneralAnswer,
+)
 from data_intelligence_sdk.core.types import FinalResponse
 
 logger = logging.getLogger(__name__)
@@ -267,11 +271,14 @@ def create_responses_router(
     settings: ApiSettings,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     run_repository: RunRepository | None = None,
+    query_orchestrator: object | None = None,
 ) -> APIRouter:
     if run_repository is None:
         raise ValueError(
             "run_repository is required for resumable Responses workflows."
         )
+    if query_orchestrator is None:
+        raise ValueError("query_orchestrator is required for Responses workflows.")
     router = APIRouter()
     artifact_history = ArtifactHistoryReader(settings.artifact_root)
 
@@ -303,6 +310,72 @@ def create_responses_router(
                     "response": {"id": response_id, "status": "in_progress"},
                 },
             )
+            try:
+                route = await query_orchestrator.route(  # type: ignore[attr-defined]
+                    invocation.query,
+                    invocation.session_context,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Query orchestration failed error_type=%s",
+                    type(exc).__name__,
+                )
+                failure = WorkflowFailedMessage(
+                    code="query_orchestration_failed",
+                    message="The request could not be routed.",
+                )
+                yield encode_sse(
+                    "response.failed",
+                    _failed_payload(response_id, failure),
+                )
+                return
+
+            if isinstance(route, DirectGeneralAnswer):
+                output_text = route.text
+                for delta in chunk_text(output_text):
+                    yield encode_sse(
+                        "response.output_text.delta",
+                        {
+                            "type": "response.output_text.delta",
+                            "response_id": response_id,
+                            "delta": delta,
+                        },
+                    )
+                yield encode_sse(
+                    "response.output_text.done",
+                    {
+                        "type": "response.output_text.done",
+                        "response_id": response_id,
+                        "text": output_text,
+                    },
+                )
+                yield encode_sse(
+                    "response.completed",
+                    {
+                        "type": "response.completed",
+                        "response_id": response_id,
+                        "response": {
+                            "id": response_id,
+                            "status": "completed",
+                            "output_text": output_text,
+                        },
+                        "evidence": None,
+                        "metadata": {"route": "general_direct"},
+                    },
+                )
+                return
+
+            if not isinstance(route, DelegateToDataFlow):
+                failure = WorkflowFailedMessage(
+                    code="query_orchestration_protocol_error",
+                    message="The request router returned an invalid result.",
+                )
+                yield encode_sse(
+                    "response.failed",
+                    _failed_payload(response_id, failure),
+                )
+                return
+
             async for message in _stream_operation(
                 response_id=response_id,
                 messages=messages,
