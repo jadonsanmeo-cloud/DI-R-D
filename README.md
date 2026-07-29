@@ -342,7 +342,7 @@ Check health:
 curl http://127.0.0.1:8000/health
 ```
 
-Create a response spec from the ingested organization corpus:
+Submit a general or data-dependent response request:
 
 ```bash
 curl --no-buffer \
@@ -354,11 +354,23 @@ curl --no-buffer \
   http://127.0.0.1:8000/api/v1/responses
 ```
 
-The workflow asks Intent Service for intent metadata, generates direct Markdown,
-and ends with `response.requires_confirmation`. The event includes a
-`response_id`, `confirmation_token`, revision, intent metadata, and `spec_markdown`.
-No engine runs before confirmation; the Markdown instructs Report Engine to
-retrieve all relevant documents from the configured organization corpus.
+An LLM orchestrator handles the request before the data workflow. It has access
+only to general model knowledge and conversation context; it cannot access
+Method Hub, MCP, Corpus Service, private documents, or a sandbox.
+
+For general questions it streams `response.output_text.delta` followed by
+`response.completed`. This path creates no pending confirmation record.
+
+When the model needs user- or organization-specific data, it calls the native
+`delegate_to_data_flow` tool. The original query and context then enter the
+existing intent and Markdown preparation flow, which ends with
+`response.requires_confirmation`. That event includes a `response_id`,
+`confirmation_token`, revision, intent metadata, and `spec_markdown`. No engine
+runs before confirmation.
+
+The orchestrator reuses `OPENAI_COMPATIBLE_*` settings. When they are absent,
+`OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, and `LLM_MODEL_NAME` are accepted as
+fallbacks.
 
 Revise the pending spec (repeat as needed):
 

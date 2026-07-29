@@ -8,6 +8,10 @@ from pathlib import Path
 
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
 from data_intelligence_api.main import create_app
+from data_intelligence_api.application.query_orchestrator import (
+    DelegateToDataFlow,
+    DirectGeneralAnswer,
+)
 from data_intelligence_api.infrastructure.persistence.memory.run_repository import (
     InMemoryRunRepository,
 )
@@ -123,6 +127,7 @@ class FakePipeline:
 
     def prepare_markdown(self, query, session_context, user_context):
         self.factory.prepare_calls += 1
+        self.factory.last_query = query.text
         self.logger.log("pipeline.start", {})
         self.logger.log("pipeline.intent_analyzed", {"intent": "reason"})
         markdown = (
@@ -155,17 +160,34 @@ class RecordingFactory:
         self.prepare_calls = 0
         self.revise_calls = 0
         self.execute_calls = 0
+        self.last_query = None
 
     def __call__(self, *, logger):
         return FakePipeline(logger, self)
 
 
+class FakeQueryOrchestrator:
+    def __init__(self, result=None, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls = []
+
+    async def route(self, query, session_context=None):
+        self.calls.append((query, session_context))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
 class BackendApiTests(unittest.TestCase):
-    def make_app(self, root, *, store=None, factory=None):
+    def make_app(self, root, *, store=None, factory=None, orchestrator=None):
         return create_app(
             ApiSettings(Path(root), ("http://localhost:3000",), 5),
             factory or RecordingFactory(),
             store or InMemoryRunRepository(),
+            query_orchestrator=(
+                orchestrator or FakeQueryOrchestrator(DelegateToDataFlow())
+            ),
         )
 
     def create_pending(self, app, source="sales.csv"):
@@ -197,6 +219,102 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("What is total revenue?", confirmation["spec_markdown"])
         self.assertNotIn("capability_requirements", confirmation)
         self.assertEqual(factory.execute_calls, 0)
+
+    def test_general_question_streams_direct_answer_without_pending_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            factory = RecordingFactory()
+            store = InMemoryRunRepository()
+            orchestrator = FakeQueryOrchestrator(
+                DirectGeneralAnswer("PostgreSQL is a relational database.")
+            )
+            app = self.make_app(
+                temp_dir,
+                store=store,
+                factory=factory,
+                orchestrator=orchestrator,
+            )
+
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "POST",
+                    "/api/v1/responses",
+                    json_body={"input": "What is PostgreSQL?", "session_id": "s-1"},
+                )
+            )
+            events = parse_sse(response)
+
+        self.assertEqual(
+            [event for event, _ in events],
+            [
+                "response.created",
+                "response.output_text.delta",
+                "response.output_text.done",
+                "response.completed",
+            ],
+        )
+        self.assertEqual(
+            events[-1][1]["response"]["output_text"],
+            "PostgreSQL is a relational database.",
+        )
+        self.assertEqual(factory.prepare_calls, 0)
+        self.assertEqual(store.runs, {})
+
+    def test_delegation_preserves_the_original_query(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            factory = RecordingFactory()
+            orchestrator = FakeQueryOrchestrator(DelegateToDataFlow())
+            app = self.make_app(
+                temp_dir,
+                factory=factory,
+                orchestrator=orchestrator,
+            )
+
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "POST",
+                    "/api/v1/responses",
+                    json_body={"input": "Summarize my latest reports"},
+                )
+            )
+            events = parse_sse(response)
+
+        self.assertEqual(events[-1][0], "response.requires_confirmation")
+        self.assertEqual(factory.last_query, "Summarize my latest reports")
+        self.assertEqual(orchestrator.calls[0][0].text, "Summarize my latest reports")
+
+    def test_orchestrator_provider_failure_returns_safe_failed_event(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            factory = RecordingFactory()
+            app = self.make_app(
+                temp_dir,
+                factory=factory,
+                orchestrator=FakeQueryOrchestrator(
+                    error=ConnectionError("provider secret detail")
+                ),
+            )
+
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "POST",
+                    "/api/v1/responses",
+                    json_body={"input": "What is PostgreSQL?"},
+                )
+            )
+            events = parse_sse(response)
+
+        self.assertEqual(events[-1][0], "response.failed")
+        self.assertEqual(
+            events[-1][1]["error"],
+            {
+                "code": "query_orchestration_failed",
+                "message": "The request could not be routed.",
+            },
+        )
+        self.assertNotIn("provider secret detail", response.content.decode())
+        self.assertEqual(factory.prepare_calls, 0)
 
     def test_revise_then_confirm_resumes_same_response(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -25,6 +25,11 @@ from data_intelligence_api.infrastructure.persistence.postgres.run_repository im
     PostgresRunRepository,
 )
 from data_intelligence_api.application.workflow import PipelineFactory, default_pipeline_factory
+from data_intelligence_api.application.query_orchestrator import GeneralQueryOrchestrator
+from data_intelligence_api.infrastructure.llm.query_orchestrator_client import (
+    OpenAIQueryOrchestratorClient,
+)
+from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger
 
 
 def create_app(
@@ -32,6 +37,7 @@ def create_app(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     run_repository: RunRepository | None = None,
     chat_service: ChatService | None = None,
+    query_orchestrator: object | None = None,
 ) -> FastAPI:
     resolved_settings = settings or ApiSettings.from_env()
     resolved_repository = run_repository or (
@@ -48,6 +54,14 @@ def create_app(
                 default_model=resolved_settings.openai_compatible_model,
             )
         ),
+    )
+    resolved_query_orchestrator = query_orchestrator or GeneralQueryOrchestrator(
+        OpenAIQueryOrchestratorClient(
+            base_url=resolved_settings.openai_compatible_base_url,
+            api_key=resolved_settings.openai_compatible_api_key,
+            model=resolved_settings.openai_compatible_model,
+        ),
+        logger=ConsoleRuntimeLogger(),
     )
 
     @asynccontextmanager
@@ -82,6 +96,7 @@ def create_app(
             resolved_settings,
             pipeline_factory,
             resolved_repository,
+            resolved_query_orchestrator,
         )
     )
     return app

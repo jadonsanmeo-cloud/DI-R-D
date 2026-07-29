@@ -52,6 +52,14 @@ class ApiSettings:
         max_upload_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
         if max_upload_bytes <= 0:
             raise ValueError("MAX_UPLOAD_BYTES must be greater than zero.")
+        openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+        compatible_base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL")
+        if not compatible_base_url:
+            compatible_base_url = (
+                os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+                if openrouter_key
+                else "http://localhost:20128/v1"
+            )
         return cls(
             data_corpus_root=root,
             cors_origins=origins,
@@ -66,14 +74,14 @@ class ApiSettings:
                 else None
             ),
             chat_store_dir=Path(os.getenv("CHAT_STORE_DIR", ".data/chat")),
-            openai_compatible_base_url=os.getenv(
-                "OPENAI_COMPATIBLE_BASE_URL",
-                "http://localhost:20128/v1",
+            openai_compatible_base_url=compatible_base_url,
+            openai_compatible_api_key=(
+                os.getenv("OPENAI_COMPATIBLE_API_KEY") or openrouter_key
             ),
-            openai_compatible_api_key=os.getenv("OPENAI_COMPATIBLE_API_KEY", ""),
-            openai_compatible_model=os.getenv(
-                "OPENAI_COMPATIBLE_MODEL",
-                "cx/gpt-5.5",
+            openai_compatible_model=(
+                os.getenv("OPENAI_COMPATIBLE_MODEL")
+                or os.getenv("LLM_MODEL_NAME")
+                or "cx/gpt-5.5"
             ),
             default_organization_id=os.getenv("DEFAULT_ORGANIZATION_ID", "test-org"),
         )
