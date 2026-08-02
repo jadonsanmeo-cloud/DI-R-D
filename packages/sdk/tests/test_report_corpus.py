@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import base64
+import gzip
+import json
+import os
 import unittest
+from unittest.mock import patch
 
 from data_intelligence_sdk.core.types import DataCorpusPackage, ExecutionSpec
 from data_intelligence_sdk.engines.reporting.corpus import (
@@ -8,11 +13,20 @@ from data_intelligence_sdk.engines.reporting.corpus import (
     CORPUS_HYBRID_SEARCH,
     CORPUS_KEYWORD_SEARCH_CONTENTS,
     CORPUS_MATERIALIZE_OPERATION,
+    CORPUS_MATERIALIZED_ROUTE,
+    ReportCorpusPolicy,
     ReportCorpusResolutionError,
     ReportCorpusResolver,
+    ingested_data_analysis_records,
+    ingested_document_route,
+    unwrap_ingested_data_result,
 )
 from data_intelligence_sdk.engines.reporting.execution import RouterAgent, ToolExecutor
-from data_intelligence_sdk.engines.reporting.planning import TemplateAgent, TemplatePool
+from data_intelligence_sdk.engines.reporting.planning import (
+    PlanAgent,
+    TemplateAgent,
+    TemplatePool,
+)
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.mcp_client import MCPToolDefinition
 
@@ -100,6 +114,37 @@ def _document_payload(document_id: str, file_name: str = "report.pdf") -> dict:
     }
 
 
+def _compressed_document_payload(
+    document_id: str,
+    file_name: str = "report.pdf",
+) -> dict:
+    payload = _document_payload(document_id, file_name)
+    result = payload["result"]
+    compressed_fields = {
+        "contents": result["contents"],
+        "chunks": result["chunks"],
+    }
+    encoded = gzip.compress(
+        json.dumps(
+            compressed_fields,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        mtime=0,
+    )
+    result["contents"] = []
+    result["chunks"] = []
+    result["compressed_payload"] = base64.b64encode(encoded).decode("ascii")
+    result["compression"] = {
+        "enabled": True,
+        "algorithm": "gzip",
+        "encoding": "base64",
+        "json_fields": ["contents", "chunks"],
+        "compressed_bytes": len(encoded),
+    }
+    return payload
+
+
 class _FakeMCPClient:
     def __init__(self, response):
         self.response = response
@@ -126,6 +171,62 @@ def _runtime(
 
 
 class ReportCorpusResolverTests(unittest.TestCase):
+    def test_compressed_ingested_payload_is_decoded_before_validation(self):
+        client = _FakeMCPClient(_compressed_document_payload("doc-compressed"))
+        resolver = ReportCorpusResolver()
+        spec = ExecutionSpec(
+            intent="report",
+            objective="Create a report from report.pdf",
+            constraints={
+                "report_data_selection": {
+                    "selector": {"type": "file_name", "value": "report.pdf"},
+                    "match_mode": "exact",
+                }
+            },
+        )
+
+        resolved = resolver.resolve(
+            spec,
+            DataCorpusPackage(metadata={"organization_id": "test-org"}),
+            _runtime(client),
+            query_text=spec.objective,
+        )
+
+        document = resolved.evidence_package["documents"][0]
+        self.assertTrue(document["content_profile"]["has_text"])
+        self.assertEqual(len(resolved.materializations["doc-compressed"]["chunks"]), 1)
+        self.assertEqual(
+            len(ingested_data_analysis_records(client.response)),
+            2,
+        )
+
+    def test_invalid_compressed_payload_has_explicit_error(self):
+        payload = _compressed_document_payload("doc-corrupt")
+        payload["result"]["compressed_payload"] = "not-valid-base64!"
+
+        with self.assertRaises(ReportCorpusResolutionError) as raised:
+            unwrap_ingested_data_result(payload)
+
+        self.assertEqual(
+            raised.exception.code,
+            "corpus_ingested_data_compression_invalid",
+        )
+
+    def test_decompressed_payload_honors_configured_safety_limit(self):
+        payload = _compressed_document_payload("doc-too-large")
+
+        with patch.dict(
+            os.environ,
+            {"REPORT_INGESTED_DATA_MAX_DECOMPRESSED_PAYLOAD_BYTES": "16"},
+        ):
+            with self.assertRaises(ReportCorpusResolutionError) as raised:
+                unwrap_ingested_data_result(payload)
+
+        self.assertEqual(
+            raised.exception.code,
+            "corpus_ingested_data_compression_limit_exceeded",
+        )
+
     def test_exact_file_selector_hydrates_before_planning(self):
         client = _FakeMCPClient(_document_payload("doc-001"))
         resolver = ReportCorpusResolver()
@@ -158,7 +259,15 @@ class ReportCorpusResolverTests(unittest.TestCase):
                         "organization_id": "test-org",
                         "match_mode": "exact",
                     },
-                )
+                ),
+                (
+                    CORPUS_GET_FILE_INGESTED_DATA,
+                    {
+                        "document_id": "doc-001",
+                        "mode": "all",
+                        "organization_id": "test-org",
+                    },
+                ),
             ],
         )
         self.assertEqual(
@@ -174,6 +283,101 @@ class ReportCorpusResolverTests(unittest.TestCase):
         document = resolved.evidence_package["documents"][0]
         self.assertTrue(document["content_profile"]["has_tables"])
         self.assertIn("main_text", document["previews"])
+        self.assertIn("doc-001", resolved.materializations)
+
+    def test_incomplete_full_materialization_fails_before_planning(self):
+        def response(arguments):
+            payload = _document_payload("doc-incomplete")
+            payload["result"]["content_summary"].update(
+                {
+                    "total_chunks": 2,
+                    "returned_chunks": 1,
+                    "has_more": True,
+                    "next_chunk_start": 1,
+                }
+            )
+            return payload
+
+        resolver = ReportCorpusResolver()
+        with self.assertRaises(ReportCorpusResolutionError) as raised:
+            resolver.resolve(
+                ExecutionSpec(
+                    intent="report",
+                    objective="Create a report from report.pdf",
+                ),
+                DataCorpusPackage(metadata={"organization_id": "test-org"}),
+                _runtime(_FakeMCPClient(response)),
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "ingested_document_materialization_incomplete",
+        )
+
+    def test_large_document_materializes_all_chunk_pages(self):
+        def response(arguments):
+            payload = _document_payload("doc-large")
+            result = payload["result"]
+            if arguments["mode"] == "overview":
+                result["content_summary"].update(
+                    {
+                        "total_chunks": 3,
+                        "returned_chunks": 1,
+                        "has_more": True,
+                        "next_chunk_start": 1,
+                    }
+                )
+                return payload
+            start = arguments["chunk_start"]
+            indexes = [0, 1] if start == 0 else [2]
+            result["contents"] = []
+            result["chunks"] = [
+                {
+                    "chunk_index": index,
+                    "embedding_id": f"embedding-{index}",
+                    "content_type": "text",
+                    "text": f"Chunk {index}",
+                    "metadata": {"position": {"chunk_index": index}},
+                }
+                for index in indexes
+            ]
+            result["content_summary"].update(
+                {
+                    "total_chunks": 3,
+                    "returned_chunks": len(indexes),
+                    "has_more": start == 0,
+                    "next_chunk_start": 2 if start == 0 else None,
+                }
+            )
+            return payload
+
+        client = _FakeMCPClient(response)
+        resolver = ReportCorpusResolver(
+            ReportCorpusPolicy(
+                all_mode_max_chunks=1,
+                materialization_page_size=2,
+            )
+        )
+        resolved = resolver.resolve(
+            ExecutionSpec(
+                intent="report",
+                objective="Create a report from report.pdf",
+            ),
+            DataCorpusPackage(metadata={"organization_id": "test-org"}),
+            _runtime(client),
+        )
+
+        self.assertEqual(
+            [arguments["mode"] for _, arguments in client.calls],
+            ["overview", "page", "page"],
+        )
+        self.assertEqual(
+            len(resolved.materializations["doc-large"]["chunks"]),
+            3,
+        )
+        self.assertFalse(
+            resolved.materializations["doc-large"]["content_summary"]["has_more"]
+        )
 
     def test_markdown_document_id_is_used_without_semantic_search(self):
         resolver = ReportCorpusResolver()
@@ -334,6 +538,14 @@ Create a report.
                         "organization_id": "test-org",
                     },
                 ),
+                (
+                    CORPUS_GET_FILE_INGESTED_DATA,
+                    {
+                        "document_id": "doc-001",
+                        "mode": "all",
+                        "organization_id": "test-org",
+                    },
+                ),
             ],
         )
         selection = resolved.evidence_package["selection"]
@@ -354,6 +566,118 @@ Create a report.
                 ),
                 "score": 0.91,
             },
+        )
+
+    def test_exact_file_stem_match_is_not_rejected_by_score_calibration(self):
+        def hydrate(arguments):
+            document_id = arguments["document_id"]
+            return _document_payload(
+                document_id,
+                "sample-monthly-operations-report-2026.pdf",
+            )
+
+        client = _FakeMCPClient(
+            {
+                CORPUS_HYBRID_SEARCH: {
+                    "result": {
+                        "results": [
+                            {
+                                "document": {
+                                    "document_id": "doc-target",
+                                    "organization_id": "test-org",
+                                    "file_name": (
+                                        "sample-monthly-operations-report-2026.pdf"
+                                    ),
+                                },
+                                "score": 0.30,
+                            },
+                            {
+                                "document": {
+                                    "document_id": "doc-unrelated",
+                                    "organization_id": "test-org",
+                                    "file_name": "unrelated-report.pdf",
+                                },
+                                "score": 0.30,
+                            },
+                        ]
+                    }
+                },
+                CORPUS_GET_FILE_INGESTED_DATA: hydrate,
+            }
+        )
+
+        resolved = ReportCorpusResolver().resolve(
+            ExecutionSpec(
+                intent="report",
+                objective=(
+                    "Create an evidence-based report about "
+                    "sample-monthly-operations-report-2026."
+                ),
+            ),
+            DataCorpusPackage(metadata={"organization_id": "test-org"}),
+            _runtime(
+                client,
+                _discovery_tool_definition(CORPUS_HYBRID_SEARCH),
+            ),
+        )
+
+        selection = resolved.evidence_package["selection"]
+        self.assertEqual(selection["selector_value"], "doc-target")
+        self.assertEqual(
+            [item["document_id"] for item in selection["discovered_documents"]],
+            ["doc-target"],
+        )
+        self.assertEqual(
+            selection["discovered_documents"][0]["identity_match"],
+            {
+                "field": "file_name",
+                "value": "sample-monthly-operations-report-2026.pdf",
+                "match": "stem",
+            },
+        )
+
+    def test_low_score_without_identity_evidence_remains_rejected(self):
+        client = _FakeMCPClient(
+            {
+                CORPUS_HYBRID_SEARCH: {
+                    "result": {
+                        "results": [
+                            {
+                                "document": {
+                                    "document_id": "doc-a",
+                                    "file_name": "unrelated-a.pdf",
+                                },
+                                "score": 0.30,
+                            },
+                            {
+                                "document": {
+                                    "document_id": "doc-b",
+                                    "file_name": "unrelated-b.pdf",
+                                },
+                                "score": 0.29,
+                            },
+                        ]
+                    }
+                },
+            }
+        )
+
+        with self.assertRaises(ReportCorpusResolutionError) as raised:
+            ReportCorpusResolver().resolve(
+                ExecutionSpec(
+                    intent="report",
+                    objective="Create a report about a missing operations source.",
+                ),
+                DataCorpusPackage(metadata={"organization_id": "test-org"}),
+                _runtime(
+                    client,
+                    _discovery_tool_definition(CORPUS_HYBRID_SEARCH),
+                ),
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "ingested_document_discovery_low_confidence",
         )
 
     def test_explicit_selector_bypasses_available_discovery_tool(self):
@@ -381,7 +705,10 @@ Create a report.
 
         self.assertEqual(
             [name for name, _ in client.calls],
-            [CORPUS_GET_FILE_INGESTED_DATA],
+            [
+                CORPUS_GET_FILE_INGESTED_DATA,
+                CORPUS_GET_FILE_INGESTED_DATA,
+            ],
         )
 
     def test_near_tied_chunk_search_hydrates_all_relevant_documents(self):
@@ -438,6 +765,8 @@ Create a report.
             [name for name, _ in client.calls],
             [
                 CORPUS_HYBRID_SEARCH,
+                CORPUS_GET_FILE_INGESTED_DATA,
+                CORPUS_GET_FILE_INGESTED_DATA,
                 CORPUS_GET_FILE_INGESTED_DATA,
                 CORPUS_GET_FILE_INGESTED_DATA,
             ],
@@ -591,6 +920,7 @@ Create a report.
                 CORPUS_HYBRID_SEARCH,
                 CORPUS_KEYWORD_SEARCH_CONTENTS,
                 CORPUS_GET_FILE_INGESTED_DATA,
+                CORPUS_GET_FILE_INGESTED_DATA,
             ],
         )
         self.assertEqual(
@@ -734,11 +1064,193 @@ Create a report.
         )
         self.assertEqual(
             [call[1].get("document_id") for call in client.calls[1:]],
-            ["doc-001", "doc-002"],
+            ["doc-001", "doc-002", "doc-001", "doc-002"],
         )
 
 
 class ReportCorpusExecutionTests(unittest.TestCase):
+    def test_plan_normalizes_declared_source_class_to_selected_document(self):
+        spec = ExecutionSpec(
+            intent="report",
+            objective="Create a report.",
+            constraints={
+                "selected_data_context": {
+                    "selected_documents": ["doc-001"],
+                    "selected_sources": ["corpus://test-org/doc-001"],
+                }
+            },
+        )
+        corpus = DataCorpusPackage(
+            sources=["corpus://test-org/doc-001"],
+            metadata={
+                "ingested_documents": [
+                    {
+                        "document_id": "doc-001",
+                        "organization_id": "test-org",
+                        "source_ref": "corpus://test-org/doc-001",
+                    }
+                ]
+            },
+        )
+        plan = PlanAgent(None)._normalize_plan(
+            {
+                "steps": [
+                    {
+                        "step_id": "source-step",
+                        "operation": {
+                            "kind": "source_operation",
+                        },
+                        "required_data": {},
+                        "outputs": [
+                            {
+                                "name": "content",
+                                "type": "object",
+                                "shape": "record",
+                            }
+                        ],
+                    }
+                ]
+            },
+            spec,
+            corpus,
+            None,
+            [],
+        )
+
+        self.assertEqual(len(plan["steps"]), 1)
+        step = plan["steps"][0]
+        self.assertEqual(step["operation"]["kind"], CORPUS_MATERIALIZE_OPERATION)
+        self.assertEqual(step["required_data"]["documents"], ["doc-001"])
+        self.assertEqual(step["outputs"][0]["type"], "array")
+        self.assertEqual(step["outputs"][0]["shape"], "table")
+
+    def test_plan_binds_llm_materialize_alias_to_selected_document(self):
+        spec = ExecutionSpec(
+            intent="report",
+            objective="Create a report.",
+            constraints={
+                "selected_data_context": {
+                    "selected_documents": ["doc-001"],
+                    "selected_sources": ["corpus://test-org/doc-001"],
+                }
+            },
+        )
+        corpus = DataCorpusPackage(
+            sources=["corpus://test-org/doc-001"],
+            metadata={
+                "ingested_documents": [
+                    {
+                        "document_id": "doc-001",
+                        "organization_id": "test-org",
+                        "source_ref": "corpus://test-org/doc-001",
+                    }
+                ]
+            },
+        )
+        plan = PlanAgent(None)._normalize_plan(
+            {
+                "steps": [
+                    {
+                        "step_id": "load-document",
+                        "operation": {"kind": "materialize_document"},
+                        "required_data": {"documents": []},
+                        "outputs": [
+                            {
+                                "name": "document-content",
+                                "type": "object",
+                                "shape": "table",
+                            }
+                        ],
+                    }
+                ]
+            },
+            spec,
+            corpus,
+            None,
+            [],
+        )
+
+        step = plan["steps"][0]
+        self.assertEqual(step["operation"]["kind"], CORPUS_MATERIALIZE_OPERATION)
+        self.assertEqual(step["required_data"]["documents"], ["doc-001"])
+        self.assertEqual(step["operation"]["parameters"]["document_ids"], ["doc-001"])
+        self.assertEqual(step["outputs"][0]["type"], "array")
+
+    def test_plan_inserts_materialization_before_unbound_analysis(self):
+        spec = ExecutionSpec(
+            intent="report",
+            objective="Create a report.",
+            constraints={
+                "selected_data_context": {
+                    "selected_documents": ["doc-001"],
+                    "selected_sources": ["corpus://test-org/doc-001"],
+                }
+            },
+        )
+        corpus = DataCorpusPackage(
+            sources=["corpus://test-org/doc-001"],
+            metadata={
+                "ingested_documents": [
+                    {
+                        "document_id": "doc-001",
+                        "organization_id": "test-org",
+                        "source_ref": "corpus://test-org/doc-001",
+                    }
+                ]
+            },
+        )
+        plan = PlanAgent(None)._normalize_plan(
+            {
+                "steps": [
+                    {
+                        "step_id": "analyze-content",
+                        "operation": {"kind": "extract_metrics"},
+                        "required_data": {"documents": []},
+                        "outputs": [{"name": "metrics", "shape": "record"}],
+                    }
+                ]
+            },
+            spec,
+            corpus,
+            None,
+            [],
+        )
+
+        self.assertEqual(len(plan["steps"]), 2)
+        source_step, analysis_step = plan["steps"]
+        self.assertEqual(
+            source_step["operation"]["kind"],
+            CORPUS_MATERIALIZE_OPERATION,
+        )
+        self.assertEqual(analysis_step["depends_on"], [source_step["step_id"]])
+        self.assertEqual(
+            analysis_step["inputs"][0]["ref"],
+            "step-output://materialize-selected-documents/ingested-document-content",
+        )
+
+    def test_router_reuses_complete_resolver_materialization(self):
+        route = ingested_document_route(
+            {
+                "step_id": "materialize-doc",
+                "required_data": {"documents": []},
+                "operation": {
+                    "kind": CORPUS_MATERIALIZE_OPERATION,
+                    "parameters": {},
+                },
+            },
+            [
+                {
+                    "tool_name": CORPUS_GET_FILE_INGESTED_DATA,
+                    "parameters_schema": _tool_definition().input_schema,
+                }
+            ],
+            selected_document_ids=["doc-001"],
+            materialized_document_ids={"doc-001"},
+        )
+
+        self.assertEqual(route["route"], CORPUS_MATERIALIZED_ROUTE)
+        self.assertEqual(route["arguments"], {"document_ids": ["doc-001"]})
+
     def test_router_binds_ingested_operation_to_exact_tool(self):
         route = RouterAgent(None).run(
             {

@@ -23,10 +23,18 @@ from data_intelligence_sdk.engines.report import (
     ReportEngine,
     ReportFormatRegistry,
     RouterAgent,
+    SemanticAnalysisAgent,
     _StepInputResolver,
     _StepOutputRegistry,
     _normalize_generated_source,
+    _normalize_plan_outputs,
 )
+from data_intelligence_sdk.engines.reporting.contracts import (
+    ReportContractValidator,
+    SEMANTIC_ANALYSIS_ROUTE,
+    ToolArgumentBinder,
+)
+from data_intelligence_sdk.runtime.mcp_client import MCPToolDefinition
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.report_sandbox_executor import (
     RequestSandboxExecutor,
@@ -144,6 +152,94 @@ class _ExplodingRouterAgent:
     def run(self, step, inventory, sources):
         del step, inventory, sources
         raise AssertionError("RouterAgent must be bypassed in force_code_agent mode.")
+
+
+class _RecordingSemanticRouter(RouterAgent):
+    def __init__(self):
+        super().__init__(None)
+        self.input_contracts = []
+
+    def run(
+        self,
+        step,
+        inventory,
+        sources,
+        resolved_input_contracts=None,
+        routing_feedback=None,
+        excluded_tool_names=None,
+    ):
+        del step, inventory, sources, routing_feedback, excluded_tool_names
+        self.input_contracts = resolved_input_contracts or []
+        return {
+            "route": SEMANTIC_ANALYSIS_ROUTE,
+            "tool_name": None,
+            "arguments": {},
+            "argument_bindings": {},
+            "reason": "The step requires grounded interpretation.",
+        }
+
+
+class _SemanticExecutionAgent:
+    def run(
+        self,
+        step,
+        resolved_inputs,
+        template_requirements,
+        user_goal,
+        validation_feedback=None,
+    ):
+        del step, template_requirements, user_goal, validation_feedback
+        return {
+            "status": "completed",
+            "output": [
+                {
+                    "finding": "Monthly volume increased while incidents declined.",
+                    "source_ref": resolved_inputs[0]["ref"],
+                }
+            ],
+            "evidence_refs": [resolved_inputs[0]["artifact_ref"]],
+            "warnings": [],
+            "error": None,
+            "batch_count": 1,
+        }
+
+
+class _RepairingRouter(RouterAgent):
+    def __init__(self):
+        super().__init__(None)
+        self.calls = []
+
+    def run(
+        self,
+        step,
+        inventory,
+        sources,
+        resolved_input_contracts=None,
+        routing_feedback=None,
+        excluded_tool_names=None,
+    ):
+        del step, inventory, sources, resolved_input_contracts
+        self.calls.append(
+            {
+                "feedback": list(routing_feedback or []),
+                "excluded": list(excluded_tool_names or []),
+            }
+        )
+        if len(self.calls) == 1:
+            return {
+                "route": "existing_tool",
+                "tool_name": "metadata_by_dataset",
+                "arguments": {},
+                "argument_bindings": {},
+                "reason": "Initial route.",
+            }
+        return {
+            "route": SEMANTIC_ANALYSIS_ROUTE,
+            "tool_name": None,
+            "arguments": {},
+            "argument_bindings": {},
+            "reason": "Repair selected semantic execution.",
+        }
 
 
 class _SumCodeAgent:
@@ -306,36 +402,330 @@ class ReportWiringTests(unittest.TestCase):
         self.assertNotIn("minItems", schema)
         self.assertEqual(ReportEngine._output_contract_errors([], schema), [])
 
-    def test_method_tool_must_consume_required_upstream_output(self):
+    def test_method_tool_binds_required_upstream_output_by_contract(self):
         resolved = [
             {
                 "argument_name": "doc_metadata",
                 "output_name": "doc_metadata",
                 "source_step_id": "extract-metadata",
+                "ref": "step-output://extract-metadata/doc_metadata",
+                "semantic_roles": ["document_metadata"],
+                "value": {"modality": "pdf"},
             }
         ]
+        result = ToolArgumentBinder().bind(
+            {
+                "arguments": {},
+                "argument_bindings": {
+                    "records": {
+                        "input_ref": (
+                            "step-output://extract-metadata/doc_metadata"
+                        ),
+                        "adapter": "identity",
+                    }
+                },
+            },
+            {
+                "type": "object",
+                "properties": {"records": {"type": "object"}},
+                "required": ["records"],
+            },
+            resolved,
+        )
 
-        self.assertFalse(
-            ReportEngine._tool_accepts_resolved_inputs(
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.arguments["records"], {"modality": "pdf"})
+        self.assertEqual(
+            result.argument_bindings["records"]["input_ref"],
+            "step-output://extract-metadata/doc_metadata",
+        )
+
+    def test_tool_binder_does_not_treat_artifact_path_as_file_identity(self):
+        artifact_path = r"G:\artifacts\run\data\document.json"
+        resolved = [
+            {
+                "ref": "step-output://materialize/content",
+                "argument_name": "content",
+                "output_name": "content",
+                "semantic_roles": ["source_content"],
+                "value": [{"text": "Evidence"}],
+                "host_path": artifact_path,
+                "artifact_ref": "artifact://run/data/document.json",
+            }
+        ]
+        result = ToolArgumentBinder().bind(
+            {
+                "arguments": {"file_name": artifact_path},
+                "argument_bindings": {},
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "file_name": {
+                        "type": "string",
+                        "description": "Filename selector for an ingested object.",
+                    }
+                },
+                "required": ["file_name"],
+            },
+            resolved,
+        )
+
+        self.assertIn(
+            "expects an identity selector",
+            "; ".join(result.errors),
+        )
+        self.assertNotIn("file_name", result.argument_bindings)
+
+    def test_tool_binder_binds_artifact_only_to_explicit_path_contract(self):
+        artifact_path = r"G:\artifacts\run\data\document.json"
+        resolved = [
+            {
+                "ref": "step-output://materialize/content",
+                "argument_name": "content",
+                "output_name": "content",
+                "semantic_roles": ["source_content"],
+                "value": [{"text": "Evidence"}],
+                "host_path": artifact_path,
+            }
+        ]
+        result = ToolArgumentBinder().bind(
+            {"arguments": {}, "argument_bindings": {}},
+            {
+                "type": "object",
+                "properties": {
+                    "input_path": {
+                        "type": "string",
+                        "description": "Local staged JSON file path.",
+                    }
+                },
+                "required": ["input_path"],
+            },
+            resolved,
+        )
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.arguments["input_path"], artifact_path)
+        self.assertEqual(
+            result.argument_bindings["input_path"]["adapter"],
+            "artifact_path",
+        )
+
+    def test_tool_binder_uses_input_structure_to_reject_wrong_array_items(self):
+        result = ToolArgumentBinder().bind(
+            {"arguments": {}, "argument_bindings": {}},
+            {
+                "type": "object",
+                "properties": {
+                    "values": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                    }
+                },
+                "required": ["values"],
+            },
+            [
                 {
-                    "type": "object",
-                    "properties": {
-                        "modality": {"type": "string"},
-                        "processing_domain": {"type": "string"},
+                    "ref": "step-output://source/records",
+                    "argument_name": "records",
+                    "value": [{"text": "Evidence"}],
+                    "json_type": "array",
+                    "structure": {
+                        "type": "array",
+                        "item": {"type": "object"},
                     },
-                },
-                resolved,
-            )
+                }
+            ],
         )
-        self.assertTrue(
-            ReportEngine._tool_accepts_resolved_inputs(
+
+        self.assertNotIn("values", result.arguments)
+        self.assertIn("is unbound", "; ".join(result.errors))
+
+    def test_plan_output_mapping_form_is_normalized_without_synthetic_output(self):
+        outputs = _normalize_plan_outputs(
+            [
                 {
-                    "type": "object",
-                    "properties": {"doc_metadata_path": {"type": "string"}},
-                },
-                resolved,
-            )
+                    "evidence": {
+                        "type": "list",
+                        "shape": {"item_type": "object"},
+                        "semantic_roles": ["goal_evidence"],
+                    }
+                }
+            ],
+            "extract",
         )
+
+        self.assertEqual(len(outputs), 1)
+        self.assertEqual(outputs[0]["name"], "evidence")
+        self.assertEqual(outputs[0]["type"], "array")
+        self.assertEqual(outputs[0]["semantic_roles"], ["goal_evidence"])
+
+    def test_tool_binder_maps_different_names_from_type_and_semantics(self):
+        result = ToolArgumentBinder().bind(
+            {"arguments": {}, "argument_bindings": {}},
+            {
+                "type": "object",
+                "properties": {"records": {"type": "array"}},
+                "required": ["records"],
+            },
+            [
+                {
+                    "ref": "step-output://materialize/document_records",
+                    "argument_name": "document_records",
+                    "output_name": "document_records",
+                    "source_step_id": "materialize",
+                    "semantic_roles": ["source_content"],
+                    "value": [{"text": "Evidence"}],
+                }
+            ],
+        )
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.arguments["records"], [{"text": "Evidence"}])
+        self.assertEqual(
+            result.argument_bindings["records"]["adapter"],
+            "identity",
+        )
+
+    def test_tool_binder_does_not_guess_between_ambiguous_inputs(self):
+        result = ToolArgumentBinder().bind(
+            {"arguments": {}, "argument_bindings": {}},
+            {
+                "type": "object",
+                "properties": {"records": {"type": "array"}},
+                "required": ["records"],
+            },
+            [
+                {
+                    "ref": "step-output://left/data",
+                    "argument_name": "data",
+                    "output_name": "data",
+                    "source_step_id": "left",
+                    "semantic_roles": ["analysis_data"],
+                    "value": [{"value": 1}],
+                },
+                {
+                    "ref": "step-output://right/data",
+                    "argument_name": "data",
+                    "output_name": "data",
+                    "source_step_id": "right",
+                    "semantic_roles": ["analysis_data"],
+                    "value": [{"value": 2}],
+                },
+            ],
+        )
+
+        self.assertNotIn("records", result.arguments)
+        self.assertIn("is unbound", "; ".join(result.errors))
+
+    def test_router_repairs_invalid_tool_binding_before_other_fallbacks(self):
+        engine = ReportEngine(llm=object())
+        router = _RepairingRouter()
+        engine.router_agent = router
+        runtime = EngineRuntimeContext(
+            mcp_tools=[
+                MCPToolDefinition(
+                    name="metadata_by_dataset",
+                    input_schema={
+                        "type": "object",
+                        "properties": {"dataset_id": {"type": "string"}},
+                        "required": ["dataset_id"],
+                    },
+                )
+            ]
+        )
+        update = engine._data_route(
+            {
+                "step": {
+                    "step_id": "interpret",
+                    "description": "Interpret the source evidence.",
+                    "operation": {
+                        "kind": "interpret",
+                        "capability": "semantic.interpret",
+                        "execution_mode": "auto",
+                    },
+                    "outputs": [{"name": "findings", "shape": "table"}],
+                },
+                "spec": ExecutionSpec(
+                    intent="report",
+                    objective="Interpret the evidence",
+                ),
+                "corpus_package": DataCorpusPackage(),
+                "runtime": runtime,
+                "resolved_inputs": [
+                    {
+                        "ref": "step-output://source/records",
+                        "argument_name": "records",
+                        "output_name": "records",
+                        "source_step_id": "source",
+                        "semantic_roles": ["source_content"],
+                        "value": [{"text": "Evidence"}],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(update["route"]["route"], SEMANTIC_ANALYSIS_ROUTE)
+        self.assertEqual(len(router.calls), 2)
+        self.assertTrue(router.calls[1]["feedback"])
+        self.assertEqual(
+            router.calls[1]["excluded"],
+            ["metadata_by_dataset"],
+        )
+
+    def test_semantic_agent_batches_every_evidence_record_without_sampling(self):
+        agent = SemanticAnalysisAgent(None, max_batch_characters=4_000)
+        records = [
+            {"text": f"record-{index}-" + ("x" * 2_000)}
+            for index in range(3)
+        ]
+
+        batches = agent._evidence_batches(
+            [
+                {
+                    "ref": "step-output://source/records",
+                    "artifact_ref": "artifact://source",
+                    "semantic_roles": ["source_content"],
+                    "value": records,
+                }
+            ]
+        )
+
+        observed = [
+            item["value"]["text"]
+            for batch in batches
+            for item in batch
+        ]
+        self.assertEqual(observed, [item["text"] for item in records])
+        self.assertGreater(len(batches), 1)
+
+    def test_report_contract_validator_rejects_dependency_cycle(self):
+        errors = ReportContractValidator().validate_plan(
+            {
+                "steps": [
+                    {
+                        "step_id": "left",
+                        "depends_on": ["right"],
+                        "inputs": [
+                            {"ref": "step-output://right/value"}
+                        ],
+                        "operation": {"execution_mode": "auto"},
+                        "outputs": [{"name": "value"}],
+                    },
+                    {
+                        "step_id": "right",
+                        "depends_on": ["left"],
+                        "inputs": [
+                            {"ref": "step-output://left/value"}
+                        ],
+                        "operation": {"execution_mode": "auto"},
+                        "outputs": [{"name": "value"}],
+                    },
+                ]
+            }
+        )
+
+        self.assertIn("dependency cycle", "; ".join(errors))
 
     def test_report_graph_uses_report_langsmith_run_name(self):
         engine = object.__new__(ReportEngine)
@@ -544,7 +934,16 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(step["depends_on"], [])
         self.assertEqual(step["required_data"]["tables"], ["sales"])
         self.assertEqual(step["required_data"]["columns"], ["revenue"])
-        self.assertEqual(step["operation"], {"kind": "inspect"})
+        self.assertEqual(
+            step["operation"],
+            {
+                "kind": "inspect",
+                "capability": "inspect",
+                "execution_mode": "auto",
+                "execution_class": "auto",
+                "parameters": {},
+            },
+        )
         self.assertEqual(step["outputs"][0]["name"], "sales-profile")
 
     def test_plan_agent_ignores_steps_owned_by_downstream_report_components(self):
@@ -668,7 +1067,7 @@ def load_rows(path: str) -> list[dict]:
                                 "description": "Upload and register the local source.",
                                 "depends_on": [],
                                 "inputs": [{"ref": "source_path"}],
-                                "operation": {"kind": "inspect_data"},
+                                "operation": {"kind": "upload_source"},
                                 "outputs": [
                                     {"name": "source-records", "shape": "table"}
                                 ],
@@ -782,6 +1181,19 @@ def load_rows(path: str) -> list[dict]:
         compile(repaired, "<test-generated-source>", "exec")
         self.assertIn("\n    return", repaired)
         self.assertNotIn("\\n", repaired)
+
+    def test_generated_source_repairs_mixed_real_and_escaped_newlines(self):
+        source = (
+            "import json\\n\\ndef load_rows(path: str):\\n"
+            "    \"\"\"Load rows.\n\n    The path is read-only.\n    \"\"\"\\n"
+            "    with open(path, encoding=\"utf-8\") as stream:\\n"
+            "        return json.load(stream)\\n"
+        )
+
+        repaired = _normalize_generated_source(source)
+
+        compile(repaired, "<test-generated-source>", "exec")
+        self.assertIn("def load_rows", repaired)
 
     def test_code_agent_canonicalizes_and_fills_source_path_arguments(self):
         source = "G:\\repo\\.uploads\\document.pdf"
@@ -937,13 +1349,14 @@ def load_rows(path: str) -> list[dict]:
         self.assertIn("-TAIL", sampled_text)
         self.assertEqual(sampled_text.count("[sample gap]"), 5)
 
-    def test_overview_metrics_are_dynamic_and_always_fill_four_cards(self):
+    def test_overview_metrics_respect_configured_card_limit(self):
         aggregated = DataScienceProcessor._overview_aggregated_data(
             {"objective_score": 92, "source_context": {"record_count": 2}},
             [
                 {"section": "A", "text": "alpha beta"},
                 {"section": "B", "text": "gamma"},
             ],
+            max_metrics=4,
         )
 
         display_values = [
@@ -1213,6 +1626,231 @@ def load_rows(path: str) -> list[dict]:
         self.assertEqual(update["route"]["route"], "generate_tool")
         self.assertIsNone(update["route"]["tool_name"])
         self.assertIn("force_code_agent", update["route"]["reason"])
+
+    def test_source_content_dependency_is_routed_to_semantic_execution(self):
+        engine = ReportEngine(llm=object())
+        router = _RecordingSemanticRouter()
+        engine.router_agent = router
+        engine.semantic_analysis_agent = _SemanticExecutionAgent()
+        runtime = EngineRuntimeContext()
+        registry = _StepOutputRegistry()
+        source_rows = [
+            {
+                "document_id": "document-a",
+                "record_kind": "indexed_chunk",
+                "text": "Monthly volume increased while incidents declined.",
+            }
+        ]
+        registry.register(
+            {
+                "step_id": "materialize-source",
+                "outputs": [
+                    {
+                        "name": "document_records",
+                        "shape": "table",
+                        "semantic_roles": ["primary_source", "source_content"],
+                    }
+                ],
+            },
+            source_rows,
+            runtime,
+        )
+        state = {
+            "step": {
+                "step_id": "summarize",
+                "description": "Summarize the materialized source evidence.",
+                "depends_on": ["materialize-source"],
+                "inputs": [
+                    {
+                        "name": "document_records",
+                        "ref": (
+                            "step-output://materialize-source/document_records"
+                        ),
+                        "required": True,
+                    }
+                ],
+                "outputs": [{"name": "summary", "shape": "table"}],
+            },
+            "spec": ExecutionSpec(intent="report", objective="Summarize evidence"),
+            "corpus_package": DataCorpusPackage(),
+            "runtime": runtime,
+            "output_registry": registry,
+        }
+        state.update(engine._data_resolve_inputs(state))
+
+        route_update = engine._data_route(state)
+        state.update(route_update)
+        execution_update = engine._data_execute_semantic(state)
+
+        self.assertEqual(
+            route_update["route"]["route"],
+            SEMANTIC_ANALYSIS_ROUTE,
+        )
+        self.assertEqual(router.input_contracts[0]["json_type"], "array")
+        self.assertEqual(
+            state["resolved_inputs"][0]["semantic_roles"],
+            ["primary_source", "source_content"],
+        )
+        self.assertEqual(
+            execution_update["execution_result"]["raw_result"][0]["finding"],
+            "Monthly volume increased while incidents declined.",
+        )
+        self.assertEqual(
+            execution_update["execution_result"]["metadata"]["provider"],
+            "semantic_analysis_agent",
+        )
+
+    def test_plain_tabular_dependency_still_uses_router_or_code_agent(self):
+        engine = ReportEngine(llm=object())
+        engine.router_agent = _GeneratedRouteAgent()
+        runtime = EngineRuntimeContext()
+        registry = _StepOutputRegistry()
+        registry.register(
+            {
+                "step_id": "load-table",
+                "outputs": [
+                    {
+                        "name": "rows",
+                        "shape": "table",
+                        "semantic_roles": ["analysis_data"],
+                    }
+                ],
+            },
+            [{"value": 2}, {"value": 3}],
+            runtime,
+        )
+        state = {
+            "step": {
+                "step_id": "sum",
+                "description": "Sum the values.",
+                "depends_on": ["load-table"],
+                "inputs": [
+                    {
+                        "name": "rows",
+                        "ref": "step-output://load-table/rows",
+                        "required": True,
+                    }
+                ],
+                "outputs": [{"name": "totals", "shape": "table"}],
+            },
+            "spec": ExecutionSpec(intent="report", objective="Calculate a total"),
+            "corpus_package": DataCorpusPackage(),
+            "runtime": runtime,
+            "output_registry": registry,
+        }
+        state.update(engine._data_resolve_inputs(state))
+
+        update = engine._data_route(state)
+
+        self.assertEqual(update["route"]["route"], "generate_tool")
+
+    def test_method_binding_mismatch_uses_local_contract_when_data_is_ready(self):
+        route = ReportEngine._local_route_after_method_mismatch(
+            {
+                "step_id": "reshape",
+                "operation": {
+                    "kind": "reshape",
+                    "execution_mode": "method_hub",
+                    "execution_class": "deterministic_transform",
+                },
+                "outputs": [
+                    {
+                        "name": "rows",
+                        "semantic_roles": ["analysis_data"],
+                    }
+                ],
+            },
+            [
+                {
+                    "ref": "step-output://load/rows",
+                    "value": [{"value": 1}],
+                }
+            ],
+            ["Required Method Hub argument 'file_name' is unbound."],
+            {"route": "unsupported", "reason": "No compatible tool."},
+        )
+
+        self.assertEqual(route["route"], "generate_tool")
+        self.assertIn("already materialized", route["reason"])
+
+    def test_method_binding_mismatch_does_not_fake_external_retrieval(self):
+        route = ReportEngine._local_route_after_method_mismatch(
+            {
+                "step_id": "retrieve",
+                "operation": {"execution_mode": "method_hub"},
+            },
+            [{"ref": "corpus://org/document", "value": None}],
+            ["No compatible tool."],
+            {"route": "unsupported", "reason": "No compatible tool."},
+        )
+
+        self.assertEqual(route["route"], "unsupported")
+
+    def test_router_preflight_excludes_schema_incompatible_tools(self):
+        engine = ReportEngine(llm=object())
+        resolved = [
+            {
+                "ref": "step-output://source/records",
+                "argument_name": "records",
+                "value": [{"text": "Evidence"}],
+                "json_type": "array",
+                "structure": {
+                    "type": "array",
+                    "item": {"type": "object"},
+                },
+            }
+        ]
+        exclusions = engine._method_tool_preflight_exclusions(
+            [
+                {
+                    "tool_name": "retrieve_by_file",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {"file_name": {"type": "string"}},
+                        "required": ["file_name"],
+                    },
+                },
+                {
+                    "tool_name": "numeric_scores",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {
+                            "values": {
+                                "type": "array",
+                                "items": {"type": "number"},
+                            }
+                        },
+                        "required": ["values"],
+                    },
+                },
+                {
+                    "tool_name": "process_records",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {
+                            "records": {
+                                "type": "array",
+                                "items": {"type": "object"},
+                            }
+                        },
+                        "required": ["records"],
+                    },
+                },
+            ],
+            {
+                "operation": {
+                    "kind": "transform",
+                    "capability": "transform",
+                    "parameters": {},
+                }
+            },
+            resolved,
+        )
+
+        self.assertEqual(
+            exclusions,
+            ["retrieve_by_file", "numeric_scores"],
+        )
 
     def test_report_engine_defaults_to_four_code_generation_attempts(self):
         engine = ReportEngine(llm=object())

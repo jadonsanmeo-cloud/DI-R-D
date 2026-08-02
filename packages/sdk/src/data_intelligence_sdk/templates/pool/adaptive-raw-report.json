@@ -15,7 +15,7 @@
     "min_sections": 3,
     "max_sections": 8,
     "allowed_content_roles": ["data_profile", "executive_summary", "key_findings", "supporting_evidence", "implication", "limitation", "recommendation", "narrative", "metrics", "chart", "table"],
-    "required_content_roles": ["data_profile", "executive_summary", "key_findings", "supporting_evidence", "limitation"],
+    "required_content_roles": ["executive_summary", "supporting_evidence", "limitation"],
     "guidance": [
       "Build sections from the actual subject and plan rather than a predefined domain taxonomy.",
       "Keep charts optional and prefer insight grids, evidence lists, or process flows for qualitative structure.",
@@ -167,6 +167,16 @@
           "layout": {"span": 7, "emphasis": "featured"},
           "data_requirement_refs": ["goal-evidence"],
           "instructions": ["Integrate the strongest findings into a final answer without merely recapping section headings."]
+        },
+        {
+          "block_id": "evidence-based-actions",
+          "type": "recommendations",
+          "content_role": "recommendation",
+          "title": "Evidence-Based Actions",
+          "required": false,
+          "layout": {"span": 5, "emphasis": "supporting"},
+          "data_requirement_refs": ["goal-evidence"],
+          "instructions": ["Offer conditional actions only when supported by the evidence; state rationale, prerequisite, risk, and a validation signal without inventing targets or owners."]
         },
         {
           "block_id": "limitations",

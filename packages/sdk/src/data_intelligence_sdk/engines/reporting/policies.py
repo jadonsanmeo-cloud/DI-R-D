@@ -23,6 +23,37 @@ CONTENT_ROLES = frozenset(
     }
 )
 
+_CONTENT_ROLE_ALIASES = {
+    "finding": "key_findings",
+    "findings": "key_findings",
+    "insight": "key_findings",
+    "insights": "key_findings",
+    "key_finding": "key_findings",
+    "headline_metric": "key_findings",
+    "evidence": "supporting_evidence",
+    "goal_evidence": "supporting_evidence",
+    "supporting_evidences": "supporting_evidence",
+    "implications": "implication",
+    "limitations": "limitation",
+    "caveat": "limitation",
+    "caveats": "limitation",
+    "recommendations": "recommendation",
+    "action": "recommendation",
+    "actions": "recommendation",
+    "summary": "executive_summary",
+}
+
+
+def normalize_content_role(value: Any) -> str:
+    """Return the canonical report contract role for a model-supplied value.
+
+    These aliases normalize protocol vocabulary only. They deliberately avoid
+    filenames, domain terms, metric names, and template/block identities.
+    """
+
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return _CONTENT_ROLE_ALIASES.get(normalized, normalized)
+
 REPORT_BLOCK_TYPES = frozenset(
     {
         "narrative",
@@ -96,9 +127,75 @@ class ChartPolicy:
     max_inline_rows: int = 100
     max_dataset_rows: int = 40
     max_categories: int = 12
+    max_measures: int = 3
 
     def __post_init__(self) -> None:
-        for name in ("max_inline_rows", "max_dataset_rows", "max_categories"):
+        for name in (
+            "max_inline_rows",
+            "max_dataset_rows",
+            "max_categories",
+            "max_measures",
+        ):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be at least 1.")
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisSamplingPolicy:
+    """Configurable prompt-bound sampling without source-specific assumptions."""
+
+    max_records: int = 12
+    max_string_characters: int = 6_000
+    max_nested_items: int = 50
+    string_segments: int = 6
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_records",
+            "max_string_characters",
+            "max_nested_items",
+            "string_segments",
+        ):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be at least 1.")
+
+
+@dataclass(frozen=True, slots=True)
+class ReportPresentationPolicy:
+    """Configurable output-density limits independent of report subject or schema."""
+
+    max_navigation_sections: int = 12
+    max_summary_sentences: int = 8
+    max_summary_characters: int = 1_800
+    max_narrative_sentences: int = 24
+    max_narrative_characters: int = 8_000
+    max_recommendation_items: int = 12
+    max_recommendation_sentences: int = 10
+    max_insight_items: int = 12
+    max_evidence_items: int = 16
+    max_process_items: int = 12
+    max_kpi_items: int = 8
+    max_table_rows: int = 200
+    min_executive_summary_characters: int = 180
+    min_analytical_narrative_characters: int = 260
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_navigation_sections",
+            "max_summary_sentences",
+            "max_summary_characters",
+            "max_narrative_sentences",
+            "max_narrative_characters",
+            "max_recommendation_items",
+            "max_recommendation_sentences",
+            "max_insight_items",
+            "max_evidence_items",
+            "max_process_items",
+            "max_kpi_items",
+            "max_table_rows",
+            "min_executive_summary_characters",
+            "min_analytical_narrative_characters",
+        ):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be at least 1.")
 

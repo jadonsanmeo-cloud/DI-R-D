@@ -51,7 +51,7 @@
           "data_requirement_refs": ["goal-evidence"],
           "instructions": [
             "Lead with the document's subject, purpose, and direct answer to the user objective.",
-            "Synthesize the strongest evidence-backed findings in no more than five sentences.",
+            "Keep the synthesis proportionate to the objective and evidence complexity.",
             "Do not lead with extraction or file-size statistics."
           ]
         },
@@ -73,7 +73,7 @@
     {
       "section_id": "headline-evidence",
       "title": "Data at a Glance",
-      "purpose": "Provide four dynamically selected overview measures for the analyzed evidence.",
+      "purpose": "Provide a compact set of overview measures when they materially orient the reader.",
       "required": true,
       "layout": {"columns": 12, "density": "compact"},
       "blocks": [
@@ -86,8 +86,8 @@
           "layout": {"span": 12, "emphasis": "featured"},
           "data_requirement_refs": ["goal-evidence"],
           "instructions": [
-            "Show exactly four dynamically selected metrics in the supplied order.",
-            "Prefer objective-relevant measures and use structural measures to complete the overview."
+            "Select only metrics that orient the reader or materially support the objective.",
+            "Prefer objective-relevant measures; use structural measures only when they add necessary context."
           ]
         }
       ]

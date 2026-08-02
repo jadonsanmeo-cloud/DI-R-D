@@ -1,5 +1,57 @@
 # Report Engine V2 - Luồng hiện tại
 
+## Cập nhật kiến trúc linh hoạt (2026-08-02)
+
+Luồng runtime hiện tại là:
+
+```text
+resolve ingested corpus
+  -> Template Architecture Pass
+  -> Plan Agent
+  -> Template Agent + contract negotiation
+  -> prune execution DAG
+  -> resolve inputs
+  -> Router Agent
+       -> Method Hub + Tool Argument Binder
+       -> Semantic Analysis Agent
+       -> Code Agent + sandbox + validator
+  -> Data Science Processor
+  -> Chart Input Assembler + Chart Agent
+  -> Structured Report Agent
+  -> Renderer
+```
+
+Template pool không còn chỉ đưa bảy domain template cho LLM. Candidate set gồm
+cả domain, analytical shape, audience và source form. `adaptive-raw-report` vẫn
+là fallback trung lập, không phải candidate để LLM chọn. Nếu LLM chọn một
+candidate với confidence hợp lệ nhưng không tạo được run-local blueprint, engine
+dùng architecture trung lập tương thích với data requirement thay vì áp nguyên
+bố cục canonical của domain. Template được user yêu cầu rõ ràng vẫn giữ canonical
+guardrail.
+
+Requiredness lấy từ `adaptation.required_content_roles` của candidate và yêu cầu
+presentation đã xác nhận, không lấy từ vị trí cố định của block trong blueprint.
+Vì vậy profile, KPI, chart hoặc key-findings không tự động trở thành bắt buộc cho
+mọi báo cáo.
+
+Mỗi template requirement truyền danh sách `consumer_blocks` cho Data Science
+Agent. Agent có thể trả `report_content.block_content` theo đúng `block_id` của
+template instance và `evidence_items` gắn semantic role. Composer ưu tiên binding
+theo block này; các bucket cũ như `key_findings` và `implications` chỉ còn là
+compatibility fallback. Cơ chế này cho phép hai narrative block cùng role phục vụ
+hai câu hỏi khác nhau mà không bị nhân bản cùng một đoạn nội dung.
+
+Chart dataset nhận record scalar theo schema thực cùng `encoding.dimension`,
+`encoding.measures`, optional series và measure metadata. `category`/`value` chỉ
+là dạng tương thích cũ, không còn là schema bắt buộc. Giới hạn sample dùng
+`AnalysisSamplingPolicy`; giới hạn chart dùng `ChartPolicy`, nên có thể cấu hình
+mà không sửa flow hoặc thêm logic theo domain/file.
+
+Các phần cố định còn lại là contract/safety boundary: tập route và execution
+class hợp lệ, block primitive mà renderer hỗ trợ, giới hạn resource, schema
+validation và CSS visual system. Chúng không quyết định domain, tên cột, metric,
+bố cục section hoặc nội dung cụ thể của report.
+
 Tài liệu này mô tả implementation đang chạy trong
 `packages/sdk/src/data_intelligence_sdk/engines/report.py`. Đây là tài liệu
 hiện trạng, khác với `report-engine-v2-implementation-plan.md`, vốn là bản kế

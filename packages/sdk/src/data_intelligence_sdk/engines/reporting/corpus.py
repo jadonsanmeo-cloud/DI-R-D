@@ -9,7 +9,14 @@ document matches remain explicit candidates.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import gzip
+import io
+import json
+import os
 import re
+import zlib
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -23,15 +30,16 @@ CORPUS_HYBRID_SEARCH = "corpus_hybrid_search"
 CORPUS_KEYWORD_SEARCH_CONTENTS = "corpus_keyword_search_contents"
 CORPUS_RETRIEVE_CONTEXT = "corpus_retrieve_context"
 CORPUS_MATERIALIZE_OPERATION = "corpus_ingested_document_materialize"
-_CORPUS_OPERATIONS = frozenset(
-    {
-        CORPUS_MATERIALIZE_OPERATION,
-        "analyze_ingested_document",
-        "analyze_document_chunks",
-        "analyze_extracted_tables",
-        "compare_ingested_documents",
-        "materialize_ingested_document",
-    }
+CORPUS_MATERIALIZED_ROUTE = "materialized_corpus"
+_INGESTED_DATA_COMPRESSION_FIELDS = frozenset({"contents", "chunks"})
+_DEFAULT_MAX_COMPRESSED_PAYLOAD_BYTES = 32 * 1024 * 1024
+_DEFAULT_MAX_DECOMPRESSED_PAYLOAD_BYTES = 256 * 1024 * 1024
+_DECOMPRESSION_READ_CHUNK_BYTES = 1024 * 1024
+_MAX_COMPRESSED_PAYLOAD_BYTES_ENV = (
+    "REPORT_INGESTED_DATA_MAX_COMPRESSED_PAYLOAD_BYTES"
+)
+_MAX_DECOMPRESSED_PAYLOAD_BYTES_ENV = (
+    "REPORT_INGESTED_DATA_MAX_DECOMPRESSED_PAYLOAD_BYTES"
 )
 _SELECTOR_NAMES = ("document_id", "object_key", "file_name")
 _TOOL_PARAMETERS = frozenset(
@@ -103,6 +111,7 @@ class ReportFileSelection:
     bucket: str | None = None
     match_mode: str = "exact"
     mode: str = "overview"
+    materialization_mode: str = "auto"
     chunk_start: int = 0
     chunk_limit: int | None = None
     candidate_policy: str = "require_selection"
@@ -138,6 +147,7 @@ class ReportCorpusResolution:
     spec: ExecutionSpec
     corpus_package: DataCorpusPackage
     evidence_package: dict[str, Any]
+    materializations: dict[str, dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +162,7 @@ class ReportCorpusDiscoveryRequest:
     candidate_policy: str
     max_documents: int
     mode: str
+    materialization_mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +176,9 @@ class ReportCorpusPolicy:
         CORPUS_RETRIEVE_CONTEXT,
     )
     default_mode: str = "overview"
+    default_materialization_mode: str = "auto"
+    all_mode_max_chunks: int = 1_000
+    materialization_page_size: int = 200
     default_max_documents: int = 20
     default_discovery_top_k: int = 10
     default_discovery_min_score: float = 0.35
@@ -233,6 +247,12 @@ class ReportCorpusResolver:
                 runtime,
                 tool_name=tool.name,
             )
+        documents = self._materialize_documents(
+            documents,
+            selection,
+            runtime,
+            tool_name=tool.name,
+        )
         evidence = self._evidence_package(
             documents,
             selection,
@@ -248,6 +268,10 @@ class ReportCorpusResolver:
             spec=resolved_spec,
             corpus_package=resolved_corpus,
             evidence_package=evidence,
+            materializations={
+                str(payload["document"]["document_id"]): payload
+                for payload in documents
+            },
         )
 
     def _discover_selection(
@@ -306,6 +330,7 @@ class ReportCorpusResolver:
                     or request.organization_id
                 ),
                 mode=request.mode,
+                materialization_mode=request.materialization_mode,
                 candidate_policy=(
                     "all_matches" if len(selected) > 1 else "require_selection"
                 ),
@@ -409,6 +434,18 @@ class ReportCorpusResolver:
                 "report_discovery_policy_invalid",
                 "report_data_discovery.initial_mode must be all, overview, or page.",
             )
+        materialization_mode = str(
+            raw.get("materialization_mode")
+            or self.policy.default_materialization_mode
+        ).lower()
+        if materialization_mode not in {"auto", "all", "page"}:
+            raise ReportCorpusResolutionError(
+                "report_discovery_policy_invalid",
+                (
+                    "report_data_discovery.materialization_mode must be "
+                    "auto, all, or page."
+                ),
+            )
         return ReportCorpusDiscoveryRequest(
             query=query,
             organization_id=organization_id,
@@ -418,6 +455,7 @@ class ReportCorpusResolver:
             candidate_policy=candidate_policy,
             max_documents=max_documents,
             mode=mode,
+            materialization_mode=materialization_mode,
         )
 
     def _resolve_discovery_tools(
@@ -490,8 +528,49 @@ class ReportCorpusResolver:
         candidates: list[dict[str, Any]],
         request: ReportCorpusDiscoveryRequest,
     ) -> list[dict[str, Any]]:
-        if len(candidates) == 1:
-            candidate = candidates[0]
+        evaluated = [
+            {
+                **candidate,
+                "identity_match": _candidate_identity_evidence(
+                    request.query,
+                    candidate,
+                ),
+            }
+            for candidate in candidates
+        ]
+        identity_matches = [
+            candidate
+            for candidate in evaluated
+            if candidate["identity_match"] is not None
+        ]
+        if identity_matches:
+            if len(identity_matches) > request.max_documents:
+                raise ReportCorpusResolutionError(
+                    "ingested_document_candidate_limit_exceeded",
+                    (
+                        f"The request explicitly matched "
+                        f"{len(identity_matches)} document identities, exceeding "
+                        f"the report limit of {request.max_documents}."
+                    ),
+                    details={"candidates": identity_matches},
+                )
+            if (
+                request.candidate_policy == "all_relevant"
+                or len(identity_matches) == 1
+            ):
+                return identity_matches
+            raise ReportCorpusResolutionError(
+                "ingested_document_selection_required",
+                "The request explicitly matched multiple report documents.",
+                details={
+                    "query": request.query,
+                    "candidate_policy": request.candidate_policy,
+                    "candidates": identity_matches,
+                },
+            )
+
+        if len(evaluated) == 1:
+            candidate = evaluated[0]
             score = _optional_float(candidate.get("score"))
             if score is not None and score < request.min_score:
                 raise ReportCorpusResolutionError(
@@ -500,13 +579,13 @@ class ReportCorpusResolver:
                     details={
                         "query": request.query,
                         "min_score": request.min_score,
-                        "candidates": candidates,
+                        "candidates": evaluated,
                     },
                 )
             return [candidate]
 
-        top = candidates[0]
-        runner_up = candidates[1]
+        top = evaluated[0]
+        runner_up = evaluated[1]
         top_score = _optional_float(top.get("score"))
         runner_up_score = _optional_float(runner_up.get("score"))
         if request.candidate_policy == "all_relevant":
@@ -516,13 +595,13 @@ class ReportCorpusResolver:
                     "Corpus search returned multiple unscored document candidates.",
                     details={
                         "query": request.query,
-                        "candidates": candidates,
+                        "candidates": evaluated,
                     },
                 )
             cutoff = max(request.min_score, top_score - request.min_margin)
             relevant = [
                 item
-                for item in candidates
+                for item in evaluated
                 if (
                     _optional_float(item.get("score")) is not None
                     and float(item["score"]) >= cutoff
@@ -535,7 +614,7 @@ class ReportCorpusResolver:
                     details={
                         "query": request.query,
                         "min_score": request.min_score,
-                        "candidates": candidates,
+                        "candidates": evaluated,
                     },
                 )
             if len(relevant) > request.max_documents:
@@ -566,7 +645,7 @@ class ReportCorpusResolver:
                 "candidate_policy": request.candidate_policy,
                 "min_score": request.min_score,
                 "min_margin": request.min_margin,
-                "candidates": candidates,
+                "candidates": evaluated,
             },
         )
 
@@ -753,6 +832,172 @@ class ReportCorpusResolver:
                 "No valid candidate document ids were returned by corpus-service.",
             )
         return hydrated
+
+    def _materialize_documents(
+        self,
+        documents: list[dict[str, Any]],
+        selection: ReportFileSelection,
+        runtime: EngineRuntimeContext,
+        *,
+        tool_name: str,
+    ) -> list[dict[str, Any]]:
+        """Hydrate every selected identity into complete report evidence."""
+
+        materialized = []
+        for overview in documents:
+            document = overview.get("document")
+            document = document if isinstance(document, dict) else {}
+            document_id = _optional_string(document.get("document_id"))
+            if document_id is None:
+                raise ReportCorpusResolutionError(
+                    "ingested_document_identity_missing",
+                    "A selected corpus document has no document_id.",
+                )
+            mode = self._materialization_mode(overview, selection)
+            if selection.mode == mode and self._payload_is_complete(overview):
+                payload = overview
+            elif mode == "page":
+                payload = self._materialize_document_pages(
+                    overview,
+                    selection,
+                    runtime,
+                    tool_name=tool_name,
+                )
+            else:
+                arguments: dict[str, Any] = {
+                    "document_id": document_id,
+                    "mode": "all",
+                }
+                organization_id = (
+                    _optional_string(document.get("organization_id"))
+                    or selection.organization_id
+                )
+                if organization_id:
+                    arguments["organization_id"] = organization_id
+                payload = self._call_tool(
+                    runtime,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+            validated = self._validate_document_payload(payload)
+            self._validate_materialized_payload(validated)
+            materialized.append(validated)
+        return materialized
+
+    def _materialization_mode(
+        self,
+        overview: dict[str, Any],
+        selection: ReportFileSelection,
+    ) -> str:
+        requested = selection.materialization_mode
+        if requested in {"all", "page"}:
+            return requested
+        summary = overview.get("content_summary")
+        summary = summary if isinstance(summary, dict) else {}
+        total_chunks = _int_value(summary.get("total_chunks"), 0)
+        return (
+            "page"
+            if total_chunks > self.policy.all_mode_max_chunks
+            else "all"
+        )
+
+    def _materialize_document_pages(
+        self,
+        overview: dict[str, Any],
+        selection: ReportFileSelection,
+        runtime: EngineRuntimeContext,
+        *,
+        tool_name: str,
+    ) -> dict[str, Any]:
+        document = overview.get("document")
+        document = document if isinstance(document, dict) else {}
+        document_id = str(document["document_id"])
+        organization_id = (
+            _optional_string(document.get("organization_id"))
+            or selection.organization_id
+        )
+        chunk_start = 0
+        chunks: list[dict[str, Any]] = []
+        last_payload: dict[str, Any] | None = None
+        while True:
+            arguments: dict[str, Any] = {
+                "document_id": document_id,
+                "mode": "page",
+                "chunk_start": chunk_start,
+                "chunk_limit": self.policy.materialization_page_size,
+            }
+            if organization_id:
+                arguments["organization_id"] = organization_id
+            page = self._validate_document_payload(
+                self._call_tool(
+                    runtime,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+            )
+            chunks.extend(_dict_items(page.get("chunks")))
+            last_payload = page
+            summary = page.get("content_summary")
+            summary = summary if isinstance(summary, dict) else {}
+            if not bool(summary.get("has_more")):
+                break
+            next_start = _int_value(summary.get("next_chunk_start"), -1)
+            if next_start <= chunk_start:
+                raise ReportCorpusResolutionError(
+                    "ingested_document_pagination_invalid",
+                    "Corpus pagination did not advance to a later chunk.",
+                    details={
+                        "document_id": document_id,
+                        "chunk_start": chunk_start,
+                        "next_chunk_start": next_start,
+                    },
+                )
+            chunk_start = next_start
+
+        if last_payload is None:
+            raise ReportCorpusResolutionError(
+                "ingested_document_materialization_incomplete",
+                f"Document {document_id} returned no materialization pages.",
+            )
+        materialized = dict(last_payload)
+        materialized["contents"] = []
+        materialized["chunks"] = chunks
+        summary = dict(materialized.get("content_summary") or {})
+        summary.update(
+            {
+                "returned_chunks": len(chunks),
+                "has_more": False,
+                "next_chunk_start": None,
+            }
+        )
+        materialized["content_summary"] = summary
+        return materialized
+
+    @staticmethod
+    def _payload_is_complete(payload: dict[str, Any]) -> bool:
+        summary = payload.get("content_summary")
+        if not isinstance(summary, dict) or bool(summary.get("has_more")):
+            return False
+        total = _int_value(summary.get("total_chunks"), -1)
+        returned = _int_value(summary.get("returned_chunks"), -2)
+        return total >= 0 and returned == total
+
+    @classmethod
+    def _validate_materialized_payload(cls, payload: dict[str, Any]) -> None:
+        if cls._payload_is_complete(payload):
+            return
+        document = payload.get("document")
+        document = document if isinstance(document, dict) else {}
+        summary = payload.get("content_summary")
+        summary = summary if isinstance(summary, dict) else {}
+        raise ReportCorpusResolutionError(
+            "ingested_document_materialization_incomplete",
+            (
+                f"Document {document.get('document_id')} was not fully "
+                "materialized before report planning."
+            ),
+            details={"content_summary": deepcopy(summary)},
+        )
 
     @staticmethod
     def _validate_document_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -952,6 +1197,7 @@ class ReportCorpusResolver:
                 "bucket": selection.bucket,
                 "match_mode": selection.match_mode,
                 "initial_mode": selection.mode,
+                "materialization_mode": selection.materialization_mode,
                 "candidate_policy": selection.candidate_policy,
                 "selection_source": selection.selection_source,
                 "discovery": (
@@ -1040,6 +1286,15 @@ class ReportCorpusResolver:
                 "report_file_selector_invalid",
                 "mode must be all, overview, or page.",
             )
+        materialization_mode = str(
+            raw.get("materialization_mode")
+            or policy.default_materialization_mode
+        ).lower()
+        if materialization_mode not in {"auto", "all", "page"}:
+            raise ReportCorpusResolutionError(
+                "report_file_selector_invalid",
+                "materialization_mode must be auto, all, or page.",
+            )
         candidate_policy = str(
             raw.get("candidate_policy") or "require_selection"
         ).lower()
@@ -1068,6 +1323,7 @@ class ReportCorpusResolver:
             bucket=bucket,
             match_mode=match_mode,
             mode=mode,
+            materialization_mode=materialization_mode,
             chunk_start=chunk_start,
             chunk_limit=chunk_limit,
             candidate_policy=candidate_policy,
@@ -1135,8 +1391,152 @@ def unwrap_ingested_data_result(result: Any) -> dict[str, Any]:
         or "document" in nested
         or "matches" in nested
     ):
-        return nested
-    return result
+        return _decode_compressed_ingested_data(nested)
+    return _decode_compressed_ingested_data(result)
+
+
+def _decode_compressed_ingested_data(payload: dict[str, Any]) -> dict[str, Any]:
+    compressed_payload = payload.get("compressed_payload")
+    compression = payload.get("compression")
+    if compressed_payload is None:
+        if isinstance(compression, dict) and compression.get("decoded") is True:
+            return payload
+        if not (
+            isinstance(compression, dict) and compression.get("enabled") is True
+        ):
+            return payload
+    if not isinstance(compressed_payload, str) or not compressed_payload:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_invalid",
+            "The compressed ingested-data response has no encoded payload.",
+        )
+    if not isinstance(compression, dict):
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_invalid",
+            "The compressed ingested-data response has no compression metadata.",
+        )
+    algorithm = str(compression.get("algorithm") or "").lower()
+    encoding = str(compression.get("encoding") or "").lower()
+    if algorithm != "gzip" or encoding != "base64":
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_unsupported",
+            (
+                "Unsupported ingested-data compression contract: "
+                f"algorithm={algorithm!r}, encoding={encoding!r}."
+            ),
+        )
+    json_fields = compression.get("json_fields")
+    if not isinstance(json_fields, list) or not json_fields:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_invalid",
+            "Compression metadata must declare the compressed JSON fields.",
+        )
+    declared_fields = {
+        str(field).strip() for field in json_fields if str(field).strip()
+    }
+    if not declared_fields or not declared_fields.issubset(
+        _INGESTED_DATA_COMPRESSION_FIELDS
+    ):
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_unsupported",
+            "Compression metadata declares unsupported ingested-data fields.",
+            details={"json_fields": sorted(declared_fields)},
+        )
+
+    max_compressed_bytes = _configured_payload_limit(
+        _MAX_COMPRESSED_PAYLOAD_BYTES_ENV,
+        _DEFAULT_MAX_COMPRESSED_PAYLOAD_BYTES,
+    )
+    max_decompressed_bytes = _configured_payload_limit(
+        _MAX_DECOMPRESSED_PAYLOAD_BYTES_ENV,
+        _DEFAULT_MAX_DECOMPRESSED_PAYLOAD_BYTES,
+    )
+    try:
+        compressed_bytes = base64.b64decode(compressed_payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_invalid",
+            "The ingested-data payload is not valid base64.",
+        ) from exc
+    if len(compressed_bytes) > max_compressed_bytes:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_limit_exceeded",
+            "The compressed ingested-data payload exceeds the configured limit.",
+            details={
+                "compressed_bytes": len(compressed_bytes),
+                "max_compressed_bytes": max_compressed_bytes,
+            },
+        )
+
+    decompressed = bytearray()
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(compressed_bytes)) as stream:
+            while True:
+                chunk = stream.read(_DECOMPRESSION_READ_CHUNK_BYTES)
+                if not chunk:
+                    break
+                decompressed.extend(chunk)
+                if len(decompressed) > max_decompressed_bytes:
+                    raise ReportCorpusResolutionError(
+                        "corpus_ingested_data_compression_limit_exceeded",
+                        (
+                            "The decompressed ingested-data payload exceeds "
+                            "the configured limit."
+                        ),
+                        details={
+                            "max_decompressed_bytes": max_decompressed_bytes
+                        },
+                    )
+    except (EOFError, OSError, zlib.error) as exc:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_invalid",
+            "The ingested-data payload is not valid gzip data.",
+        ) from exc
+    decompressed_bytes = bytes(decompressed)
+    try:
+        decoded = json.loads(decompressed_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_invalid",
+            "The decompressed ingested-data payload is not valid UTF-8 JSON.",
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_invalid",
+            "The decompressed ingested-data payload must be a JSON object.",
+        )
+
+    hydrated = dict(payload)
+    for field in declared_fields:
+        value = decoded.get(field)
+        if not isinstance(value, list):
+            raise ReportCorpusResolutionError(
+                "corpus_ingested_data_compression_invalid",
+                f"The decompressed {field!r} field must be a JSON array.",
+            )
+        hydrated[field] = value
+    hydrated.pop("compressed_payload", None)
+    hydrated["compression"] = {**compression, "decoded": True}
+    return hydrated
+
+
+def _configured_payload_limit(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_config_invalid",
+            f"{name} must be a positive integer.",
+        ) from exc
+    if value <= 0:
+        raise ReportCorpusResolutionError(
+            "corpus_ingested_data_compression_config_invalid",
+            f"{name} must be a positive integer.",
+        )
+    return value
 
 
 def ingested_data_has_content(result: Any) -> bool:
@@ -1191,12 +1591,20 @@ def ingested_data_analysis_records(result: Any) -> list[dict[str, Any]]:
 def ingested_document_route(
     step_request: dict[str, Any],
     method_hub: list[dict[str, Any]],
+    *,
+    selected_document_ids: list[str] | None = None,
+    materialized_document_ids: set[str] | None = None,
 ) -> dict[str, Any] | None:
     """Build an exact Method Hub route for an ingested-document plan step."""
 
     operation = step_request.get("operation")
     operation = operation if isinstance(operation, dict) else {}
-    if str(operation.get("kind") or "") not in _CORPUS_OPERATIONS:
+    operation_kind = str(operation.get("kind") or "")
+    capability = str(operation.get("capability") or operation_kind)
+    if (
+        operation_kind != CORPUS_MATERIALIZE_OPERATION
+        and capability != CORPUS_MATERIALIZE_OPERATION
+    ):
         return None
     tool = next(
         (
@@ -1237,17 +1645,56 @@ def ingested_document_route(
         str(item) for item in required_data.get("documents", []) if str(item)
     ]
     document_id = _optional_string(parameters.get("document_id"))
-    if document_id is None and document_ids:
-        document_id = document_ids[0]
-    if document_id is None:
+    raw_parameter_document_ids = parameters.get("document_ids")
+    parameter_document_ids = [
+        str(item)
+        for item in (
+            raw_parameter_document_ids
+            if isinstance(raw_parameter_document_ids, (list, tuple, set))
+            else []
+        )
+        if str(item)
+    ]
+    resolved_document_ids = list(
+        dict.fromkeys(
+            [
+                *([document_id] if document_id else []),
+                *parameter_document_ids,
+                *document_ids,
+                *[str(item) for item in selected_document_ids or [] if str(item)],
+            ]
+        )
+    )
+    if not resolved_document_ids:
         return {
             "route": "unsupported",
             "tool_name": None,
             "arguments": {},
             "reason": "The ingested-document step has no resolved document_id.",
         }
+    available = materialized_document_ids or set()
+    if available and all(item in available for item in resolved_document_ids):
+        return {
+            "route": CORPUS_MATERIALIZED_ROUTE,
+            "tool_name": CORPUS_GET_FILE_INGESTED_DATA,
+            "arguments": {"document_ids": resolved_document_ids},
+            "reason": (
+                "Reused complete ingested-document materialization prepared "
+                "by the Report Corpus Resolver."
+            ),
+        }
+    if len(resolved_document_ids) > 1:
+        return {
+            "route": "unsupported",
+            "tool_name": None,
+            "arguments": {},
+            "reason": (
+                "Multiple selected documents require resolver-owned "
+                "materialization before execution."
+            ),
+        }
     arguments: dict[str, Any] = {
-        "document_id": document_id,
+        "document_id": resolved_document_ids[0],
         "mode": str(parameters.get("mode") or "all"),
     }
     for name in ("organization_id", "chunk_start", "chunk_limit"):
@@ -1411,6 +1858,83 @@ def _candidate_score(hit: dict[str, Any]) -> float | None:
         if values:
             return max(values)
     return None
+
+
+def _candidate_identity_evidence(
+    query: str,
+    candidate: dict[str, Any],
+) -> dict[str, str] | None:
+    """Return exact identity evidence independent of retrieval score calibration."""
+
+    query_tokens = _identity_tokens(query)
+    if not query_tokens:
+        return None
+
+    document_id = _optional_string(candidate.get("document_id"))
+    if document_id:
+        document_id_tokens = _identity_tokens(document_id)
+        if _contains_token_sequence(query_tokens, document_id_tokens):
+            return {
+                "field": "document_id",
+                "value": document_id,
+                "match": "exact",
+            }
+
+    for field_name in ("file_name", "object_key", "source_uri"):
+        raw_value = _optional_string(candidate.get(field_name))
+        if raw_value is None:
+            continue
+        basename = raw_value.replace("\\", "/").rsplit("/", 1)[-1]
+        full_tokens = _identity_tokens(basename)
+        if (
+            _is_distinctive_identity(full_tokens)
+            and _contains_token_sequence(query_tokens, full_tokens)
+        ):
+            return {
+                "field": field_name,
+                "value": raw_value,
+                "match": "exact",
+            }
+        stem = re.sub(r"\.[A-Za-z0-9]{1,12}$", "", basename)
+        stem_tokens = _identity_tokens(stem)
+        if (
+            stem_tokens != full_tokens
+            and _is_distinctive_identity(stem_tokens)
+            and _contains_token_sequence(query_tokens, stem_tokens)
+        ):
+            return {
+                "field": field_name,
+                "value": raw_value,
+                "match": "stem",
+            }
+    return None
+
+
+def _identity_tokens(value: Any) -> tuple[str, ...]:
+    return tuple(
+        token
+        for token in re.findall(r"[^\W_]+", str(value or "").casefold())
+        if token
+    )
+
+
+def _contains_token_sequence(
+    haystack: tuple[str, ...],
+    needle: tuple[str, ...],
+) -> bool:
+    if not needle or len(needle) > len(haystack):
+        return False
+    width = len(needle)
+    return any(
+        haystack[index : index + width] == needle
+        for index in range(len(haystack) - width + 1)
+    )
+
+
+def _is_distinctive_identity(tokens: tuple[str, ...]) -> bool:
+    if len(tokens) >= 2:
+        return True
+    return len(tokens) == 1 and len(tokens[0]) >= 8
 
 
 def _report_request_text(value: Any) -> str | None:

@@ -11,6 +11,7 @@ from data_intelligence_sdk.engines.report import (
     PlanAgent,
     ReportAgent,
     ReportEngine,
+    ReportPresentationPolicy,
     ReportRenderer,
     TemplateAgent,
     TemplatePool,
@@ -25,6 +26,211 @@ class ReportTemplateTests(unittest.TestCase):
     def setUp(self):
         self.pool = TemplatePool()
         self.agent = TemplateAgent(None, self.pool)
+
+    def test_instance_design_requires_analytical_development_not_fixed_layout(self):
+        shallow_sections = [
+            {
+                "section_id": "opening",
+                "blocks": [
+                    {
+                        "block_id": "answer",
+                        "content_role": "executive_summary",
+                        "required": True,
+                    },
+                    {
+                        "block_id": "facts",
+                        "content_role": "key_findings",
+                        "required": True,
+                    },
+                ],
+            }
+        ]
+        flexible_sections = [
+            *shallow_sections,
+            {
+                "section_id": "any-run-local-shape",
+                "blocks": [
+                    {
+                        "block_id": "development",
+                        "content_role": "implication",
+                        "required": True,
+                    }
+                ],
+            },
+        ]
+
+        self.assertTrue(TemplateAgent._instance_design_issues(shallow_sections))
+        self.assertEqual(
+            TemplateAgent._instance_design_issues(flexible_sections),
+            [],
+        )
+
+    def test_markdown_boundary_resolves_and_persists_presentation_roles(self):
+        class ContractLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def invoke(self, prompt):
+                self.calls += 1
+                rendered = prompt.to_string()
+                if "resolve_presentation_contract" in rendered:
+                    return SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "requested_content_roles": [
+                                    "recommendation",
+                                    "chart",
+                                ]
+                            }
+                        )
+                    )
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "template_id": "business-economics-finance",
+                            "confidence": 0.95,
+                            "selection_reason": (
+                                "The objective concerns operational evidence and "
+                                "decision support rather than a narrow time series."
+                            ),
+                            "requested_content_roles": [],
+                        }
+                    )
+                )
+
+        llm = ContractLLM()
+        proposal = TemplateAgent(llm, self.pool).run(
+            ExecutionSpec(
+                intent="report",
+                objective="Assess the available operational evidence",
+                constraints={
+                    "confirmed_spec_markdown": (
+                        "# Interactive Execution Spec\n\n"
+                        "## Expected Output\n\n"
+                        "Include explicit actions and an evidence-backed visual."
+                    )
+                },
+            ),
+            {"steps": []},
+            DataCorpusPackage(),
+        )
+
+        provenance = proposal["template_instance"]["provenance"]
+        self.assertEqual(
+            provenance["requested_content_roles"],
+            ["chart", "recommendation"],
+        )
+        blocks = [
+            block
+            for section in proposal["template_instance"]["sections"]
+            for block in section.get("blocks", [])
+        ]
+        self.assertTrue(
+            next(
+                block
+                for block in blocks
+                if block.get("content_role") == "recommendation"
+            )["required"]
+        )
+        self.assertFalse(
+            next(
+                block
+                for block in blocks
+                if block.get("content_role") == "chart"
+            )["required"]
+        )
+        self.assertEqual(llm.calls, 2)
+
+    def test_requested_chart_role_is_restored_after_blueprint_adaptation(self):
+        definition = self.pool.get("business-economics-finance")
+        sections_without_chart = [
+            {
+                **section,
+                "blocks": [
+                    block
+                    for block in section.get("blocks", [])
+                    if block.get("content_role") != "chart"
+                ],
+            }
+            for section in definition.get("sections", [])
+            if any(
+                block.get("content_role") != "chart"
+                for block in section.get("blocks", [])
+            )
+        ]
+        spec = ExecutionSpec(
+            intent="report",
+            objective="Create an operational report",
+            constraints={
+                "report_content_roles": ["chart", "recommendation"],
+            },
+        )
+
+        restored = TemplateAgent._ensure_requested_content_roles(
+            sections_without_chart,
+            definition,
+            spec,
+        )
+
+        self.assertTrue(
+            any(
+                block.get("content_role") == "chart"
+                for section in restored
+                for block in section.get("blocks", [])
+            )
+        )
+        self.assertTrue(
+            any(
+                block.get("content_role") == "recommendation"
+                for section in restored
+                for block in section.get("blocks", [])
+            )
+        )
+        recommendation = next(
+            block
+            for section in restored
+            for block in section.get("blocks", [])
+            if block.get("content_role") == "recommendation"
+        )
+        chart = next(
+            block
+            for section in restored
+            for block in section.get("blocks", [])
+            if block.get("content_role") == "chart"
+        )
+        self.assertTrue(recommendation["required"])
+        self.assertFalse(chart["required"])
+
+    def test_requested_roles_are_not_inferred_from_objective_keywords(self):
+        definition = self.pool.get("business-economics-finance")
+        sections = [
+            {
+                **section,
+                "blocks": [
+                    block
+                    for block in section.get("blocks", [])
+                    if block.get("content_role") != "chart"
+                ],
+            }
+            for section in definition.get("sections", [])
+        ]
+
+        unchanged = TemplateAgent._ensure_requested_content_roles(
+            sections,
+            definition,
+            ExecutionSpec(
+                intent="report",
+                objective="Create a chart and visualize the result",
+            ),
+        )
+
+        self.assertFalse(
+            any(
+                block.get("content_role") == "chart"
+                for section in unchanged
+                for block in section.get("blocks", [])
+            )
+        )
 
     def test_required_semantic_groups_must_all_be_satisfied(self):
         definition = self.pool.get("time-series-analysis")
@@ -99,7 +305,7 @@ class ReportTemplateTests(unittest.TestCase):
             " ".join(definition["adaptation"]["guidance"]),
         )
 
-    def test_llm_receives_only_seven_new_domain_templates(self):
+    def test_llm_receives_domain_and_cross_domain_architecture_candidates(self):
         candidate_ids = {
             item["template_id"]
             for item in self.pool.selection_candidates()
@@ -115,10 +321,15 @@ class ReportTemplateTests(unittest.TestCase):
                 "science-policy-environment",
                 "society-culture-relationships",
                 "technology-engineering",
+                "document-analysis",
+                "data-profile",
+                "executive-overview",
+                "time-series-analysis",
+                "segment-comparison",
             },
         )
         self.assertNotIn("adaptive-raw-report", candidate_ids)
-        self.assertNotIn("document-analysis", candidate_ids)
+        self.assertIn("document-analysis", candidate_ids)
 
     def test_low_confidence_selection_uses_manifest_raw_fallback(self):
         proposal = self.agent.run(
@@ -194,6 +405,11 @@ class ReportTemplateTests(unittest.TestCase):
                                             {
                                                 "content_role": "supporting_evidence",
                                                 "block_id": "evidence-trail",
+                                            },
+                                            {
+                                                "content_role": "implication",
+                                                "block_id": "architectural-interpretation",
+                                                "required": True,
                                             }
                                         ],
                                     },
@@ -264,7 +480,7 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertIn("technical-profile", llm.prompt)
         self.assertIn("archetype_ref", llm.prompt)
         self.assertNotIn('"name": "Adaptive Raw Report"', llm.prompt)
-        self.assertNotIn('"name": "Document Analysis"', llm.prompt)
+        self.assertIn('"name": "Document Analysis"', llm.prompt)
         self.assertEqual(
             proposal["selection"]["mode"],
             "llm",
@@ -274,13 +490,14 @@ class ReportTemplateTests(unittest.TestCase):
             "llm_blueprint",
         )
 
-    def test_domain_candidates_publish_legal_archetypes(self):
+    def test_architecture_candidates_publish_legal_archetypes(self):
         candidates = self.pool.selection_candidates()
 
         self.assertTrue(candidates)
+        role_sets = []
         for candidate in candidates:
             sections = candidate.get("section_archetypes", [])
-            self.assertGreaterEqual(len(sections), 5)
+            self.assertGreaterEqual(len(sections), 1)
             blocks = [
                 block
                 for section in sections
@@ -289,14 +506,13 @@ class ReportTemplateTests(unittest.TestCase):
             self.assertTrue(blocks)
             self.assertTrue(all(block.get("archetype_ref") for block in blocks))
             self.assertTrue(all(block.get("content_role") for block in blocks))
-            self.assertTrue(
-                any(block.get("content_role") == "supporting_evidence" for block in blocks)
-            )
-            self.assertTrue(
-                any(block.get("content_role") == "limitation" for block in blocks)
+            role_sets.append(
+                frozenset(str(block.get("content_role")) for block in blocks)
             )
 
-    def test_archetype_ref_preserves_guardrails_and_requiredness(self):
+        self.assertGreater(len(set(role_sets)), 1)
+
+    def test_archetype_ref_preserves_guardrails_and_contract_requiredness(self):
         definition = self.pool.get("technology-engineering")
         sections = self.agent._adapt_sections(
             definition,
@@ -365,7 +581,7 @@ class ReportTemplateTests(unittest.TestCase):
 
         profile = sections[0]["blocks"][0]
         self.assertEqual(profile["type"], "profile")
-        self.assertTrue(profile["required"])
+        self.assertFalse(profile["required"])
         self.assertTrue(sections[0]["required"])
         self.assertIn("Focus on the selected runtime.", profile["instructions"])
         self.assertTrue(
@@ -435,6 +651,114 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertEqual(instance["provenance"]["selection_mode"], "explicit")
         self.assertEqual(instance["provenance"]["design_source"], "canonical_template")
 
+    def test_revised_plan_can_change_a_non_explicit_template_selection(self):
+        class RevisedSelectionLLM:
+            def invoke(self, prompt):
+                del prompt
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "template_id": "technology-engineering",
+                            "confidence": 0.96,
+                            "selection_reason": (
+                                "The validated plan now exposes system-boundary "
+                                "and implementation evidence."
+                            ),
+                        }
+                    )
+                )
+
+        previous_instance = {
+            "template_id": "education-learning",
+            "revision": 1,
+            "status": "draft",
+            "provenance": {
+                "selection_mode": "deterministic_fallback",
+                "selection_confidence": 0.0,
+            },
+        }
+        proposal = TemplateAgent(RevisedSelectionLLM(), self.pool).run(
+            ExecutionSpec(
+                intent="report",
+                objective="Assess the service architecture",
+            ),
+            {
+                "steps": [
+                    {
+                        "step_id": "architecture-evidence",
+                        "outputs": [
+                            {
+                                "name": "system-evidence",
+                                "shape": "table",
+                                "semantic_roles": ["goal_evidence"],
+                            }
+                        ],
+                    }
+                ]
+            },
+            DataCorpusPackage(),
+            previous_instance,
+        )
+
+        self.assertEqual(
+            proposal["selection"]["template_id"],
+            "technology-engineering",
+        )
+        self.assertEqual(proposal["selection"]["mode"], "llm_revision")
+
+    def test_llm_selection_without_blueprint_uses_neutral_architecture(self):
+        class SelectionOnlyLLM:
+            def invoke(self, prompt):
+                del prompt
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "template_id": "technology-engineering",
+                            "confidence": 0.94,
+                            "selection_reason": (
+                                "The objective and source concern service boundaries "
+                                "and architectural trade-offs."
+                            ),
+                        }
+                    )
+                )
+
+        proposal = TemplateAgent(SelectionOnlyLLM(), self.pool).run(
+            ExecutionSpec(
+                intent="report",
+                objective="Assess service boundaries and architectural trade-offs",
+            ),
+            {
+                "steps": [
+                    {
+                        "step_id": "analyze",
+                        "outputs": [
+                            {
+                                "name": "evidence",
+                                "shape": "table",
+                                "semantic_roles": ["goal_evidence"],
+                            }
+                        ],
+                    }
+                ]
+            },
+            DataCorpusPackage(),
+        )
+
+        instance = proposal["template_instance"]
+        self.assertEqual(instance["template_id"], "technology-engineering")
+        self.assertEqual(
+            instance["provenance"]["design_source"],
+            "adaptive_fallback",
+        )
+        self.assertEqual(
+            [section["section_id"] for section in instance["sections"]],
+            [
+                section["section_id"]
+                for section in self.pool.get("adaptive-raw-report")["sections"]
+            ],
+        )
+
     def test_dynamic_instance_normalizes_invalid_section_layouts(self):
         definition = self.pool.get("adaptive-raw-report")
         requested_sections = json.loads(json.dumps(definition["sections"]))
@@ -477,14 +801,14 @@ class ReportTemplateTests(unittest.TestCase):
             "data-profile",
         )
 
-    def test_root_local_materialization_is_goal_evidence(self):
+    def test_root_local_materialization_is_source_content_only(self):
         normalized = PlanAgent(None)._normalize_plan(
             {
                 "steps": [
                     {
                         "step_id": "read-file",
                         "description": "Materialize the selected source.",
-                        "operation": {"kind": "inspect_data"},
+                        "operation": {"kind": "read_source_content"},
                         "outputs": [
                             {
                                 "name": "source-rows",
@@ -503,7 +827,7 @@ class ReportTemplateTests(unittest.TestCase):
 
         self.assertEqual(
             normalized["steps"][0]["outputs"][0]["semantic_roles"],
-            ["analysis_data", "source_content", "goal_evidence"],
+            ["analysis_data", "source_content"],
         )
 
     def test_singular_semantic_role_is_preserved_and_binds_template(self):
@@ -653,6 +977,35 @@ class ReportTemplateTests(unittest.TestCase):
             blocks[1]["content"]["text"],
             "Distinct fallback findings.",
         )
+
+    def test_structured_summary_uses_dedicated_executive_summary_block(self):
+        fallback = {
+            "title": "Operations report",
+            "summary": "Fallback joined every step summary.",
+            "warnings": [],
+            "sections": [
+                {
+                    "section_id": "overview",
+                    "blocks": [
+                        {
+                            "block_id": "executive-summary",
+                            "type": "narrative",
+                            "content_role": "executive_summary",
+                            "status": "completed",
+                            "content": {"text": "Grounded executive answer."},
+                        }
+                    ],
+                }
+            ],
+        }
+        payload = {
+            "summary": "Unbounded concatenation from every analysis step.",
+            "sections": [],
+        }
+
+        aligned = ReportAgent._align_structured_payload(payload, fallback)
+
+        self.assertEqual(aligned["summary"], "Grounded executive answer.")
 
     def test_file_templates_require_goal_evidence_without_fixed_kpis(self):
         forbidden = {
@@ -862,9 +1215,11 @@ class ReportTemplateTests(unittest.TestCase):
         self.assertIn('class="theme-toggle"', html)
         self.assertIn("Document profile", html)
 
-    def test_renderer_uses_dashboard_layout_and_limits_kpis(self):
+    def test_renderer_uses_dashboard_layout_and_configured_kpi_limit(self):
         metrics = [{"name": f"metric_{index}", "value": index} for index in range(1, 7)]
-        rendered = ReportRenderer().render(
+        rendered = ReportRenderer(
+            presentation_policy=ReportPresentationPolicy(max_kpi_items=4)
+        ).render(
             {
                 "title": "Document report",
                 "summary": "A short report.",
@@ -1048,6 +1403,59 @@ class ReportTemplateTests(unittest.TestCase):
             {"x": "page_number", "y": "character_count"},
         )
 
+    def test_chart_option_labels_are_aligned_to_dataset_semantics(self):
+        option = ChartAgent._align_option_to_dataset(
+            {
+                "title": {"text": "Wrong title"},
+                "yAxis": {"type": "value", "name": "Wrong unit"},
+                "series": [{"name": "Wrong measure", "data": [1, 2]}],
+            },
+            {
+                "datasets": [
+                    {
+                        "title": "Monthly transaction volume",
+                        "measure": "Transactions",
+                        "unit": "thousands",
+                        "data": [
+                            {"category": "Jan", "value": 10.2},
+                            {"category": "Feb", "value": 10.8},
+                        ],
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(option["title"]["text"], "Monthly transaction volume")
+        self.assertEqual(option["yAxis"]["name"], "Transactions (thousands)")
+        self.assertEqual(option["series"][0]["name"], "Transactions")
+
+    def test_chart_measure_label_does_not_repeat_embedded_unit(self):
+        self.assertEqual(
+            ChartAgent._measure_label(
+                {"measure": "Revenue (USD)", "unit": "USD"}
+            ),
+            "Revenue (USD)",
+        )
+
+    def test_visual_evidence_does_not_expose_internal_artifact_uri(self):
+        items = ReportAgent._visual_items_for_block(
+            {"content_role": "supporting_evidence"},
+            [
+                {
+                    "report_content": {
+                        "supporting_evidence": [
+                            {
+                                "statement": "Monthly rows support the trend.",
+                                "source_location": "artifact://run/data.json#sample",
+                            }
+                        ]
+                    }
+                }
+            ],
+        )
+
+        self.assertEqual(items, [{"title": "", "text": "Monthly rows support the trend."}])
+
     def test_chart_polish_removes_invalid_formatter_and_dense_labels(self):
         option = ChartAgent._polish_option(
             {
@@ -1106,6 +1514,127 @@ class ReportTemplateTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "partial")
+
+    def test_structured_report_repairs_missing_and_shallow_required_narratives(self):
+        executive_text = (
+            "The observed result improved across the covered period, while the "
+            "available evidence links that change to documented operating actions. "
+            "The decision implication is to preserve the validated controls while "
+            "monitoring whether the result holds beyond the bounded evidence window."
+        )
+        analysis_text = (
+            "The evidence shows a sustained directional pattern rather than an "
+            "isolated endpoint. The materialized observations provide the comparison "
+            "basis, and the documented interventions offer plausible operating context. "
+            "Those interventions remain explanatory hypotheses unless the source "
+            "establishes attribution. The practical consequence is to separate the "
+            "observed performance signal from the mechanism proposed by the source, "
+            "then validate both against additional periods and comparable conditions."
+        )
+
+        class RepairingReportAgent(ReportAgent):
+            def __init__(self):
+                super().__init__(object())
+                self.calls = []
+
+            def _invoke_json_with_prompt(self, system_prompt, **inputs):
+                del system_prompt
+                self.calls.append(inputs)
+                if len(self.calls) == 1:
+                    return {
+                        "title": "Evidence Review",
+                        "sections": [
+                            {
+                                "section_id": "overview",
+                                "blocks": [
+                                    {
+                                        "block_id": "executive",
+                                        "type": "narrative",
+                                        "content": {"text": "Metrics improved."},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                return {
+                    "title": "Evidence Review",
+                    "sections": [
+                        {
+                            "section_id": "overview",
+                            "blocks": [
+                                {
+                                    "block_id": "executive",
+                                    "type": "narrative",
+                                    "content": {"text": executive_text},
+                                },
+                                {
+                                    "block_id": "deep-analysis",
+                                    "type": "narrative",
+                                    "content": {"text": analysis_text},
+                                },
+                            ],
+                        }
+                    ],
+                }
+
+        instance = {
+            "instance_id": "instance",
+            "template_id": "adaptive-raw-report",
+            "template_version": "1.0.0",
+            "revision": 1,
+            "status": "accepted",
+            "bindings": [],
+            "sections": [
+                {
+                    "section_id": "overview",
+                    "title": "Overview",
+                    "purpose": "Answer and analyze the evidence.",
+                    "layout": {"columns": 12},
+                    "blocks": [
+                        {
+                            "block_id": "executive",
+                            "type": "narrative",
+                            "content_role": "executive_summary",
+                            "title": "Executive Answer",
+                            "required": True,
+                            "layout": {"span": 12},
+                            "instructions": ["Synthesize the decision answer."],
+                            "data_requirement_refs": [],
+                        },
+                        {
+                            "block_id": "deep-analysis",
+                            "type": "narrative",
+                            "content_role": "narrative",
+                            "title": "Deep Analysis",
+                            "required": True,
+                            "layout": {"span": 12},
+                            "instructions": ["Develop evidence and interpretation."],
+                            "data_requirement_refs": [],
+                        },
+                    ],
+                }
+            ],
+        }
+        agent = RepairingReportAgent()
+        report = agent.run_structured(
+            ExecutionSpec(intent="report", objective="Analyze the evidence"),
+            instance,
+            [],
+            [],
+            {"sources": []},
+        )
+
+        blocks = report["sections"][0]["blocks"]
+        self.assertEqual(len(agent.calls), 2)
+        self.assertEqual([block["block_id"] for block in blocks], ["executive", "deep-analysis"])
+        self.assertEqual(blocks[0]["content"]["text"], executive_text)
+        self.assertEqual(blocks[1]["content"]["text"], analysis_text)
+        repair_ids = {
+            block["block_id"]
+            for section in agent.calls[1]["template_instance"]["sections"]
+            for block in section["blocks"]
+        }
+        self.assertEqual(repair_ids, {"executive", "deep-analysis"})
 
     def test_report_blocks_use_distinct_analysis_content(self):
         result = {

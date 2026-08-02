@@ -67,7 +67,7 @@
           "instructions": [
             "Lead with a direct answer to the objective and the strongest observed patterns.",
             "Do not lead with row count, column count, or field names alone.",
-            "Use no more than five sentences."
+            "Keep the opening proportionate to the objective and evidence complexity."
           ]
         },
         {
@@ -88,7 +88,7 @@
     {
       "section_id": "headline-evidence",
       "title": "Data at a Glance",
-      "purpose": "Provide four dynamically selected overview measures for the analyzed data.",
+      "purpose": "Provide a compact set of overview measures that materially helps answer the objective.",
       "required": true,
       "layout": {"columns": 12, "density": "compact"},
       "blocks": [
@@ -101,8 +101,8 @@
           "layout": {"span": 12, "emphasis": "featured"},
           "data_requirement_refs": ["goal-evidence"],
           "instructions": [
-            "Show exactly four dynamically selected metrics in the supplied order.",
-            "Prefer objective-relevant measures and use structural measures to complete the overview."
+            "Select only metrics that orient the reader or materially support the objective.",
+            "Prefer objective-relevant measures; use structural measures only when they add necessary context."
           ]
         }
       ]
