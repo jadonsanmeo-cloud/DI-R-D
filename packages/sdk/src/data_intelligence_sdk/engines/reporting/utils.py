@@ -51,16 +51,38 @@ def _to_jsonable(value: Any) -> Any:
 def _extract_message_content(response: Any) -> str:
     content = getattr(response, "content", None)
     if content is not None:
-        return str(content)
+        return _render_message_content(content)
     if isinstance(response, dict):
         if "content" in response:
-            return str(response["content"])
+            return _render_message_content(response["content"])
         if "output" in response:
-            return str(response["output"])
+            return _render_message_content(response["output"])
         messages = response.get("messages")
         if messages:
             return _extract_message_content(messages[-1])
     return str(response)
+
+
+def _render_message_content(content: Any) -> str:
+    """Flatten text from OpenAI/LangChain content blocks without Python reprs."""
+
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple)):
+        parts = [_render_message_content(item) for item in content]
+        return "\n".join(part for part in parts if part.strip())
+    if isinstance(content, dict):
+        for key in ("text", "content", "output_text", "value"):
+            value = content.get(key)
+            if isinstance(value, (str, list, tuple, dict)):
+                rendered = _render_message_content(value)
+                if rendered.strip():
+                    return rendered
+        return ""
+    text = getattr(content, "text", None)
+    if isinstance(text, str):
+        return text
+    return str(content)
 
 
 def _parse_json_payload(text: str) -> Any:
@@ -68,7 +90,17 @@ def _parse_json_payload(text: str) -> Any:
     fenced = re.search(r"```(?:json)?\s*(.*?)```", stripped, flags=re.DOTALL)
     if fenced:
         stripped = fenced.group(1).strip()
-    return json.loads(stripped)
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError as original_error:
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"[\[{]", stripped):
+            try:
+                payload, _ = decoder.raw_decode(stripped[match.start() :])
+            except json.JSONDecodeError:
+                continue
+            return payload
+        raise original_error
 
 
 def _normalize_generated_source(value: Any) -> str:
@@ -82,10 +114,10 @@ def _normalize_generated_source(value: Any) -> str:
     except SyntaxError:
         pass
 
-    # Some models double-escape the complete JSON source string. Only decode this
-    # shape when the payload has no real line structure, preserving valid "\n"
-    # string literals in ordinary generated Python.
-    if "\\n" in source and source.count("\n") <= 1:
+    # Some models double-escape all or part of the JSON source string. The
+    # original source is already known to be invalid here, so accept the repaired
+    # representation only when Python's parser proves that it is complete code.
+    if "\\n" in source:
         repaired = (
             source.replace("\\r\\n", "\n")
             .replace("\\n", "\n")
@@ -160,63 +192,234 @@ def _int_value(value: Any, default: int) -> int:
         return int(match.group(1)) if match else default
 
 
+def _normalized_input_reference(value: Any) -> str:
+    """Normalize a symbolic PlanStep input without guessing a data source.
+
+    Plan models commonly spell an upstream output as either the canonical
+    ``step-output://step/output`` URI or the compact ``step.output`` form.  The
+    latter is unambiguous only when neither side contains a path separator, so
+    local paths, artifact URIs, and corpus URIs remain untouched.
+    """
+
+    rendered = str(value or "").strip()
+    legacy = re.fullmatch(r"step://([^/]+)/(.+)", rendered)
+    if legacy:
+        return f"step-output://{legacy.group(1)}/{legacy.group(2)}"
+    compact = re.fullmatch(r"([^./\\:]+)\.([^./\\:]+)", rendered)
+    if compact:
+        return f"step-output://{compact.group(1)}/{compact.group(2)}"
+    return rendered
+
+
 def _normalize_plan_inputs(value: Any) -> list[dict[str, Any]]:
-    inputs = []
+    """Return one normalized binding per declared input name.
+
+    Besides the canonical list form, accept the model-friendly mapping form
+    ``{"metrics": "step.metrics", "risks": "step.risks"}``.  Expanding that
+    mapping here keeps lineage explicit and prevents a later dependency binder
+    from silently collapsing several upstream values onto the first output.
+    """
+
+    reserved = {
+        "artifact_ref",
+        "kind",
+        "input",
+        "name",
+        "ref",
+        "required",
+        "source",
+        "source_path",
+        "source_ref",
+        "step_output_ref",
+        "type",
+    }
+
+    def normalize(item: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(item)
+        normalized["ref"] = _normalized_input_reference(
+            normalized.get("ref")
+            or normalized.get("input")
+            or normalized.get("step_output_ref")
+            or normalized.get("artifact_ref")
+            or normalized.get("source_path")
+            or normalized.get("source_ref")
+            or normalized.get("source")
+            or ""
+        )
+        normalized.setdefault("kind", "data_reference")
+        return normalized
+
+    inputs: list[dict[str, Any]] = []
     for item in _list_value(value):
         if isinstance(item, dict):
-            normalized = dict(item)
-            normalized["ref"] = str(
-                normalized.get("ref")
-                or normalized.get("step_output_ref")
-                or normalized.get("artifact_ref")
-                or normalized.get("source_path")
-                or normalized.get("source")
-                or ""
-            )
-            if not normalized.get("name"):
-                reserved = {
-                    "artifact_ref",
-                    "kind",
+            explicit_ref = any(
+                item.get(key)
+                for key in (
                     "ref",
-                    "required",
-                    "source",
-                    "source_path",
+                    "input",
                     "step_output_ref",
-                    "type",
+                    "artifact_ref",
+                    "source_path",
+                    "source_ref",
+                    "source",
+                )
+            )
+            custom_keys = [key for key in item if key not in reserved]
+            mapping_input = bool(
+                not item.get("name")
+                and not explicit_ref
+                and custom_keys
+                and all(
+                    isinstance(item.get(key), (str, dict))
+                    for key in custom_keys
+                )
+            )
+            if mapping_input:
+                inherited = {
+                    key: deepcopy(item[key])
+                    for key in ("kind", "required", "type")
+                    if key in item
                 }
-                custom_keys = [key for key in normalized if key not in reserved]
-                if len(custom_keys) == 1:
-                    normalized["name"] = str(custom_keys[0])
-            normalized.setdefault("kind", "data_reference")
-            normalized.setdefault("required", True)
+                for key in custom_keys:
+                    raw_binding = item[key]
+                    binding = (
+                        {**deepcopy(inherited), **deepcopy(raw_binding)}
+                        if isinstance(raw_binding, dict)
+                        else {**deepcopy(inherited), "ref": raw_binding}
+                    )
+                    binding.setdefault("name", str(key))
+                    inputs.append(normalize(binding))
+                continue
+            normalized = normalize(item)
+            if not normalized.get("name") and len(custom_keys) == 1:
+                normalized["name"] = str(custom_keys[0])
             inputs.append(normalized)
         elif item is not None and str(item).strip():
             inputs.append(
                 {
-                    "ref": str(item),
+                    "ref": _normalized_input_reference(item),
                     "kind": "data_reference",
-                    "required": True,
                 }
             )
     return inputs
 
 
 def _normalize_plan_outputs(value: Any, step_id: str) -> list[dict[str, Any]]:
+    """Return one output descriptor for every named value in a PlanStep.
+
+    A model may express multiple outputs as a mapping inside one list item.  A
+    mapping is a collection of independent output contracts, not an array
+    wrapper.  Expand it before type/shape normalization so the executor,
+    registry, and downstream references all share the same contract.
+    """
+
     outputs = []
+    reserved = {
+        "consumer_hints",
+        "description",
+        "name",
+        "required",
+        "schema",
+        "semantic_role",
+        "semantic_roles",
+        "shape",
+        "type",
+    }
+
+    def append_output(item: dict[str, Any], index: int) -> None:
+        normalized = dict(item)
+        normalized["name"] = str(
+            normalized.get("name") or f"{step_id}-result-{index}"
+        )
+        raw_shape = normalized.get("shape")
+        if isinstance(raw_shape, dict):
+            normalized.setdefault("schema", deepcopy(raw_shape))
+            raw_shape = (
+                raw_shape.get("name")
+                or raw_shape.get("type")
+                or normalized.get("type")
+            )
+        raw_type = str(normalized.get("type") or "").lower()
+        type_aliases = {
+            "dict": "object",
+            "document_json": "object",
+            "list": "array",
+            "table": "array",
+        }
+        normalized["type"] = type_aliases.get(raw_type, raw_type or "array")
+        shape = str(
+            raw_shape
+            or ("record" if normalized["type"] == "object" else "table")
+        ).lower()
+        if shape in {"object", "dict", "document_json", "json"}:
+            shape = "record"
+        canonical_shapes = {
+            "array",
+            "category_series",
+            "list",
+            "record",
+            "scalar",
+            "table",
+            "time_series",
+        }
+        if shape not in canonical_shapes:
+            shape = {
+                "array": "table",
+                "object": "record",
+            }.get(normalized["type"], "scalar")
+        normalized["shape"] = shape
+        if shape in {"array", "list", "table", "time_series", "category_series"}:
+            normalized["type"] = "array"
+        elif shape == "record":
+            normalized["type"] = "object"
+        semantic_roles = [
+            str(role)
+            for role in (
+                _list_value(normalized.get("semantic_roles"))
+                + _list_value(normalized.get("semantic_role"))
+            )
+            if str(role).strip()
+        ]
+        normalized["semantic_roles"] = list(
+            dict.fromkeys(semantic_roles or ["analysis_data"])
+        )
+        normalized.setdefault("consumer_hints", ["analysis", "report"])
+        outputs.append(normalized)
+
     for index, item in enumerate(_list_value(value), start=1):
         if isinstance(item, dict):
-            normalized = dict(item)
-            normalized["name"] = str(
-                normalized.get("name") or f"{step_id}-result-{index}"
+            custom_keys = [key for key in item if key not in reserved]
+            mapping_output = (
+                not item.get("name")
+                and bool(custom_keys)
+                and all(isinstance(item.get(key), dict) for key in custom_keys)
             )
-            normalized.setdefault("shape", "table")
-            normalized.setdefault("semantic_roles", ["analysis_data"])
-            normalized.setdefault("consumer_hints", ["analysis", "report"])
-            outputs.append(normalized)
+            if mapping_output:
+                inherited = {
+                    key: deepcopy(item[key])
+                    for key in (
+                        "consumer_hints",
+                        "description",
+                        "required",
+                        "semantic_role",
+                        "semantic_roles",
+                    )
+                    if key in item
+                }
+                for key in custom_keys:
+                    descriptor = {
+                        **deepcopy(inherited),
+                        **deepcopy(item[key]),
+                        "name": str(key),
+                    }
+                    append_output(descriptor, len(outputs) + 1)
+                continue
+            append_output(item, index)
         elif item is not None and str(item).strip():
             outputs.append(
                 {
                     "name": str(item),
+                    "type": "array",
                     "shape": "table",
                     "semantic_roles": ["analysis_data"],
                     "consumer_hints": ["analysis", "report"],
@@ -225,6 +428,7 @@ def _normalize_plan_outputs(value: Any, step_id: str) -> list[dict[str, Any]]:
     return outputs or [
         {
             "name": f"{step_id}-result",
+            "type": "array",
             "shape": "table",
             "semantic_roles": ["analysis_data"],
             "consumer_hints": ["analysis", "report"],
@@ -285,6 +489,7 @@ def _compatible_plan_outputs(
                 str(item)
                 for item in (
                     _list_value(output.get("semantic_roles"))
+                    + _list_value(output.get("semantic_role"))
                     + _list_value(output.get("fields"))
                 )
                 if str(item)
@@ -347,43 +552,106 @@ def _bind_dependency_inputs(steps: list[dict[str, Any]]) -> None:
     steps_by_id = {str(step.get("step_id")): step for step in steps}
     for step in steps:
         inputs = _normalize_plan_inputs(step.get("inputs"))
-        for dependency in map(str, step.get("depends_on", [])):
+        step_dependencies = list(map(str, step.get("depends_on", [])))
+        output_name_owners = Counter(
+            str(output.get("name"))
+            for dependency in step_dependencies
+            for output in steps_by_id.get(dependency, {}).get("outputs", [])
+            if isinstance(output, dict) and output.get("name")
+        )
+        for dependency in step_dependencies:
             upstream = steps_by_id.get(dependency, {})
-            outputs = upstream.get("outputs", [])
-            output_name = str(
-                outputs[0].get("name")
-                if outputs and isinstance(outputs[0], dict)
-                else f"{dependency}-result"
-            )
-            existing_binding = next(
-                (
-                    item
-                    for item in inputs
-                    if _step_id_from_input_ref(item.get("ref")) == dependency
-                    or str(item.get("ref", "")) == output_name
-                ),
-                None,
-            )
-            if existing_binding is not None:
-                existing_binding.setdefault("name", output_name)
-                existing_binding["ref"] = f"step-output://{dependency}/{output_name}"
+            outputs = [
+                item
+                for item in upstream.get("outputs", [])
+                if isinstance(item, dict) and item.get("name")
+            ]
+            if not outputs:
+                outputs = [{"name": f"{dependency}-result"}]
+            output_names = {str(output.get("name")) for output in outputs}
+            for binding in inputs:
+                ref = str(binding.get("ref") or "")
+                relative_prefix = f"{dependency}/"
+                if not ref.startswith(relative_prefix):
+                    continue
+                relative_output = ref.removeprefix(relative_prefix)
+                if relative_output in output_names:
+                    binding["ref"] = (
+                        f"step-output://{dependency}/{relative_output}"
+                    )
+            existing_bindings = [
+                item
+                for item in inputs
+                if _step_id_from_input_ref(item.get("ref")) == dependency
+                or (
+                    str(item.get("ref") or "")
+                    in {str(output.get("name")) for output in outputs}
+                    and output_name_owners[str(item.get("ref") or "")] == 1
+                )
+            ]
+            if existing_bindings:
+                for binding in existing_bindings:
+                    match = _STEP_OUTPUT_REF.match(str(binding.get("ref") or ""))
+                    if match:
+                        binding.setdefault("name", match.group(2))
+                    else:
+                        output_name = str(binding.get("ref") or "")
+                        binding.setdefault("name", output_name)
+                        binding["ref"] = (
+                            f"step-output://{dependency}/{output_name}"
+                        )
+                    binding.setdefault(
+                        "required",
+                        bool(upstream.get("required", True)),
+                    )
                 continue
             empty_input = next(
                 (item for item in inputs if not str(item.get("ref", "")).strip()),
                 None,
             )
-            binding = empty_input if empty_input is not None else {}
-            binding.setdefault("name", output_name)
-            binding.update(
-                {
-                    "ref": f"step-output://{dependency}/{output_name}",
-                    "kind": "data_reference",
-                    "required": bool(binding.get("required", True)),
-                }
+            for output_index, output in enumerate(outputs):
+                output_name = str(output.get("name"))
+                binding = (
+                    empty_input
+                    if output_index == 0 and empty_input is not None
+                    else {}
+                )
+                binding.setdefault("name", output_name)
+                binding.update(
+                    {
+                        "ref": f"step-output://{dependency}/{output_name}",
+                        "kind": "data_reference",
+                    }
+                )
+                binding.setdefault(
+                    "required",
+                    bool(upstream.get("required", True)),
+                )
+                if binding not in inputs:
+                    inputs.append(binding)
+        for item in inputs:
+            item.setdefault("required", True)
+        deduplicated_inputs: list[dict[str, Any]] = []
+        exact_bindings: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for item in inputs:
+            key = (
+                str(item.get("name") or "").strip(),
+                str(item.get("ref") or "").strip(),
+                str(item.get("kind") or "data_reference").strip(),
             )
-            if empty_input is None:
-                inputs.append(binding)
-        step["inputs"] = inputs
+            existing = exact_bindings.get(key)
+            if existing is None:
+                copied = deepcopy(item)
+                exact_bindings[key] = copied
+                deduplicated_inputs.append(copied)
+                continue
+            existing["required"] = bool(
+                existing.get("required", True) or item.get("required", True)
+            )
+            for field, field_value in item.items():
+                if field not in existing or existing[field] in (None, "", [], {}):
+                    existing[field] = deepcopy(field_value)
+        step["inputs"] = deduplicated_inputs
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,6 +665,7 @@ class _StepOutputRecord:
     schema: dict[str, Any] | None = None
     profile: dict[str, Any] | None = None
     json_type: str = "null"
+    semantic_roles: tuple[str, ...] = ()
 
 
 class _StepOutputRegistry:
@@ -472,6 +741,16 @@ class _StepOutputRegistry:
                 schema=schema,
                 profile=profile,
                 json_type=json_type,
+                semantic_roles=tuple(
+                    dict.fromkeys(
+                        str(role)
+                        for role in (
+                            _list_value(output.get("semantic_roles"))
+                            + _list_value(output.get("semantic_role"))
+                        )
+                        if str(role)
+                    )
+                ),
             )
             with self._lock:
                 self._records[(step_id, output_name)] = record
@@ -649,6 +928,7 @@ class _StepInputResolver:
             "schema": record.schema or {},
             "profile": record.profile or {},
             "json_type": record.json_type,
+            "semantic_roles": list(record.semantic_roles),
             "value": record.value,
         }
 
@@ -885,8 +1165,32 @@ def _scoped_corpus_payload(
         catalog["datasets"] = [
             item for item in catalog["datasets"] if str(item.get("name")) in allowed
         ]
+    selected_document_ids = set(scope["documents"])
+    source_descriptors = [
+        {
+            key: deepcopy(document.get(key))
+            for key in (
+                "document_id",
+                "file_name",
+                "object_key",
+                "source_uri",
+                "source_ref",
+                "artifact_ref",
+            )
+            if document.get(key) is not None
+        }
+        for document in _list_value(
+            corpus_package.metadata.get("ingested_documents")
+        )
+        if isinstance(document, dict)
+        and (
+            not selected_document_ids
+            or str(document.get("document_id")) in selected_document_ids
+        )
+    ]
     return {
         "sources": scope["sources"],
+        "source_descriptors": source_descriptors,
         "schemas": {"tables": scoped_tables, "vector_collections": scoped_vectors},
         "metadata": {**deepcopy(corpus_package.metadata), "catalog": catalog},
         "scope": scope,

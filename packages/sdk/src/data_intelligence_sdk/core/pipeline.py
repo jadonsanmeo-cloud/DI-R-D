@@ -334,28 +334,68 @@ class DataIntelligencePipeline:
 
         if self.markdown_spec_builder is None:
             raise RuntimeError("Markdown spec builder is not configured.")
-        analyzed_intent = self._analyze_intent(
-            query,
-            session_context,
-            user_context,
-        )
-        intent_analysis = _normalize_intent_analysis(analyzed_intent)
-        self._log("pipeline.intent_analyzed", _intent_event_payload(analyzed_intent, intent_analysis))
-        markdown = self.markdown_spec_builder.build(query, intent_analysis)
-        self._log(
-            "pipeline.spec_built",
-            {
+        run_artifact = self._create_run_artifact(query)
+        try:
+            self._log(
+                "pipeline.start",
+                {
+                    "query": query.text,
+                    "artifact_ref": (
+                        run_artifact.artifact_ref
+                        if run_artifact is not None
+                        else None
+                    ),
+                },
+            )
+            analyzed_intent = self._analyze_intent(
+                query,
+                session_context,
+                user_context,
+            )
+            intent_analysis = _normalize_intent_analysis(analyzed_intent)
+            intent_payload = _intent_event_payload(
+                analyzed_intent,
+                intent_analysis,
+            )
+            self._log("pipeline.intent_analyzed", intent_payload)
+            self._record_artifact_event(
+                run_artifact,
+                phase="intent",
+                event_type="intent.analyzed",
+                payload=intent_payload,
+            )
+            markdown = self.markdown_spec_builder.build(query, intent_analysis)
+            spec_payload = {
                 "intent": intent_analysis.intent,
                 "format": "markdown",
                 "character_count": len(markdown),
-            },
-        )
+                "spec_markdown": markdown,
+            }
+            self._log("pipeline.spec_built", spec_payload)
+            self._record_artifact_event(
+                run_artifact,
+                phase="spec_builder",
+                event_type="spec.built",
+                payload=spec_payload,
+            )
+        except Exception as exc:
+            if run_artifact is not None:
+                run_artifact.finalize(
+                    status="failed",
+                    failure_phase="spec_preparation",
+                    error=_artifact_error(exc),
+                )
+            raise
         return PreparedMarkdownExecution(
             query=query,
             intent_analysis=intent_analysis,
             spec_markdown=markdown,
             session_context=session_context,
             user_context=user_context,
+            run_artifact=run_artifact,
+            run_artifact_id=(
+                run_artifact.run_id if run_artifact is not None else None
+            ),
         )
 
     def execute_confirmed_markdown(
@@ -367,32 +407,95 @@ class DataIntelligencePipeline:
 
         if self.markdown_report_engine is None:
             raise RuntimeError("Markdown report engine is not configured.")
-        runtime = EngineRuntimeContext(
-            run_context=EngineRunContext(),
-            mcp_client=self.mcp_client,
-            mcp_tools=self.mcp_tools,
-            interface_registry=self.interface_registry,
-            interface_builder=self.interface_builder,
-            sandbox_executor=self.sandbox_executor,
-            artifact_store=self.artifact_store,
-            log_store=self.log_store,
-            resource_manager=self.resource_manager,
-            sandbox=None,
-            run_artifact=prepared.run_artifact,
+        run_artifact = self._resolve_run_artifact(prepared)
+        self._record_artifact_event(
+            run_artifact,
+            phase="spec_builder",
+            event_type="spec.confirmed",
+            payload={
+                "format": "markdown",
+                "intent": prepared.intent_analysis.intent,
+                "spec_markdown": spec_markdown,
+            },
         )
         self._log(
             "pipeline.spec_confirmed",
             {"format": "markdown", "intent": prepared.intent_analysis.intent},
         )
-        result = self.markdown_report_engine.run_markdown(
-            spec_markdown=spec_markdown,
-            organization_id=self.default_organization_id,
-            runtime=runtime,
-            user_context=prepared.user_context,
+        phase = "sandbox_provisioning"
+        try:
+            sandbox_context = (
+                self.sandbox_provider.open()
+                if self.sandbox_provider is not None
+                else nullcontext(None)
+            )
+            with sandbox_context as sandbox:
+                phase = "engine_execution"
+                sandbox_executor = self.sandbox_executor
+                if sandbox_executor is None and sandbox is not None:
+                    sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
+
+                def record_runtime_event(**event: Any) -> dict[str, Any]:
+                    return self._record_runtime_event(run_artifact, **event)
+
+                runtime = EngineRuntimeContext(
+                    run_context=EngineRunContext(event_recorder=record_runtime_event),
+                    mcp_client=self.mcp_client,
+                    mcp_tools=self.mcp_tools,
+                    interface_registry=self.interface_registry,
+                    interface_builder=self.interface_builder,
+                    sandbox_executor=sandbox_executor,
+                    artifact_store=self.artifact_store,
+                    log_store=self.log_store,
+                    resource_manager=self.resource_manager,
+                    sandbox=sandbox,
+                    run_artifact=run_artifact,
+                )
+                result = self.markdown_report_engine.run_markdown(
+                    spec_markdown=spec_markdown,
+                    organization_id=self.default_organization_id,
+                    runtime=runtime,
+                    user_context=prepared.user_context,
+                    user_query=prepared.query,
+                )
+        except Exception as exc:
+            if run_artifact is not None:
+                run_artifact.finalize(
+                    status="failed",
+                    engine_name="report",
+                    failure_phase=phase,
+                    error=_artifact_error(exc),
+                )
+            raise
+
+        response = (
+            result
+            if isinstance(result, FinalResponse)
+            else FinalResponse(answer=str(result), metadata={"engine_name": "report"})
         )
-        if isinstance(result, FinalResponse):
-            return result
-        return FinalResponse(answer=str(result), metadata={"engine_name": "report"})
+        artifact_ref = run_artifact.artifact_ref if run_artifact is not None else None
+        if artifact_ref is not None:
+            response.metadata["artifact_ref"] = artifact_ref
+        self._record_artifact_event(
+            run_artifact,
+            phase="response",
+            event_type="response.completed",
+            payload=asdict(response),
+        )
+        if run_artifact is not None:
+            run_artifact.finalize(
+                status="completed",
+                engine_name=str(response.metadata.get("engine_name") or "report"),
+                final_answer=response.answer,
+            )
+        self._log(
+            "pipeline.completed",
+            {
+                "answer_type": type(response.answer).__name__,
+                "engine_name": response.metadata.get("engine_name"),
+            },
+        )
+        return response
 
     def execute_confirmed_spec(
         self,

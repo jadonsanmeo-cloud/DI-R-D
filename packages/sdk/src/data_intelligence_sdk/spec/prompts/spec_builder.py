@@ -179,7 +179,15 @@ Field rules:
 - objective: rewrite the user request into one clear executable objective.
 - data_requirements: include only source refs from corpus_package.sources, corpus_summary.sources, or refs explicitly present in corpus metadata.
 - capability_requirements: describe capabilities the engine/runtime must resolve; do not name concrete method calls unless the capability itself is method-specific.
-- constraints: structured task constraints such as filters, metrics, group_by, language, output_format, evidence_required, and scope.
+- constraints: structured task constraints such as filters, metrics, group_by,
+  language, output_format, evidence_required, scope, and report_content_roles.
+  For report requests, normalize explicitly requested presentation capabilities
+  into `report_content_roles` using only: `data_profile`, `executive_summary`,
+  `key_findings`, `supporting_evidence`, `implication`, `limitation`,
+  `recommendation`, `narrative`, `metrics`, `chart`, or `table`. This field is the
+  contract consumed by the Template Agent; do not rely on downstream components
+  re-reading keywords from the original prompt. Omit roles the user did not ask
+  for and do not prescribe section IDs, ordering, or a fixed page layout.
 - engine_hint: use "report" for report tasks; otherwise use null unless a specific engine is clearly required.
 
 Do not include confirmed. The confirmation component owns that field.

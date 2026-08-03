@@ -43,6 +43,7 @@ from data_intelligence_sdk.engines.reporting.execution import (
     CodeAgent,
     DataScienceAgent,
     RouterAgent,
+    SemanticAnalysisAgent,
     ToolExecutor,
     ValidatorAgent,
 )
@@ -52,11 +53,13 @@ from data_intelligence_sdk.engines.reporting.planning import (
     TemplatePool,
 )
 from data_intelligence_sdk.engines.reporting.policies import (
+    AnalysisSamplingPolicy,
     ChartPolicy,
     LocalePolicy,
     ReportAssetPolicy,
     ReportFormat,
     ReportFormatRegistry,
+    ReportPresentationPolicy,
     SourceHandlerPolicy,
     SourceMaterializationRegistry,
 )
@@ -123,6 +126,7 @@ from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
 __all__ = [
+    "AnalysisSamplingPolicy",
     "ChartAgent",
     "ChartInputAssembler",
     "ChartPolicy",
@@ -136,8 +140,10 @@ __all__ = [
     "ReportEngine",
     "ReportFormat",
     "ReportFormatRegistry",
+    "ReportPresentationPolicy",
     "ReportRenderer",
     "RouterAgent",
+    "SemanticAnalysisAgent",
     "SourceHandlerPolicy",
     "SourceMaterializationRegistry",
     "TemplateAgent",

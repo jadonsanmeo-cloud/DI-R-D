@@ -278,11 +278,13 @@ def _name_matches_query(name: str, query_text: str) -> bool:
 
 
 def _extract_metrics(query_text: str, mentioned_columns: list[str]) -> list[str]:
-    metrics = [column for column in mentioned_columns if column.lower() in query_text]
-    for common_metric in ("revenue", "count", "average", "total"):
-        if common_metric in query_text and common_metric not in metrics:
-            metrics.append(common_metric)
-    return metrics
+    # Metric identity comes from the available corpus schema. Do not inject a
+    # fixed English or business vocabulary into every request; the Spec Builder
+    # can preserve an unbound metric request in its structured requirements when
+    # the schema has not established a concrete field yet.
+    return [
+        column for column in mentioned_columns if column.lower() in query_text
+    ]
 
 
 def _infer_output_type(query_text: str, intent: Intent) -> str | None:

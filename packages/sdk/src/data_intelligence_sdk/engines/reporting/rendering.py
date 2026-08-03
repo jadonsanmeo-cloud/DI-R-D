@@ -37,6 +37,7 @@ from data_intelligence_sdk.tools import create_mcp_tools
 from data_intelligence_sdk.engines.reporting.policies import (
     LocalePolicy,
     ReportAssetPolicy,
+    ReportPresentationPolicy,
 )
 from data_intelligence_sdk.engines.reporting.utils import (
     _int_value,
@@ -49,8 +50,10 @@ class ReportRenderer:
         self,
         *,
         asset_policy: ReportAssetPolicy | None = None,
+        presentation_policy: ReportPresentationPolicy | None = None,
     ) -> None:
         self.asset_policy = asset_policy or ReportAssetPolicy()
+        self.presentation_policy = presentation_policy or ReportPresentationPolicy()
 
     def render(
         self,
@@ -110,12 +113,10 @@ class ReportRenderer:
         locale_policy: LocalePolicy | None = None,
     ) -> str:
         locale = locale_policy or LocalePolicy.for_locale("en")
-        lines = [
-            f"# {report.get('title', locale.report_label)}",
-            "",
-            str(report.get("summary", "")),
-            "",
-        ]
+        lines = [f"# {report.get('title', locale.report_label)}", ""]
+        summary = str(report.get("summary", "")).strip()
+        if summary and not self._summary_repeats_executive_block(report, summary):
+            lines.extend([summary, ""])
         for section in report.get("sections", []):
             lines.extend(
                 [f"## {section.get('title', section.get('section_id', 'Section'))}", ""]
@@ -158,6 +159,20 @@ class ReportRenderer:
                             "",
                         ]
                     )
+                    insight = content.get("insight")
+                    insight = insight if isinstance(insight, dict) else {}
+                    claim = str(insight.get("claim") or "").strip()
+                    description = str(insight.get("description") or "").strip()
+                    purpose = str(insight.get("purpose") or "").strip()
+                    coverage = str(insight.get("coverage") or "").strip()
+                    if claim:
+                        lines.extend([f"**Insight:** {claim}", ""])
+                    if description and self._normalized_text(description) != self._normalized_text(claim):
+                        lines.extend([description, ""])
+                    if purpose:
+                        lines.extend([f"**Why this chart:** {purpose}", ""])
+                    if coverage:
+                        lines.extend([f"**Coverage:** {coverage}", ""])
         return "\n".join(lines).strip() + "\n"
 
     def _html(
@@ -176,8 +191,8 @@ class ReportRenderer:
         status = self._display_name(str(report.get("status", "completed")))
         summary = self._compact_text(
             str(report.get("summary", "")),
-            max_sentences=6,
-            max_chars=1200,
+            max_sentences=self.presentation_policy.max_summary_sentences,
+            max_chars=self.presentation_policy.max_summary_characters,
         )
         sections = [
             item
@@ -191,7 +206,10 @@ class ReportRenderer:
             + '">'
             + f"{index:02d}"
             + "</a>"
-            for index, section in enumerate(sections[:8], start=1)
+            for index, section in enumerate(
+                sections[: self.presentation_policy.max_navigation_sections],
+                start=1,
+            )
         )
         body = [
             '<nav class="report-nav">',
@@ -208,7 +226,11 @@ class ReportRenderer:
             f'<span class="status-pill">{self._escape(status)}</span>',
             "</div>",
             f"<h1>{title}</h1>",
-            f'<p class="report-summary">{self._escape(summary)}</p>',
+        ]
+        if summary and not self._summary_repeats_executive_block(report, summary):
+            body.append(f'<p class="report-summary">{self._escape(summary)}</p>')
+        body.extend(
+            [
             '<div class="hero-rule"></div>',
             "</div>",
             '<aside class="document-profile">',
@@ -221,7 +243,8 @@ class ReportRenderer:
             "</dl>",
             "</aside>",
             "</header>",
-        ]
+            ]
+        )
         for section_index, section in enumerate(sections, start=1):
             rendered_blocks = []
             for block in section.get("blocks", []):
@@ -251,8 +274,8 @@ class ReportRenderer:
                 if block_type == "narrative":
                     text = self._compact_text(
                         str(content.get("text", "")),
-                        max_sentences=18,
-                        max_chars=4800,
+                        max_sentences=self.presentation_policy.max_narrative_sentences,
+                        max_chars=self.presentation_policy.max_narrative_characters,
                     )
                     if not text:
                         continue
@@ -266,9 +289,11 @@ class ReportRenderer:
                         if line.strip()
                     ]
                     items = (
-                        line_items[:8]
+                        line_items[: self.presentation_policy.max_recommendation_items]
                         if len(line_items) > 1
-                        else self._sentences(raw_text)[:6]
+                        else self._sentences(raw_text)[
+                            : self.presentation_policy.max_recommendation_sentences
+                        ]
                     )
                     if not items:
                         continue
@@ -302,7 +327,7 @@ class ReportRenderer:
                         item
                         for item in content.get("items", [])
                         if isinstance(item, dict) and item.get("text")
-                    ][:8]
+                    ][: self.presentation_policy.max_insight_items]
                     if not items:
                         continue
                     block_body.append('<div class="insight-grid">')
@@ -324,7 +349,7 @@ class ReportRenderer:
                         item
                         for item in content.get("items", [])
                         if isinstance(item, dict) and item.get("text")
-                    ][:8]
+                    ][: self.presentation_policy.max_evidence_items]
                     if not items:
                         continue
                     block_body.append('<ol class="evidence-list">')
@@ -350,7 +375,7 @@ class ReportRenderer:
                         item
                         for item in content.get("items", [])
                         if isinstance(item, dict) and item.get("text")
-                    ][:6]
+                    ][: self.presentation_policy.max_process_items]
                     if not items:
                         continue
                     block_body.append('<ol class="process-flow">')
@@ -367,7 +392,8 @@ class ReportRenderer:
                         )
                     block_body.append("</ol>")
                 elif block_type == "kpi_group":
-                    metrics = content.get("metrics", [])[:4]
+                    metrics = content.get("metrics", [])
+                    metrics = metrics[: self.presentation_policy.max_kpi_items]
                     if not metrics:
                         continue
                     block_body.append('<dl class="kpi-grid">')
@@ -403,13 +429,20 @@ class ReportRenderer:
                 elif block_type == "chart" and content.get("chart"):
                     chart_id = _safe_id(content.get("chart_id"))
                     chart = content["chart"]
+                    insight = content.get("insight")
+                    insight = insight if isinstance(insight, dict) else {}
+                    claim = str(insight.get("claim") or "").strip()
+                    description = str(insight.get("description") or "").strip()
+                    purpose = str(insight.get("purpose") or "").strip()
+                    coverage = str(insight.get("coverage") or "").strip()
+                    aria_label = description or claim or "Data chart"
                     if chart.get("option"):
                         option = json.dumps(
                             chart.get("option", {}), ensure_ascii=False
                         ).replace("</", "<\\/")
                         block_body.append(
                             f'<div id="{chart_id}" class="echarts-chart" '
-                            'role="img" aria-label="Data chart"></div>'
+                            f'role="img" aria-label="{self._escape(aria_label)}"></div>'
                         )
                         block_body.append(
                             '<script type="application/json" '
@@ -431,6 +464,30 @@ class ReportRenderer:
                             )
                             + "</p>"
                         )
+                    if claim or description or purpose or coverage:
+                        block_body.append('<aside class="chart-insight">')
+                        if claim:
+                            block_body.append(
+                                '<span class="chart-insight-label">Insight</span>'
+                                f"<p>{self._escape(claim)}</p>"
+                            )
+                        if description and self._normalized_text(
+                            description
+                        ) != self._normalized_text(claim):
+                            block_body.append(
+                                f'<small>{self._escape(description)}</small>'
+                            )
+                        if purpose:
+                            block_body.append(
+                                '<small><strong>Why this chart:</strong> '
+                                f"{self._escape(purpose)}</small>"
+                            )
+                        if coverage:
+                            block_body.append(
+                                '<small><strong>Coverage:</strong> '
+                                f"{self._escape(coverage)}</small>"
+                            )
+                        block_body.append("</aside>")
                 if not block_body:
                     continue
                 rendered_blocks.append(
@@ -525,6 +582,30 @@ class ReportRenderer:
             if item.strip()
         ]
 
+    @staticmethod
+    def _normalized_text(value: Any) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).casefold().strip()
+
+    @classmethod
+    def _summary_repeats_executive_block(
+        cls,
+        report: dict[str, Any],
+        summary: str,
+    ) -> bool:
+        normalized_summary = cls._normalized_text(summary)
+        if not normalized_summary:
+            return False
+        return any(
+            cls._normalized_text(block.get("content", {}).get("text"))
+            == normalized_summary
+            for section in _list_value(report.get("sections"))
+            if isinstance(section, dict)
+            for block in _list_value(section.get("blocks"))
+            if isinstance(block, dict)
+            and str(block.get("content_role") or "") == "executive_summary"
+            and isinstance(block.get("content"), dict)
+        )
+
     @classmethod
     def _compact_text(
         cls,
@@ -602,7 +683,7 @@ class ReportRenderer:
         columns = list(dict.fromkeys(key for row in normalized for key in row))
         head = "".join(f"<th>{self._escape(str(key))}</th>" for key in columns)
         body = []
-        for row in normalized[:100]:
+        for row in normalized[: self.presentation_policy.max_table_rows]:
             cells = "".join(
                 f"<td>{self._escape(str(row.get(key, '')))}</td>" for key in columns
             )
@@ -799,6 +880,23 @@ h3 { margin-bottom: 0; font-size: 17px; }
   background: var(--soft);
   border-left: 3px solid var(--amber);
 }
+.chart-insight {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-left: 3px solid var(--accent);
+  background: var(--soft);
+}
+.chart-insight-label {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.chart-insight p { margin: 0; color: var(--ink); font-weight: 650; }
+.chart-insight small { color: var(--muted); line-height: 1.55; }
 .takeaway-list {
   display: grid;
   gap: 15px;

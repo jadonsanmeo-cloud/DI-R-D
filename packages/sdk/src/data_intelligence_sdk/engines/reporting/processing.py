@@ -35,7 +35,13 @@ from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
 from data_intelligence_sdk.engines.reporting.execution import DataScienceAgent
-from data_intelligence_sdk.engines.reporting.policies import ChartPolicy, LocalePolicy
+from data_intelligence_sdk.engines.reporting.policies import (
+    AnalysisSamplingPolicy,
+    ChartPolicy,
+    LocalePolicy,
+    ReportPresentationPolicy,
+    normalize_content_role,
+)
 from data_intelligence_sdk.engines.reporting.utils import (
     _STEP_OUTPUT_REF,
     _StepOutputRegistry,
@@ -47,6 +53,19 @@ from data_intelligence_sdk.engines.reporting.utils import (
     _safe_id,
 )
 
+
+_NON_ANALYTICAL_CHART_FIELDS = frozenset(
+    {
+        "relevance_score",
+        "retrieval_score",
+        "similarity_score",
+        "vector_distance",
+        "retrieval_rank",
+        "chunk_index",
+        "source_index",
+    }
+)
+
 class DataScienceProcessor:
     def __init__(
         self,
@@ -54,6 +73,8 @@ class DataScienceProcessor:
         max_inline_chart_rows: int | None = None,
         *,
         chart_policy: ChartPolicy | None = None,
+        sampling_policy: AnalysisSamplingPolicy | None = None,
+        presentation_policy: ReportPresentationPolicy | None = None,
         locale_policy: LocalePolicy | None = None,
     ) -> None:
         self.agent = agent
@@ -63,8 +84,11 @@ class DataScienceProcessor:
                 max_inline_rows=max_inline_chart_rows,
                 max_dataset_rows=self.chart_policy.max_dataset_rows,
                 max_categories=self.chart_policy.max_categories,
+                max_measures=self.chart_policy.max_measures,
             )
         self.locale_policy = locale_policy or LocalePolicy.for_locale("en")
+        self.sampling_policy = sampling_policy or AnalysisSamplingPolicy()
+        self.presentation_policy = presentation_policy or ReportPresentationPolicy()
 
     def process(
         self,
@@ -77,17 +101,20 @@ class DataScienceProcessor:
         user_goal: str | None = None,
         locale_policy: LocalePolicy | None = None,
     ) -> dict[str, Any]:
-        raw_data = execution_result.get("raw_result")
-        rows = _normalize_rows(raw_data)
+        raw_data, derived_warnings = self._normalize_derived_metrics(
+            execution_result.get("raw_result")
+        )
+        rows = self._analysis_rows(step, raw_data)
         step_id = str(step.get("step_id", "step"))
         output_descriptors: list[dict[str, Any]] = []
-        materialization_warnings: list[str] = []
+        materialization_warnings: list[str] = list(derived_warnings)
         if execution_result.get("status") in {"completed", "completed_no_data"}:
-            output_descriptors, materialization_warnings = output_registry.register(
+            output_descriptors, registry_warnings = output_registry.register(
                 step,
                 raw_data,
                 runtime,
             )
+            materialization_warnings.extend(registry_warnings)
         artifact_ref = (
             str(output_descriptors[0]["artifact_ref"])
             if output_descriptors
@@ -98,7 +125,13 @@ class DataScienceProcessor:
             "outputs": output_descriptors,
             "schema": _infer_schema(rows),
             "profile": _profile_rows(rows, raw_data),
-            "sample": self._analysis_sample(rows),
+            "sample": self._analysis_sample(
+                rows,
+                max_rows=self.sampling_policy.max_records,
+                max_string_chars=self.sampling_policy.max_string_characters,
+                max_nested_items=self.sampling_policy.max_nested_items,
+                string_segments=self.sampling_policy.string_segments,
+            ),
             "execution_status": execution_result.get("status"),
             "execution_error": execution_result.get("error"),
         }
@@ -117,6 +150,14 @@ class DataScienceProcessor:
             raw_data,
             user_goal,
         )
+        if self._analysis_has_unsupported_numbers(decision, raw_data):
+            fallback = self.agent._fallback_analysis(
+                step,
+                materialized,
+                raw_data,
+                template_requirements,
+            )
+            decision = self._ground_report_content(decision, fallback, raw_data)
         decision = self._normalize_trusted_analysis(
             decision,
             execution_result,
@@ -124,10 +165,15 @@ class DataScienceProcessor:
             raw_data,
             artifact_ref,
         )
-        decision["report_content"] = self._normalize_report_content(decision)
+        decision["report_content"] = self._normalize_report_content(
+            decision,
+            template_requirements,
+            max_block_items=self.presentation_policy.max_insight_items,
+        )
         decision["aggregated_data"] = self._overview_aggregated_data(
             decision.get("aggregated_data"),
             rows,
+            max_metrics=self.presentation_policy.max_kpi_items,
         )
         if execution_result.get("status") == "failed":
             decision["status"] = "failed"
@@ -174,6 +220,10 @@ class DataScienceProcessor:
                     "analytical_purpose",
                     "evidence_claim",
                     "recommended_types",
+                    "measure",
+                    "unit",
+                    "encoding",
+                    "measures",
                 )
             }
             if chart_data["render"] and len(chart_data["rows"]) >= 2:
@@ -181,17 +231,20 @@ class DataScienceProcessor:
                     {
                         "dataset_id": f"{step_id}-chart-data",
                         "for_chart_ids": chart_ids,
-                        "shape": "category_series",
+                        "shape": "records",
                         "artifact_ref": f"{artifact_ref}/chart-data",
                         "title": chart_data["title"],
                         "coverage": chart_data["coverage"],
                         "analytical_purpose": chart_data["analytical_purpose"],
                         "evidence_claim": chart_data["evidence_claim"],
                         "recommended_types": chart_data["recommended_types"],
-                        "semantic_roles": {
-                            "comparison_dimension": "category",
-                            "primary_measure": "value",
-                        },
+                        "measure": chart_data["measure"],
+                        "unit": chart_data["unit"],
+                        "semantic_roles": deepcopy(
+                            chart_data.get("semantic_roles", {})
+                        ),
+                        "encoding": deepcopy(chart_data.get("encoding", {})),
+                        "measures": deepcopy(chart_data.get("measures", [])),
                         "schema": _infer_schema(chart_data["rows"]),
                         "profile": _profile_rows(
                             chart_data["rows"],
@@ -255,8 +308,294 @@ class DataScienceProcessor:
         )
         return result
 
+    @classmethod
+    def _normalize_derived_metrics(cls, value: Any) -> tuple[Any, list[str]]:
+        """Recalculate explicitly declared relative percentages from row values."""
+
+        warnings: list[str] = []
+
+        def normalize(item: Any) -> Any:
+            if isinstance(item, list):
+                return [normalize(child) for child in item]
+            if not isinstance(item, dict):
+                return deepcopy(item)
+            normalized = {str(key): normalize(child) for key, child in item.items()}
+            percent_fields = [
+                key
+                for key, child in normalized.items()
+                if isinstance(child, (int, float))
+                and not isinstance(child, bool)
+                and "percent" in key.casefold()
+                and "change" in key.casefold()
+            ]
+            comparison_fields = [
+                key
+                for key, child in normalized.items()
+                if isinstance(child, (int, float))
+                and not isinstance(child, bool)
+                and any(
+                    token in key.casefold()
+                    for token in ("comparison", "baseline", "previous", "reference")
+                )
+            ]
+            value_fields = [
+                key
+                for key, child in normalized.items()
+                if isinstance(child, (int, float))
+                and not isinstance(child, bool)
+                and key not in percent_fields
+                and key not in comparison_fields
+                and key.casefold() in {"value", "metric_value", "current_value"}
+            ]
+            if not percent_fields or not comparison_fields or not value_fields:
+                return normalized
+            current = float(normalized[value_fields[0]])
+            comparison = float(normalized[comparison_fields[0]])
+            if comparison == 0:
+                return normalized
+            expected = (current - comparison) / abs(comparison) * 100
+            for field in percent_fields:
+                supplied = float(normalized[field])
+                tolerance = max(0.1, abs(expected) * 0.005)
+                if abs(supplied - expected) > tolerance:
+                    normalized[field] = round(expected, 1)
+                    warnings.append(
+                        "A derived percentage was recalculated from its declared "
+                        "value and comparison fields."
+                    )
+            return normalized
+
+        return normalize(value), list(dict.fromkeys(warnings))
+
+    @classmethod
+    def _analysis_has_unsupported_numbers(
+        cls,
+        decision: dict[str, Any],
+        raw_data: Any,
+    ) -> bool:
+        trusted = cls._numeric_evidence_values(raw_data)
+        report_values = [
+            decision.get("analysis_summary"),
+            decision.get("observations"),
+            decision.get("report_content"),
+            decision.get("chart_data", {}).get("evidence_claim")
+            if isinstance(decision.get("chart_data"), dict)
+            else None,
+        ]
+        return any(not cls._value_is_numerically_grounded(value, trusted) for value in report_values)
+
+    @classmethod
+    def _ground_report_content(
+        cls,
+        decision: dict[str, Any],
+        fallback: dict[str, Any],
+        raw_data: Any,
+    ) -> dict[str, Any]:
+        grounded = deepcopy(decision)
+        trusted = cls._numeric_evidence_values(raw_data)
+        if not cls._value_is_numerically_grounded(
+            grounded.get("analysis_summary"), trusted
+        ):
+            grounded["analysis_summary"] = fallback.get("analysis_summary")
+        grounded["observations"] = [
+            item
+            for item in _list_value(grounded.get("observations"))
+            if cls._value_is_numerically_grounded(item, trusted)
+        ] or deepcopy(_list_value(fallback.get("observations")))
+
+        supplied = grounded.get("report_content")
+        supplied = deepcopy(supplied) if isinstance(supplied, dict) else {}
+        fallback_content = fallback.get("report_content")
+        fallback_content = (
+            fallback_content if isinstance(fallback_content, dict) else {}
+        )
+        for field in (
+            "executive_summary",
+            "key_findings",
+            "supporting_evidence",
+            "implications",
+            "recommendations",
+            "limitations",
+            "evidence_items",
+        ):
+            value = supplied.get(field)
+            if isinstance(value, list):
+                filtered = [
+                    item
+                    for item in value
+                    if cls._value_is_numerically_grounded(item, trusted)
+                ]
+                supplied[field] = filtered or deepcopy(
+                    _list_value(fallback_content.get(field))
+                )
+            elif not cls._value_is_numerically_grounded(value, trusted):
+                supplied[field] = deepcopy(fallback_content.get(field))
+        block_content = supplied.get("block_content")
+        if isinstance(block_content, dict):
+            supplied["block_content"] = {
+                str(block_id): payload
+                for block_id, payload in block_content.items()
+                if cls._value_is_numerically_grounded(payload, trusted)
+            }
+        grounded["report_content"] = supplied
+        chart_data = grounded.get("chart_data")
+        if isinstance(chart_data, dict) and not cls._value_is_numerically_grounded(
+            chart_data.get("evidence_claim"), trusted
+        ):
+            replacement_claim = cls._chart_claim_from_grounded_rows(
+                chart_data,
+                trusted,
+            )
+            if replacement_claim:
+                chart_data = deepcopy(chart_data)
+                chart_data["evidence_claim"] = replacement_claim
+                grounded["chart_data"] = chart_data
+            else:
+                grounded["chart_data"] = deepcopy(fallback.get("chart_data", {}))
+        return grounded
+
+    @classmethod
+    def _chart_claim_from_grounded_rows(
+        cls,
+        chart_data: dict[str, Any],
+        trusted: list[float],
+    ) -> str:
+        rows = [
+            row
+            for row in _list_value(chart_data.get("rows"))
+            if isinstance(row, dict)
+        ]
+        encoding = chart_data.get("encoding")
+        encoding = encoding if isinstance(encoding, dict) else {}
+        dimension = str(
+            encoding.get("dimension")
+            or encoding.get("x")
+            or encoding.get("x_field")
+            or ""
+        ).strip()
+        measures = [
+            str(field)
+            for field in (
+                _list_value(encoding.get("measures"))
+                or _list_value(encoding.get("measure"))
+                or _list_value(encoding.get("y"))
+            )
+            if str(field)
+        ]
+        if len(rows) < 2 or not dimension or not measures:
+            return ""
+        measure = measures[0]
+        valid_rows = [
+            row
+            for row in rows
+            if row.get(dimension) not in (None, "")
+            and isinstance(row.get(measure), (int, float))
+            and not isinstance(row.get(measure), bool)
+            and cls._value_is_numerically_grounded(str(row.get(measure)), trusted)
+        ]
+        if len(valid_rows) < 2:
+            return ""
+        first = valid_rows[0]
+        last = valid_rows[-1]
+        label = re.sub(r"[_\-.]+", " ", measure).strip()
+        label = label[:1].upper() + label[1:] if label else "Measure"
+        return (
+            f"Across {first.get(dimension)} to {last.get(dimension)}, "
+            f"{label} changed from {first.get(measure)} to {last.get(measure)}."
+        )
+
+    @classmethod
+    def _numeric_evidence_values(cls, value: Any) -> list[float]:
+        values: list[float] = []
+
+        def collect(item: Any) -> None:
+            if isinstance(item, bool):
+                return
+            if isinstance(item, (int, float)):
+                values.append(float(item))
+            elif isinstance(item, str):
+                for token in re.findall(r"[-+]?\d[\d,]*(?:\.\d+)?", item):
+                    try:
+                        values.append(float(token.replace(",", "")))
+                    except ValueError:
+                        continue
+            elif isinstance(item, dict):
+                for child in item.values():
+                    collect(child)
+            elif isinstance(item, (list, tuple, set)):
+                for child in item:
+                    collect(child)
+
+        collect(value)
+        return values
+
+    @classmethod
+    def _value_is_numerically_grounded(
+        cls,
+        value: Any,
+        trusted: list[float],
+    ) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            candidates = cls._numeric_evidence_values(value)
+            return all(
+                any(
+                    min(
+                        abs(candidate - evidence),
+                        abs(abs(candidate) - abs(evidence)),
+                    )
+                    <= max(0.05, abs(evidence) * 0.005)
+                    for evidence in trusted
+                )
+                for candidate in candidates
+            )
+        if isinstance(value, dict):
+            return all(
+                cls._value_is_numerically_grounded(child, trusted)
+                for child in value.values()
+            )
+        if isinstance(value, (list, tuple, set)):
+            return all(
+                cls._value_is_numerically_grounded(child, trusted)
+                for child in value
+            )
+        return True
+
     @staticmethod
-    def _normalize_report_content(decision: dict[str, Any]) -> dict[str, Any]:
+    def _analysis_rows(step: dict[str, Any], raw_data: Any) -> list[Any]:
+        """Flatten declared named outputs for profiling and bounded analysis.
+
+        A multi-output semantic step returns an object keyed by output name. Treating
+        that object as one record hides every contained table from analysis.
+        """
+
+        outputs = [
+            str(output.get("name") or "").strip()
+            for output in _list_value(step.get("outputs"))
+            if isinstance(output, dict) and str(output.get("name") or "").strip()
+        ]
+        if len(outputs) < 2 or not isinstance(raw_data, dict):
+            return _normalize_rows(raw_data)
+        matched = [name for name in outputs if name in raw_data]
+        if len(matched) < 2:
+            return _normalize_rows(raw_data)
+        rows: list[Any] = []
+        for name in matched:
+            for value in _normalize_rows(raw_data.get(name)):
+                if isinstance(value, dict):
+                    rows.append({"output_name": name, **deepcopy(value)})
+                else:
+                    rows.append({"output_name": name, "value": deepcopy(value)})
+        return rows
+
+    @staticmethod
+    def _normalize_report_content(
+        decision: dict[str, Any],
+        template_requirements: list[dict[str, Any]] | None = None,
+        *,
+        max_block_items: int | None = None,
+    ) -> dict[str, Any]:
         supplied = decision.get("report_content")
         content = dict(supplied) if isinstance(supplied, dict) else {}
         observations = [
@@ -268,6 +607,7 @@ class DataScienceProcessor:
             "finding": [],
             "evidence": [],
             "implication": [],
+            "recommendation": [],
             "limitation": [],
         }
         for observation in observations:
@@ -310,7 +650,7 @@ class DataScienceProcessor:
             )
         else:
             summary = str(summary_value).strip()
-        return {
+        normalized = {
             "executive_summary": summary,
             "key_findings": items("key_findings", categorized["finding"]),
             "supporting_evidence": items(
@@ -318,15 +658,183 @@ class DataScienceProcessor:
                 categorized["evidence"],
             ),
             "implications": items("implications", categorized["implication"]),
+            "recommendations": items(
+                "recommendations",
+                categorized["recommendation"],
+            ),
             "limitations": items("limitations", categorized["limitation"]),
         }
+        evidence_items = [
+            deepcopy(item)
+            for item in _list_value(content.get("evidence_items"))
+            if isinstance(item, dict)
+            and str(
+                item.get("statement")
+                or item.get("text")
+                or item.get("content")
+                or ""
+            ).strip()
+        ]
+        if not evidence_items:
+            legacy_roles = {
+                "key_findings": "key_findings",
+                "supporting_evidence": "supporting_evidence",
+                "implications": "implication",
+                "recommendations": "recommendation",
+                "limitations": "limitation",
+            }
+            for field, role in legacy_roles.items():
+                for value in normalized[field]:
+                    if isinstance(value, dict):
+                        item = deepcopy(value)
+                    else:
+                        item = {"statement": str(value)}
+                    item.setdefault("kind", role)
+                    item["content_roles"] = list(
+                        dict.fromkeys(
+                            [
+                                str(existing)
+                                for existing in _list_value(
+                                    item.get("content_roles")
+                                )
+                                if str(existing)
+                            ]
+                            + [role]
+                        )
+                    )
+                    evidence_items.append(item)
+
+        for item in evidence_items:
+            roles = [
+                normalize_content_role(value)
+                for value in _list_value(item.get("content_roles"))
+                if normalize_content_role(value)
+            ]
+            kind = normalize_content_role(
+                item.get("kind") or item.get("category") or ""
+            )
+            if kind in {
+                "key_findings",
+                "supporting_evidence",
+                "implication",
+                "recommendation",
+                "limitation",
+                "narrative",
+            }:
+                roles.append(kind)
+            item["content_roles"] = list(dict.fromkeys(roles))
+
+        role_fields = {
+            "key_findings": "key_findings",
+            "supporting_evidence": "supporting_evidence",
+            "implication": "implications",
+            "recommendation": "recommendations",
+            "limitation": "limitations",
+        }
+        for role, field in role_fields.items():
+            if normalized[field]:
+                continue
+            normalized[field] = [
+                deepcopy(item)
+                for item in evidence_items
+                if role in _list_value(item.get("content_roles"))
+            ]
+        normalized["evidence_items"] = evidence_items
+
+        block_content: dict[str, dict[str, Any]] = {}
+        supplied_blocks = content.get("block_content")
+        if isinstance(supplied_blocks, dict):
+            for block_id, payload in supplied_blocks.items():
+                normalized_id = str(block_id).strip()
+                if not normalized_id or not isinstance(payload, dict):
+                    continue
+                block_payload: dict[str, Any] = {}
+                text = payload.get("text")
+                if isinstance(text, str) and text.strip():
+                    block_payload["text"] = text.strip()
+                for field in ("items", "metrics", "rows"):
+                    values = payload.get(field)
+                    if isinstance(values, list):
+                        block_payload[field] = deepcopy(values)
+                if block_payload:
+                    block_content[normalized_id] = block_payload
+
+        def matching_items(role: str) -> list[dict[str, Any]]:
+            canonical = normalize_content_role(role)
+            values = [
+                deepcopy(item)
+                for item in evidence_items
+                if canonical in _list_value(item.get("content_roles"))
+            ]
+            limit = max_block_items or ReportPresentationPolicy().max_insight_items
+            return values[:limit]
+
+        for requirement in template_requirements or []:
+            for block in _list_value(requirement.get("consumer_blocks")):
+                if not isinstance(block, dict):
+                    continue
+                block_id = str(block.get("block_id") or "").strip()
+                if not block_id or block_id in block_content:
+                    continue
+                block_type = str(block.get("type") or "").strip()
+                role = normalize_content_role(block.get("content_role"))
+                selected = matching_items(role)
+                if block_type in {"insight_grid", "evidence_list", "process_flow"}:
+                    if selected:
+                        block_content[block_id] = {"items": selected}
+                elif block_type == "recommendations":
+                    if selected:
+                        block_content[block_id] = {"items": selected}
+                elif block_type == "narrative":
+                    if role == "executive_summary" and summary:
+                        block_content[block_id] = {"text": summary}
+                    else:
+                        if not selected and role == "narrative":
+                            selected = (
+                                matching_items("key_findings")
+                                or matching_items("implication")
+                                or matching_items("supporting_evidence")
+                            )
+                            normalized_summary = re.sub(
+                                r"\s+", " ", summary
+                            ).casefold()
+                            selected = [
+                                item
+                                for item in selected
+                                if re.sub(
+                                    r"\s+",
+                                    " ",
+                                    ": ".join(
+                                        value
+                                        for value in (
+                                            str(item.get("title") or "").strip(),
+                                            str(
+                                                item.get("statement")
+                                                or item.get("text")
+                                                or ""
+                                            ).strip(),
+                                        )
+                                        if value
+                                    ),
+                                )
+                                .casefold()
+                                .strip()
+                                not in normalized_summary
+                            ]
+                        if selected:
+                            block_content[block_id] = {"items": selected}
+        normalized["block_content"] = block_content
+        return normalized
 
     @classmethod
     def _overview_aggregated_data(
         cls,
         supplied: Any,
         rows: list[Any],
+        *,
+        max_metrics: int | None = None,
     ) -> dict[str, Any]:
+        metric_limit = max_metrics or ReportPresentationPolicy().max_kpi_items
         aggregated = supplied if isinstance(supplied, dict) else {}
         source_context = deepcopy(aggregated.get("source_context", {}))
         structural = cls._structural_overview_metrics(rows)
@@ -334,7 +842,7 @@ class DataScienceProcessor:
         normalized_names: set[str] = set()
 
         def add(name: str, value: Any) -> None:
-            if len(selected) >= 4:
+            if len(selected) >= metric_limit:
                 return
             if isinstance(value, bool) or not isinstance(value, (int, float, str)):
                 return
@@ -413,22 +921,117 @@ class DataScienceProcessor:
         for row in _list_value(chart_data.get("rows")):
             if not isinstance(row, dict):
                 continue
-            category = row.get("category")
-            value = row.get("value")
-            if (
-                category is None
-                or isinstance(value, bool)
-                or not isinstance(value, (int, float))
-            ):
+            normalized = {}
+            for raw_name, value in row.items():
+                name = str(raw_name).strip()
+                if not name or isinstance(value, (dict, list, tuple, set)):
+                    continue
+                normalized[name] = value[:200] if isinstance(value, str) else value
+            if not normalized:
                 continue
-            normalized_rows.append(
-                {
-                    "category": str(category)[:80],
-                    "value": value,
-                }
+            normalized_rows.append(normalized)
+
+        fields = list(
+            dict.fromkeys(name for row in normalized_rows for name in row)
+        )
+        encoding = chart_data.get("encoding")
+        encoding = dict(encoding) if isinstance(encoding, dict) else {}
+
+        def declared_fields(*names: str) -> list[str]:
+            values = []
+            for name in names:
+                values.extend(str(item) for item in _list_value(encoding.get(name)))
+            return [item for item in dict.fromkeys(values) if item in fields]
+
+        dimensions = declared_fields("dimension", "dimensions", "x", "x_field")
+        measure_fields = declared_fields("measure", "measures", "y", "y_fields")
+        measure_fields = [
+            field
+            for field in measure_fields
+            if cls._is_analytical_chart_field(field)
+        ]
+        measure_specs = [
+            deepcopy(item)
+            for item in _list_value(chart_data.get("measures"))
+            if isinstance(item, dict) and str(item.get("field") or "") in fields
+            and cls._is_analytical_chart_field(item.get("field"))
+        ]
+        measure_fields.extend(
+            str(item.get("field"))
+            for item in measure_specs
+            if str(item.get("field")) not in measure_fields
+            and cls._is_analytical_chart_field(item.get("field"))
+        )
+        if not dimensions and "category" in fields:
+            dimensions = ["category"]
+        if not measure_fields and "value" in fields:
+            measure_fields = ["value"]
+        if not measure_fields:
+            measure_fields = [
+                field
+                for field in fields
+                if cls._is_analytical_chart_field(field)
+                if any(
+                    isinstance(row.get(field), (int, float))
+                    and not isinstance(row.get(field), bool)
+                    for row in normalized_rows
+                )
+            ]
+        if not dimensions:
+            dimensions = [
+                field
+                for field in fields
+                if field not in measure_fields
+                and any(row.get(field) is not None for row in normalized_rows)
+            ][:1]
+        valid_measures = [
+            field
+            for field in measure_fields
+            if any(
+                isinstance(row.get(field), (int, float))
+                and not isinstance(row.get(field), bool)
+                for row in normalized_rows
             )
-        render = requested and len(normalized_rows) >= 2
+        ][: policy.max_measures]
+        measure_specs = [
+            item
+            for item in measure_specs
+            if str(item.get("field") or "") in valid_measures
+        ]
+        dimension = dimensions[0] if dimensions else ""
+        chart_rows = [
+            row
+            for row in normalized_rows
+            if dimension
+            and row.get(dimension) is not None
+            and any(
+                isinstance(row.get(field), (int, float))
+                and not isinstance(row.get(field), bool)
+                for field in valid_measures
+            )
+        ]
+        render = requested and len(chart_rows) >= 2 and bool(valid_measures)
         reason = str(chart_data.get("reason") or "").strip()
+        primary_spec = next(
+            (
+                item
+                for item in measure_specs
+                if str(item.get("field")) == (valid_measures[0] if valid_measures else "")
+            ),
+            {},
+        )
+        measure = str(
+            chart_data.get("measure")
+            or primary_spec.get("label")
+            or (valid_measures[0] if valid_measures else "")
+        ).strip()[:120]
+        unit = str(chart_data.get("unit") or primary_spec.get("unit") or "").strip()[:80]
+        if render and not measure:
+            render = False
+            reason = (
+                "The chart was omitted because its numeric measure was not "
+                "declared explicitly."
+            )
         if requested and not render and not reason:
             reason = "Fewer than two valid objective-relevant chart rows were supplied."
         if not requested and not reason:
@@ -445,11 +1048,31 @@ class DataScienceProcessor:
                 for item in _list_value(chart_data.get("recommended_types"))
                 if str(item)
             ],
+            "measure": measure,
+            "unit": unit,
             "title": str(chart_data.get("title") or "Evidence distribution")[:120],
             "coverage": str(chart_data.get("coverage") or "materialized_result")[:200],
-            "truncated": len(normalized_rows) > policy.max_dataset_rows,
-            "source_row_count": len(normalized_rows),
-            "rows": normalized_rows[: policy.max_dataset_rows],
+            "encoding": {
+                "dimension": dimension,
+                "measures": valid_measures,
+                **(
+                    {"series": str(encoding.get("series"))}
+                    if str(encoding.get("series") or "") in fields
+                    else {}
+                ),
+            },
+            "measures": measure_specs,
+            "semantic_roles": {
+                "comparison_dimension": dimension,
+                "primary_measure": valid_measures[0] if valid_measures else "",
+                **{
+                    f"measure_{index + 1}": field
+                    for index, field in enumerate(valid_measures)
+                },
+            },
+            "truncated": len(chart_rows) > policy.max_dataset_rows,
+            "source_row_count": len(chart_rows),
+            "rows": chart_rows[: policy.max_dataset_rows],
         }
 
     @classmethod
@@ -477,6 +1100,7 @@ class DataScienceProcessor:
         numeric_fields = [
             field
             for field in fields
+            if cls._is_analytical_chart_field(field)
             if any(
                 isinstance(row.get(field), (int, float))
                 and not isinstance(row.get(field), bool)
@@ -603,6 +1227,8 @@ class DataScienceProcessor:
         rows: list[Any],
         max_rows: int = 12,
         max_string_chars: int = 6000,
+        max_nested_items: int = 50,
+        string_segments: int = 6,
     ) -> list[Any]:
         if not rows:
             return []
@@ -621,29 +1247,47 @@ class DataScienceProcessor:
             if isinstance(value, str) and len(value) > max_string_chars:
                 if max_string_chars < 600:
                     return value[:max_string_chars] + "... [sample truncated]"
-                segment_count = 6
-                segment_size = max_string_chars // segment_count
-                starts = {
-                    round(index * (len(value) - segment_size) / (segment_count - 1))
-                    for index in range(segment_count)
-                }
+                segment_count = string_segments
+                segment_size = max(1, max_string_chars // segment_count)
+                starts = (
+                    {0}
+                    if segment_count == 1
+                    else {
+                        round(
+                            index
+                            * (len(value) - segment_size)
+                            / (segment_count - 1)
+                        )
+                        for index in range(segment_count)
+                    }
+                )
                 return "\n... [sample gap] ...\n".join(
                     value[start : start + segment_size] for start in sorted(starts)
                 )
             if isinstance(value, dict):
                 return {str(key): bounded(item) for key, item in value.items()}
             if isinstance(value, (list, tuple)):
-                if len(value) <= 50:
+                if len(value) <= max_nested_items:
                     selected_items = value
+                elif max_nested_items == 1:
+                    selected_items = [value[0]]
                 else:
                     indices = {
-                        round(index * (len(value) - 1) / 49) for index in range(50)
+                        round(
+                            index * (len(value) - 1) / (max_nested_items - 1)
+                        )
+                        for index in range(max_nested_items)
                     }
                     selected_items = [value[index] for index in sorted(indices)]
                 return [bounded(item) for item in selected_items]
             return deepcopy(value)
 
         return [bounded(row) for row in selected]
+
+    @staticmethod
+    def _is_analytical_chart_field(field: Any) -> bool:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(field).casefold()).strip("_")
+        return bool(normalized) and normalized not in _NON_ANALYTICAL_CHART_FIELDS
 
     @staticmethod
     def _normalize_trusted_analysis(

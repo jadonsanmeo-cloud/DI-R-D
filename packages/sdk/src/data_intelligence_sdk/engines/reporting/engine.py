@@ -17,6 +17,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, START, StateGraph
@@ -36,15 +38,32 @@ from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manag
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.sandbox import SandboxEnvironment
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
+from data_intelligence_sdk.spec.markdown_builder import (
+    extract_presentation_contract,
+)
 from data_intelligence_sdk.tools import create_mcp_tools
 
 from data_intelligence_sdk.engines.reporting.composition import (
     ChartAgent,
     ReportAgent,
 )
+from data_intelligence_sdk.engines.reporting.contracts import (
+    DETERMINISTIC_TRANSFORM_CLASS,
+    GENERATED_CODE_ROUTE,
+    METHOD_HUB_ROUTE,
+    SEMANTIC_ANALYSIS_ROUTE,
+    SEMANTIC_INFERENCE_CLASS,
+    UNSUPPORTED_ROUTE,
+    ReportContractValidator,
+    ToolArgumentBinder,
+    execution_class_for_step,
+)
 from data_intelligence_sdk.engines.reporting.corpus import (
+    CORPUS_GET_FILE_INGESTED_DATA,
+    CORPUS_MATERIALIZED_ROUTE,
     ReportCorpusResolutionError,
     ReportCorpusResolver,
+    ingested_data_analysis_records,
     ingested_document_route,
     is_ingested_data_tool,
 )
@@ -52,6 +71,7 @@ from data_intelligence_sdk.engines.reporting.execution import (
     CodeAgent,
     DataScienceAgent,
     RouterAgent,
+    SemanticAnalysisAgent,
     ToolExecutor,
     ValidatorAgent,
 )
@@ -61,12 +81,14 @@ from data_intelligence_sdk.engines.reporting.planning import (
     TemplatePool,
 )
 from data_intelligence_sdk.engines.reporting.policies import (
+    AnalysisSamplingPolicy,
     ChartPolicy,
     DEFAULT_SOURCE_MATERIALIZATION_REGISTRY,
     LocalePolicy,
     ReportAssetPolicy,
     ReportFormat,
     ReportFormatRegistry,
+    ReportPresentationPolicy,
     SourceMaterializationRegistry,
 )
 from data_intelligence_sdk.engines.reporting.processing import (
@@ -97,6 +119,7 @@ class _DataStepState(TypedDict, total=False):
     step: dict[str, Any]
     spec: ExecutionSpec
     corpus_package: DataCorpusPackage
+    ingested_materializations: dict[str, dict[str, Any]]
     runtime: EngineRuntimeContext
     locale_policy: LocalePolicy
     output_registry: _StepOutputRegistry
@@ -113,6 +136,8 @@ class _DataStepState(TypedDict, total=False):
     sandbox_result: SandboxRunResult
     contract_errors: list[str]
     validation: dict[str, Any]
+    validation_failure_kind: str
+    validation_failure_fingerprints: list[str]
     execution_result: dict[str, Any]
     data_step_result: dict[str, Any]
 
@@ -122,12 +147,14 @@ class _ReportGraphState(TypedDict, total=False):
     spec: ExecutionSpec
     corpus_package: DataCorpusPackage
     ingested_evidence_package: dict[str, Any]
+    ingested_materializations: dict[str, dict[str, Any]]
     runtime: EngineRuntimeContext
     output_registry: _StepOutputRegistry
     user_context: UserContext | None
     report_format: ReportFormat
     locale_policy: LocalePolicy
     plan: dict[str, Any]
+    template_draft_proposal: dict[str, Any]
     template_proposal: dict[str, Any]
     template_instance: dict[str, Any]
     previous_template_instance: dict[str, Any] | None
@@ -178,6 +205,8 @@ class ReportEngine:
         source_registry: SourceMaterializationRegistry | None = None,
         format_registry: ReportFormatRegistry | None = None,
         chart_policy: ChartPolicy | None = None,
+        sampling_policy: AnalysisSamplingPolicy | None = None,
+        presentation_policy: ReportPresentationPolicy | None = None,
         asset_policy: ReportAssetPolicy | None = None,
         default_locale: str = "en",
     ) -> None:
@@ -202,26 +231,41 @@ class ReportEngine:
         )
         self.format_registry = format_registry or ReportFormatRegistry()
         self.chart_policy = chart_policy or ChartPolicy()
+        self.sampling_policy = sampling_policy or AnalysisSamplingPolicy()
+        self.presentation_policy = (
+            presentation_policy or ReportPresentationPolicy()
+        )
         self.asset_policy = asset_policy or ReportAssetPolicy()
         self.default_locale = default_locale
         self.template_pool = template_pool or TemplatePool()
         self.plan_agent = PlanAgent(self.llm, self.source_registry)
         self.template_agent = TemplateAgent(self.llm, self.template_pool)
         self.router_agent = RouterAgent(self.llm, self.source_registry)
+        self.semantic_analysis_agent = SemanticAnalysisAgent(self.llm)
         self.code_agent = CodeAgent(self.llm)
         self.validator_agent = ValidatorAgent(self.llm)
         self.datascience_agent = DataScienceAgent(self.llm)
         self.chart_agent = ChartAgent(self.llm)
-        self.report_agent = ReportAgent(self.llm)
+        self.report_agent = ReportAgent(
+            self.llm,
+            presentation_policy=self.presentation_policy,
+        )
         self.corpus_resolver = ReportCorpusResolver()
         self.tool_executor = ToolExecutor()
         self.input_resolver = _StepInputResolver()
+        self.tool_argument_binder = ToolArgumentBinder()
+        self.contract_validator = ReportContractValidator()
         self.datascience_processor = DataScienceProcessor(
             self.datascience_agent,
             chart_policy=self.chart_policy,
+            sampling_policy=self.sampling_policy,
+            presentation_policy=self.presentation_policy,
         )
         self.chart_input_assembler = ChartInputAssembler()
-        self.renderer = ReportRenderer(asset_policy=self.asset_policy)
+        self.renderer = ReportRenderer(
+            asset_policy=self.asset_policy,
+            presentation_policy=self.presentation_policy,
+        )
         self._data_step_graph = self._build_data_step_graph()
         self._graph = self._build_graph()
 
@@ -286,6 +330,7 @@ class ReportEngine:
             "query_text": input.query.text,
             "spec": spec,
             "corpus_package": corpus_package,
+            "ingested_materializations": {},
             "runtime": runtime,
             "output_registry": _StepOutputRegistry(),
             "user_context": user_context,
@@ -333,10 +378,14 @@ class ReportEngine:
                 ),
                 "workflow": [
                     "Ingested Corpus Resolver",
+                    "Template Architecture Pass",
                     "Plan Agent",
                     "Template Agent",
+                    "Report Contract Validator",
                     "DAG Scheduler",
                     "Router Agent",
+                    "Tool Argument Binder",
+                    "Semantic Analysis Agent",
                     "Code Agent",
                     "Sandbox",
                     "Validator Agent",
@@ -357,17 +406,25 @@ class ReportEngine:
         organization_id: str,
         runtime: EngineRuntimeContext,
         user_context: UserContext | None = None,
+        user_query: UserQuery | None = None,
     ) -> FinalResponse:
         markdown = spec_markdown.strip()
+        resolved_query = user_query or UserQuery(text=markdown)
+        objective = resolved_query.text.strip() or markdown
+        presentation_contract = extract_presentation_contract(markdown)
         output = self.run(
             EngineInput(
-                query=UserQuery(text=markdown),
+                query=resolved_query,
                 spec=ExecutionSpec(
                     intent="report",
-                    objective=markdown,
+                    objective=objective,
                     confirmed=True,
                     engine_hint=self.name,
-                    constraints={"output_format": "markdown"},
+                    constraints={
+                        "output_format": "markdown",
+                        "confirmed_spec_markdown": markdown,
+                        **presentation_contract,
+                    },
                 ),
                 corpus_package=DataCorpusPackage(
                     metadata={"organization_id": organization_id}
@@ -386,6 +443,7 @@ class ReportEngine:
     def _build_graph(self) -> Any:
         graph = StateGraph(_ReportGraphState)
         graph.add_node("resolve_ingested_data", self._graph_resolve_ingested_data)
+        graph.add_node("template_draft", self._graph_template_draft)
         graph.add_node("plan", self._graph_plan)
         graph.add_node("template", self._graph_template)
         graph.add_node("negotiate", self._graph_negotiate)
@@ -397,7 +455,8 @@ class ReportEngine:
         graph.add_node("compose_report", self._graph_compose_report)
         graph.add_node("render", self._graph_render)
         graph.add_edge(START, "resolve_ingested_data")
-        graph.add_edge("resolve_ingested_data", "plan")
+        graph.add_edge("resolve_ingested_data", "template_draft")
+        graph.add_edge("template_draft", "plan")
         graph.add_edge("plan", "template")
         graph.add_edge("template", "negotiate")
         graph.add_conditional_edges(
@@ -490,6 +549,7 @@ class ReportEngine:
             "spec": resolution.spec,
             "corpus_package": resolution.corpus_package,
             "ingested_evidence_package": resolution.evidence_package,
+            "ingested_materializations": resolution.materializations,
         }
 
     def _build_data_step_graph(self) -> Any:
@@ -501,10 +561,16 @@ class ReportEngine:
         )
         graph.add_node("route", self._data_route)
         graph.add_node("execute_existing", self._data_execute_existing)
+        graph.add_node("execute_semantic", self._data_execute_semantic)
         graph.add_node("generate_code", self._data_generate_code)
         graph.add_node("validate_code", self._data_validate_code)
         graph.add_node("execute_generated", self._data_execute_generated)
         graph.add_node("generation_failed", self._data_generation_failed)
+        graph.add_node("execution_unsupported", self._data_execution_unsupported)
+        graph.add_node(
+            "finalize_execution_failure",
+            self._data_finalize_execution_failure,
+        )
         graph.add_node("analyze", self._data_analyze)
         graph.add_edge(START, "resolve_inputs")
         graph.add_conditional_edges(
@@ -515,16 +581,25 @@ class ReportEngine:
                 "failed": "input_resolution_failed",
             },
         )
-        graph.add_edge("input_resolution_failed", "analyze")
+        graph.add_edge("input_resolution_failed", "finalize_execution_failure")
         graph.add_conditional_edges(
             "route",
             self._data_route_choice,
-            {"existing": "execute_existing", "generate": "generate_code"},
+            {
+                "existing": "execute_existing",
+                "semantic": "execute_semantic",
+                "generate": "generate_code",
+                "unsupported": "execution_unsupported",
+            },
         )
         graph.add_conditional_edges(
             "execute_existing",
             self._existing_execution_choice,
-            {"analyze": "analyze", "generate": "generate_code"},
+            {
+                "analyze": "analyze",
+                "generate": "generate_code",
+                "failed": "finalize_execution_failure",
+            },
         )
         graph.add_edge("generate_code", "validate_code")
         graph.add_conditional_edges(
@@ -536,10 +611,73 @@ class ReportEngine:
                 "failed": "generation_failed",
             },
         )
-        graph.add_edge("execute_generated", "analyze")
-        graph.add_edge("generation_failed", "analyze")
+        graph.add_conditional_edges(
+            "execute_generated",
+            self._execution_analysis_choice,
+            {
+                "analyze": "analyze",
+                "failed": "finalize_execution_failure",
+            },
+        )
+        graph.add_conditional_edges(
+            "execute_semantic",
+            self._execution_analysis_choice,
+            {
+                "analyze": "analyze",
+                "failed": "finalize_execution_failure",
+            },
+        )
+        graph.add_edge("generation_failed", "finalize_execution_failure")
+        graph.add_edge("execution_unsupported", "finalize_execution_failure")
+        graph.add_edge("finalize_execution_failure", END)
         graph.add_edge("analyze", END)
         return graph.compile()
+
+    def _graph_template_draft(
+        self,
+        state: _ReportGraphState,
+    ) -> dict[str, Any]:
+        """Select a blueprint and expose its evidence contract before planning."""
+
+        draft_plan = {
+            "schema_version": "1.0",
+            "plan_id": "template-evidence-draft",
+            "revision": 0,
+            "objective": state["spec"].objective,
+            "scope": _scope_from_spec(state["spec"], state["corpus_package"]),
+            "steps": [],
+            "request_resolutions": [],
+            "warnings": [],
+        }
+        proposal = self.template_agent.run(
+            state["spec"],
+            draft_plan,
+            state["corpus_package"],
+            state.get("previous_template_instance"),
+        )
+        feedback = [
+            deepcopy(item)
+            for item in proposal.get("missing_data_requests", [])
+            if isinstance(item, dict)
+        ]
+        state["runtime"].run_context.record_step(
+            "template_architecture",
+            inputs={
+                "objective": state["spec"].objective,
+                "evidence_scope": _scope_from_spec(
+                    state["spec"], state["corpus_package"]
+                ),
+            },
+            outputs={
+                "selection": proposal.get("selection"),
+                "evidence_requirements": feedback,
+            },
+        )
+        return {
+            "template_draft_proposal": proposal,
+            "template_feedback": feedback,
+            "previous_template_instance": proposal.get("template_instance"),
+        }
 
     def _graph_plan(self, state: _ReportGraphState) -> dict[str, Any]:
         plan = self.plan_agent.run(
@@ -548,14 +686,39 @@ class ReportEngine:
             state.get("plan"),
             state.get("template_feedback", []),
         )
+        contract_errors = self.contract_validator.validate_plan(plan)
+        initial_contract_errors = list(contract_errors)
+        if contract_errors:
+            repaired_plan = self.plan_agent.run(
+                state["spec"],
+                state["corpus_package"],
+                plan,
+                state.get("template_feedback", []),
+                validation_feedback=contract_errors,
+            )
+            repaired_errors = self.contract_validator.validate_plan(repaired_plan)
+            if len(repaired_errors) < len(contract_errors):
+                plan = repaired_plan
+                contract_errors = repaired_errors
         state["runtime"].run_context.record_step(
             "plan_agent",
+            status="failed" if contract_errors else "completed",
             inputs={
                 "execution_spec": _execution_spec_payload(state["spec"]),
                 "template_feedback": state.get("template_feedback", []),
             },
-            outputs={"plan": plan},
+            outputs={
+                "plan": plan,
+                "contract_errors": contract_errors,
+                "initial_contract_errors": initial_contract_errors,
+                "repair_attempted": bool(initial_contract_errors),
+            },
         )
+        if contract_errors:
+            raise ValueError(
+                "ReportPlan contract validation failed: "
+                + "; ".join(contract_errors)
+            )
         return {"plan": plan}
 
     def _graph_template(self, state: _ReportGraphState) -> dict[str, Any]:
@@ -573,8 +736,28 @@ class ReportEngine:
             if proposal.get("status") in {"accepted", "partial"}
             else state["plan"]
         )
+        contract_errors = [
+            *self.contract_validator.validate_plan(execution_plan),
+            *self.contract_validator.validate_template_bindings(
+                execution_plan,
+                proposal.get("template_instance", {}),
+            ),
+        ]
+        template_instance = proposal.get("template_instance", {})
+        required_content_roles = sorted(
+            {
+                str(block.get("content_role"))
+                for section in template_instance.get("sections", [])
+                if isinstance(section, dict)
+                for block in section.get("blocks", [])
+                if isinstance(block, dict)
+                and block.get("required")
+                and block.get("content_role")
+            }
+        )
         state["runtime"].run_context.record_step(
             "template_agent",
+            status="failed" if contract_errors else "completed",
             inputs={"plan_revision": state["plan"].get("revision")},
             outputs={
                 "status": proposal.get("status"),
@@ -583,8 +766,18 @@ class ReportEngine:
                 "scheduled_step_ids": [
                     step.get("step_id") for step in execution_plan.get("steps", [])
                 ],
+                "requested_content_roles": template_instance.get(
+                    "provenance", {}
+                ).get("requested_content_roles", []),
+                "required_content_roles": required_content_roles,
+                "contract_errors": contract_errors,
             },
         )
+        if contract_errors:
+            raise ValueError(
+                "Plan–Template contract validation failed: "
+                + "; ".join(contract_errors)
+            )
         return {
             "plan": execution_plan,
             "template_proposal": proposal,
@@ -884,6 +1077,9 @@ class ReportEngine:
                     {
                         "spec": state["spec"],
                         "corpus_package": state["corpus_package"],
+                        "ingested_materializations": state.get(
+                            "ingested_materializations", {}
+                        ),
                         "runtime": state["runtime"],
                         "locale_policy": state.get("locale_policy"),
                         "output_registry": state["output_registry"],
@@ -948,6 +1144,9 @@ class ReportEngine:
                     "step": state["step"],
                     "spec": state["spec"],
                     "corpus_package": state["corpus_package"],
+                    "ingested_materializations": state.get(
+                        "ingested_materializations", {}
+                    ),
                     "runtime": state["runtime"],
                     "output_registry": state["output_registry"],
                     "template_requirements": state.get("template_requirements", []),
@@ -1016,6 +1215,10 @@ class ReportEngine:
             state.get("chart_results", []),
             scoped,
         )
+        finalized_template_instance = self.report_agent.reconcile_template_instance(
+            state.get("template_instance", {}),
+            structured,
+        )
         state["runtime"].run_context.record_step(
             "report_agent",
             inputs={
@@ -1026,9 +1229,19 @@ class ReportEngine:
             outputs={
                 "status": structured.get("status"),
                 "report_format": "structured_report",
+                "rendered_section_count": len(structured.get("sections", [])),
+                "rendered_block_count": sum(
+                    len(section.get("blocks", []))
+                    for section in structured.get("sections", [])
+                    if isinstance(section, dict)
+                ),
             },
         )
-        return {"structured_report": structured, "legacy_markdown": None}
+        return {
+            "structured_report": structured,
+            "template_instance": finalized_template_instance,
+            "legacy_markdown": None,
+        }
 
     def _graph_render(self, state: _ReportGraphState) -> dict[str, Any]:
         rendered = self.renderer.render(
@@ -1089,8 +1302,30 @@ class ReportEngine:
             for binding in matching_bindings
         }
         chart_consumers: dict[str, list[str]] = {item: [] for item in requirement_ids}
+        block_consumers: dict[str, list[dict[str, Any]]] = {
+            item: [] for item in requirement_ids
+        }
         for section in template_instance.get("sections", []):
             for block in section.get("blocks", []):
+                consumer = {
+                    "section_id": str(section.get("section_id") or ""),
+                    "section_title": str(section.get("title") or ""),
+                    "section_purpose": str(section.get("purpose") or ""),
+                    "block_id": str(block.get("block_id") or ""),
+                    "type": str(block.get("type") or ""),
+                    "content_role": str(block.get("content_role") or ""),
+                    "title": str(block.get("title") or ""),
+                    "instructions": [
+                        str(item)
+                        for item in _list_value(block.get("instructions"))
+                        if str(item)
+                    ],
+                    "required": bool(block.get("required", False)),
+                }
+                for requirement_ref in block.get("data_requirement_refs", []):
+                    normalized_ref = str(requirement_ref)
+                    if normalized_ref in block_consumers and consumer["block_id"]:
+                        block_consumers[normalized_ref].append(deepcopy(consumer))
                 slot = block.get("chart_slot")
                 if not isinstance(slot, dict):
                     continue
@@ -1103,6 +1338,7 @@ class ReportEngine:
             {
                 "requirement_ref": requirement_id,
                 "consumer_chart_ids": chart_consumers.get(requirement_id, []),
+                "consumer_blocks": block_consumers.get(requirement_id, []),
                 "expected_output": deepcopy(
                     binding_by_requirement.get(requirement_id, {}).get(
                         "expected_output", {}
@@ -1166,19 +1402,35 @@ class ReportEngine:
     def _data_route(self, state: _DataStepState) -> dict[str, Any]:
         scope = _scope_from_spec(state["spec"], state["corpus_package"])
         inventory = _method_hub_payload(state["runtime"])
-        corpus_route = ingested_document_route(state["step"], inventory)
+        input_contracts = self.input_resolver.contract_payload(
+            state.get("resolved_inputs", [])
+        )
+        corpus_route = ingested_document_route(
+            state["step"],
+            inventory,
+            selected_document_ids=scope["documents"],
+            materialized_document_ids=set(
+                state.get("ingested_materializations", {})
+            ),
+        )
         if corpus_route is not None:
             route = corpus_route
         elif self.force_code_agent:
             route = {
-                "route": "generate_tool",
+                "route": GENERATED_CODE_ROUTE,
                 "tool_name": None,
                 "arguments": {},
+                "argument_bindings": {},
                 "reason": (
                     "ReportEngine force_code_agent mode bypasses existing methods."
                 ),
             }
         else:
+            preflight_exclusions = self._method_tool_preflight_exclusions(
+                inventory,
+                state["step"],
+                state.get("resolved_inputs", []),
+            )
             route = self.router_agent.run(
                 state["step"],
                 (
@@ -1187,104 +1439,251 @@ class ReportEngine:
                     else inventory
                 ),
                 scope["sources"],
-            )
-        if route.get("route") == "existing_tool":
-            tool = next(
-                (
-                    item
-                    for item in inventory
-                    if item.get("tool_name") == route.get("tool_name")
+                *(
+                    (input_contracts, [], preflight_exclusions)
+                    if isinstance(self.router_agent, RouterAgent)
+                    else ()
                 ),
-                {},
             )
-            route["arguments"] = self.input_resolver.merge_arguments(
-                route.get("arguments"),
-                tool.get("parameters_schema", {}),
+        route = self._bind_method_route(
+            route,
+            inventory,
+            state.get("resolved_inputs", []),
+            state["step"],
+        )
+        binding_errors = list(route.get("binding_errors", []))
+        if (
+            binding_errors
+            and isinstance(self.router_agent, RouterAgent)
+            and not self.force_code_agent
+        ):
+            rejected_tool = str(route.get("tool_name") or "")
+            repaired = self.router_agent.run(
+                state["step"],
+                state["runtime"],
+                scope["sources"],
+                input_contracts,
+                binding_errors,
+                [rejected_tool] if rejected_tool else [],
+            )
+            route = self._bind_method_route(
+                repaired,
+                inventory,
                 state.get("resolved_inputs", []),
-                sandbox=False,
+                state["step"],
             )
-            if state.get("resolved_inputs") and not self._tool_accepts_resolved_inputs(
-                tool.get("parameters_schema", {}),
-                state["resolved_inputs"],
-            ):
-                route = {
-                    "route": "generate_tool",
-                    "tool_name": None,
-                    "arguments": {},
-                    "reason": (
-                        "The selected MethodHub tool cannot consume the required "
-                        "upstream step output."
-                    ),
-                }
-            elif (
-                isinstance(self.router_agent, RouterAgent)
-                and not self.router_agent.arguments_match_schema(
-                    route["arguments"],
-                    tool.get("parameters_schema", {}),
-                )
-            ):
-                route = {
-                    "route": "generate_tool",
-                    "tool_name": None,
-                    "arguments": {},
-                    "reason": (
-                        "Resolved inputs do not satisfy the selected MethodHub "
-                        "tool parameter schema."
-                    ),
-                }
+            if route.get("binding_errors"):
+                binding_errors.extend(route["binding_errors"])
+        if route.get("route") == UNSUPPORTED_ROUTE or route.get("binding_errors"):
+            route = self._local_route_after_method_mismatch(
+                state["step"],
+                state.get("resolved_inputs", []),
+                list(dict.fromkeys(binding_errors + route.get("binding_errors", []))),
+                route,
+            )
         state["runtime"].run_context.record_step(
             "router_agent",
             inputs={
                 "step_request": state["step"],
                 "method_hub": inventory,
+                "resolved_input_contracts": input_contracts,
                 "force_code_agent": self.force_code_agent,
             },
             outputs={"route": route},
         )
         return {"route": route}
 
-    @staticmethod
-    def _tool_accepts_resolved_inputs(
-        parameters_schema: Any,
+    def _method_tool_preflight_exclusions(
+        self,
+        inventory: list[dict[str, Any]],
+        step: dict[str, Any],
         resolved_inputs: list[dict[str, Any]],
-    ) -> bool:
-        properties = (
-            parameters_schema.get("properties", {})
-            if isinstance(parameters_schema, dict)
+    ) -> list[str]:
+        """Exclude tools whose schemas cannot consume the PlanStep contract."""
+
+        operation = step.get("operation", {})
+        operation = operation if isinstance(operation, dict) else {}
+        literal_arguments = operation.get("parameters", {})
+        literal_arguments = (
+            deepcopy(literal_arguments)
+            if isinstance(literal_arguments, dict)
             else {}
         )
-        if not isinstance(properties, dict) or not properties:
-            return False
-        property_names = {str(name) for name in properties}
-        for binding in resolved_inputs:
-            raw_names = {
-                str(binding.get("argument_name") or ""),
-                str(binding.get("output_name") or ""),
-                str(binding.get("source_step_id") or ""),
+        requested_capability = str(operation.get("capability") or "").strip()
+        exclusions: list[str] = []
+        for tool in inventory:
+            tool_name = str(tool.get("tool_name") or "")
+            if not tool_name:
+                continue
+            advertised = {
+                str(item).strip()
+                for item in tool.get("capability_names", [])
+                if str(item).strip()
             }
-            candidates = {
-                candidate
-                for raw_name in raw_names
-                if raw_name
-                for candidate in (
-                    raw_name,
-                    re.sub(r"[^A-Za-z0-9_]+", "_", raw_name).strip("_"),
-                    f"{raw_name}_path",
-                )
+            if (
+                requested_capability
+                and advertised
+                and requested_capability not in advertised
+            ):
+                exclusions.append(tool_name)
+                continue
+            binding = self.tool_argument_binder.bind(
+                {
+                    "arguments": literal_arguments,
+                    "argument_bindings": {},
+                },
+                tool.get("parameters_schema", {}),
+                resolved_inputs,
+                sandbox=False,
+            )
+            if binding.errors or (
+                resolved_inputs and not binding.argument_bindings
+            ):
+                exclusions.append(tool_name)
+        return list(dict.fromkeys(exclusions))
+
+    @staticmethod
+    def _local_route_after_method_mismatch(
+        step: dict[str, Any],
+        resolved_inputs: list[dict[str, Any]],
+        binding_errors: list[str],
+        rejected_route: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Repair a Method Hub mismatch using already-materialized inputs.
+
+        A local route is valid only when runtime-owned upstream data is actually
+        available. This prevents an unavailable corpus/database retrieval from
+        being disguised as local code while still allowing a bad tool choice to
+        recover into the PlanStep's semantic or deterministic execution branch.
+        """
+
+        has_local_value = any(
+            isinstance(item, dict)
+            and (
+                item.get("value") is not None
+                or item.get("host_path")
+                or item.get("sandbox_path")
+            )
+            for item in resolved_inputs
+        )
+        if not has_local_value:
+            return {
+                **rejected_route,
+                "route": UNSUPPORTED_ROUTE,
+                "tool_name": None,
+                "arguments": {},
+                "argument_bindings": {},
+                "binding_errors": binding_errors,
+                "reason": (
+                    str(rejected_route.get("reason") or "").strip()
+                    or "No compatible Method Hub contract or local input is available."
+                ),
             }
-            if property_names.intersection(candidates):
-                return True
-        return len(resolved_inputs) == 1 and len(property_names) == 1
+
+        execution_class = execution_class_for_step(step)
+        route_kind = {
+            SEMANTIC_INFERENCE_CLASS: SEMANTIC_ANALYSIS_ROUTE,
+            DETERMINISTIC_TRANSFORM_CLASS: GENERATED_CODE_ROUTE,
+        }.get(execution_class, UNSUPPORTED_ROUTE)
+        if route_kind == UNSUPPORTED_ROUTE:
+            return {
+                **rejected_route,
+                "route": UNSUPPORTED_ROUTE,
+                "tool_name": None,
+                "arguments": {},
+                "argument_bindings": {},
+                "binding_errors": binding_errors,
+                "reason": (
+                    "A Method Hub mismatch cannot be repaired locally because "
+                    f"the PlanStep execution class is {execution_class!r}."
+                ),
+            }
+        return {
+            "route": route_kind,
+            "tool_name": None,
+            "arguments": {},
+            "argument_bindings": {},
+            "binding_errors": binding_errors,
+            "reason": (
+                "No schema-compatible Method Hub binding was available. The "
+                "operation will use the local execution contract because all "
+                "required upstream data is already materialized."
+            ),
+        }
+
+    def _bind_method_route(
+        self,
+        route: dict[str, Any],
+        inventory: list[dict[str, Any]],
+        resolved_inputs: list[dict[str, Any]],
+        step: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = deepcopy(route) if isinstance(route, dict) else {}
+        if normalized.get("route") != METHOD_HUB_ROUTE:
+            return normalized
+        tool = next(
+            (
+                item
+                for item in inventory
+                if item.get("tool_name") == normalized.get("tool_name")
+            ),
+            None,
+        )
+        if tool is None:
+            normalized["binding_errors"] = [
+                f"Method Hub tool {normalized.get('tool_name')!r} is unavailable."
+            ]
+            return normalized
+        operation = step.get("operation")
+        operation = operation if isinstance(operation, dict) else {}
+        requested_capability = str(operation.get("capability") or "").strip()
+        advertised_capabilities = {
+            str(item).strip()
+            for item in tool.get("capability_names", [])
+            if str(item).strip()
+        }
+        if (
+            requested_capability
+            and advertised_capabilities
+            and requested_capability not in advertised_capabilities
+        ):
+            normalized["binding_errors"] = [
+                f"Tool {tool.get('tool_name')!r} does not advertise required "
+                f"capability {requested_capability!r}."
+            ]
+            return normalized
+        binding = self.tool_argument_binder.bind(
+            normalized,
+            tool.get("parameters_schema", {}),
+            resolved_inputs,
+            sandbox=False,
+        )
+        normalized.update(
+            {
+                "arguments": binding.arguments,
+                "argument_bindings": binding.argument_bindings,
+                "binding_errors": list(binding.errors),
+            }
+        )
+        return normalized
 
     def _data_route_choice(self, state: _DataStepState) -> str:
-        return (
-            "existing"
-            if state.get("route", {}).get("route") == "existing_tool"
-            else "generate"
-        )
+        route = state.get("route", {}).get("route")
+        if route in {METHOD_HUB_ROUTE, CORPUS_MATERIALIZED_ROUTE}:
+            return "existing"
+        if route == SEMANTIC_ANALYSIS_ROUTE:
+            return "semantic"
+        if route == UNSUPPORTED_ROUTE:
+            return "unsupported"
+        return "generate"
 
     def _data_execute_existing(self, state: _DataStepState) -> dict[str, Any]:
-        result = self.tool_executor.execute_existing(state["route"], state["runtime"])
+        if state["route"].get("route") == CORPUS_MATERIALIZED_ROUTE:
+            result = self._reuse_ingested_materialization(state)
+        else:
+            result = self.tool_executor.execute_existing(
+                state["route"], state["runtime"]
+            )
         state["runtime"].run_context.record_step(
             "tool_executor",
             status="failed" if result.get("status") == "failed" else "completed",
@@ -1296,17 +1695,190 @@ class ReportEngine:
         )
         return {"execution_result": result}
 
+    def _data_execute_semantic(
+        self,
+        state: _DataStepState,
+    ) -> dict[str, Any]:
+        decision = self.semantic_analysis_agent.run(
+            state["step"],
+            state.get("resolved_inputs", []),
+            state.get("template_requirements", []),
+            state["spec"].objective,
+        )
+        output_schema = self._step_output_schema(state["step"], {})
+        contract_errors = (
+            self._output_contract_errors(decision.get("output"), output_schema)
+            if decision.get("status") != "failed"
+            else []
+        )
+        if contract_errors:
+            decision = self.semantic_analysis_agent.run(
+                state["step"],
+                state.get("resolved_inputs", []),
+                state.get("template_requirements", []),
+                state["spec"].objective,
+                validation_feedback=contract_errors,
+            )
+            contract_errors = (
+                self._output_contract_errors(decision.get("output"), output_schema)
+                if decision.get("status") != "failed"
+                else []
+            )
+        status = str(decision.get("status") or "failed")
+        error = decision.get("error")
+        if contract_errors:
+            status = "failed"
+            error = "Semantic output contract failed: " + "; ".join(
+                contract_errors
+            )
+        result = {
+            "schema_version": "1.0",
+            "status": status,
+            "tool_name": None,
+            "arguments": {
+                "input_refs": [
+                    str(item.get("ref"))
+                    for item in state.get("resolved_inputs", [])
+                    if item.get("ref")
+                ]
+            },
+            "raw_result": decision.get("output"),
+            "error": error,
+            "metadata": {
+                "provider": "semantic_analysis_agent",
+                "evidence_refs": decision.get("evidence_refs", []),
+                "warnings": decision.get("warnings", []),
+                "batch_count": decision.get("batch_count", 0),
+                "contract_errors": contract_errors,
+            },
+        }
+        state["runtime"].run_context.record_step(
+            "semantic_analysis_agent",
+            status="failed" if status == "failed" else "completed",
+            inputs={
+                "step_id": state["step"].get("step_id"),
+                "input_contracts": self.input_resolver.contract_payload(
+                    state.get("resolved_inputs", [])
+                ),
+            },
+            outputs={
+                "status": status,
+                "error": error,
+                "batch_count": decision.get("batch_count", 0),
+                "contract_errors": contract_errors,
+                "evidence_refs": decision.get("evidence_refs", []),
+                "warnings": decision.get("warnings", []),
+            },
+            artifact_refs=[
+                str(item)
+                for item in decision.get("evidence_refs", [])
+                if str(item).startswith("artifact")
+            ],
+        )
+        return {"execution_result": result}
+
+    @staticmethod
+    def _data_execution_unsupported(
+        state: _DataStepState,
+    ) -> dict[str, Any]:
+        return {
+            "execution_result": {
+                "schema_version": "1.0",
+                "status": "failed",
+                "tool_name": None,
+                "arguments": {},
+                "raw_result": None,
+                "error": str(
+                    state.get("route", {}).get("reason")
+                    or "No execution contract supports this PlanStep."
+                ),
+            }
+        }
+
+    @staticmethod
+    def _reuse_ingested_materialization(
+        state: _DataStepState,
+    ) -> dict[str, Any]:
+        arguments = state.get("route", {}).get("arguments", {})
+        arguments = arguments if isinstance(arguments, dict) else {}
+        document_ids = [
+            str(item)
+            for item in arguments.get("document_ids", [])
+            if str(item)
+        ]
+        materializations = state.get("ingested_materializations", {})
+        missing = [
+            document_id
+            for document_id in document_ids
+            if document_id not in materializations
+        ]
+        if missing:
+            return {
+                "schema_version": "1.0",
+                "status": "failed",
+                "tool_name": CORPUS_GET_FILE_INGESTED_DATA,
+                "arguments": {"document_ids": document_ids},
+                "raw_result": None,
+                "error": (
+                    "Resolved ingested-document materialization is unavailable "
+                    f"for: {', '.join(missing)}"
+                ),
+            }
+        records: list[dict[str, Any]] = []
+        for document_id in document_ids:
+            records.extend(
+                ingested_data_analysis_records(materializations[document_id])
+            )
+        return {
+            "schema_version": "1.0",
+            "status": "completed",
+            "tool_name": CORPUS_GET_FILE_INGESTED_DATA,
+            "arguments": {"document_ids": document_ids},
+            "raw_result": records,
+            "error": None,
+            "metadata": {
+                "provider": "report_corpus_resolver",
+                "reused_materialization": True,
+                "document_count": len(document_ids),
+            },
+        }
+
     def _existing_execution_choice(self, state: _DataStepState) -> str:
-        if is_ingested_data_tool(
-            state.get("execution_result", {}).get("tool_name")
-        ):
+        if state.get("route", {}).get("route") == CORPUS_MATERIALIZED_ROUTE:
             return "analyze"
         if (
             state.get("execution_result", {}).get("status") == "failed"
             and self.fallback_to_generation_on_tool_error
+            and any(
+                isinstance(item, dict)
+                and (
+                    item.get("value") is not None
+                    or item.get("host_path")
+                    or item.get("sandbox_path")
+                )
+                for item in state.get("resolved_inputs", [])
+            )
         ):
             return "generate"
-        return "analyze"
+        if is_ingested_data_tool(
+            state.get("execution_result", {}).get("tool_name")
+        ):
+            return "analyze"
+        return (
+            "failed"
+            if state.get("execution_result", {}).get("status") == "failed"
+            else "analyze"
+        )
+
+    @staticmethod
+    def _execution_analysis_choice(state: _DataStepState) -> str:
+        """Analyze only successfully materialized execution results."""
+
+        return (
+            "failed"
+            if state.get("execution_result", {}).get("status") == "failed"
+            else "analyze"
+        )
 
     def _data_generate_code(self, state: _DataStepState) -> dict[str, Any]:
         attempt = int(state.get("attempt", 0)) + 1
@@ -1324,18 +1896,23 @@ class ReportEngine:
             error_logs=state.get("error_logs"),
             validation_feedback=state.get("validation_feedback"),
         )
-        code_spec = self._align_generated_parameter_schema(code_spec)
         code_spec["execution_arguments"] = CodeAgent._normalize_execution_arguments(
             code_spec.get("execution_arguments"),
             code_spec.get("parameters_schema", {}),
             scoped.get("sources", []),
         )
-        code_spec["execution_arguments"] = self.input_resolver.merge_arguments(
-            code_spec.get("execution_arguments"),
+        generated_binding = self.tool_argument_binder.bind(
+            {
+                "arguments": code_spec.get("execution_arguments"),
+                "argument_bindings": code_spec.get("argument_bindings", {}),
+            },
             code_spec.get("parameters_schema", {}),
             state.get("resolved_inputs", []),
             sandbox=True,
         )
+        code_spec["execution_arguments"] = generated_binding.arguments
+        code_spec["argument_bindings"] = generated_binding.argument_bindings
+        code_spec["binding_errors"] = list(generated_binding.errors)
         state["runtime"].run_context.record_step(
             "code_agent",
             inputs={
@@ -1349,113 +1926,24 @@ class ReportEngine:
                 "tool_name": code_spec.get("tool_name"),
                 "language": "python",
                 "source_code": code_spec.get("source_code", ""),
+                "generation_error": code_spec.get("generation_error"),
+                "generation_error_kind": code_spec.get("generation_error_kind"),
+                "binding_errors": code_spec.get("binding_errors", []),
+                "response_fields": code_spec.get("response_fields", []),
             },
         )
         return {"attempt": attempt, "code_spec": code_spec}
-
-    @staticmethod
-    def _align_generated_parameter_schema(
-        code_spec: dict[str, Any],
-    ) -> dict[str, Any]:
-        aligned = deepcopy(code_spec)
-        source = str(aligned.get("source_code") or "")
-        tool_name = str(aligned.get("tool_name") or "")
-        try:
-            syntax_tree = ast.parse(source)
-        except SyntaxError:
-            return aligned
-        function_node = next(
-            (
-                node
-                for node in syntax_tree.body
-                if isinstance(node, ast.FunctionDef) and node.name == tool_name
-            ),
-            None,
-        )
-        if function_node is None:
-            return aligned
-
-        positional = function_node.args.posonlyargs + function_node.args.args
-        parameters = positional + function_node.args.kwonlyargs
-        parameter_names = [argument.arg for argument in parameters]
-        default_count = len(function_node.args.defaults)
-        required_positional = positional[: len(positional) - default_count]
-        required_keyword_only = [
-            argument
-            for argument, default in zip(
-                function_node.args.kwonlyargs,
-                function_node.args.kw_defaults,
-            )
-            if default is None
-        ]
-        required_names = [
-            argument.arg for argument in required_positional + required_keyword_only
-        ]
-
-        raw_schema = aligned.get("parameters_schema")
-        schema = deepcopy(raw_schema) if isinstance(raw_schema, dict) else {}
-        raw_properties = schema.get("properties")
-        properties = (
-            deepcopy(raw_properties) if isinstance(raw_properties, dict) else {}
-        )
-        if function_node.args.kwarg is None:
-            properties = {
-                name: value
-                for name, value in properties.items()
-                if name in parameter_names
-            }
-        for argument in parameters:
-            properties.setdefault(
-                argument.arg,
-                {
-                    "type": ReportEngine._annotation_json_type(
-                        argument.annotation,
-                        argument.arg,
-                    )
-                },
-            )
-        schema.update(
-            {
-                "type": "object",
-                "properties": properties,
-                "required": required_names,
-            }
-        )
-        aligned["parameters_schema"] = schema
-        execution_arguments = aligned.get("execution_arguments")
-        if isinstance(execution_arguments, dict) and function_node.args.kwarg is None:
-            aligned["execution_arguments"] = {
-                name: value
-                for name, value in execution_arguments.items()
-                if name in parameter_names
-            }
-        return aligned
-
-    @staticmethod
-    def _annotation_json_type(
-        annotation: ast.expr | None,
-        parameter_name: str,
-    ) -> str:
-        if parameter_name == "path" or parameter_name.endswith("_path"):
-            return "string"
-        rendered = ast.unparse(annotation).lower() if annotation is not None else ""
-        if "list" in rendered or "sequence" in rendered or "tuple" in rendered:
-            return "array"
-        if "dict" in rendered or "mapping" in rendered:
-            return "object"
-        if "bool" in rendered:
-            return "boolean"
-        if "int" in rendered:
-            return "integer"
-        if "float" in rendered or "number" in rendered:
-            return "number"
-        return "string" if "str" in rendered else "object"
 
     def _data_validate_code(self, state: _DataStepState) -> dict[str, Any]:
         interface = self._build_generated_interface(state["step"], state["code_spec"])
         validation_inputs = state["code_spec"].get("execution_arguments", {})
         if not isinstance(validation_inputs, dict):
             validation_inputs = {}
+        binding_errors = [
+            str(error)
+            for error in state["code_spec"].get("binding_errors", [])
+            if str(error).strip()
+        ]
         argument_errors = self._execution_argument_errors(
             state["code_spec"],
             validation_inputs,
@@ -1464,10 +1952,11 @@ class ReportEngine:
                 state["runtime"].sandbox_environment or SandboxEnvironment()
             ).to_prompt_payload(),
         )
-        if argument_errors:
+        preflight_errors = [*binding_errors, *argument_errors]
+        if preflight_errors:
             sandbox_result = SandboxRunResult(
                 status="failed",
-                error="; ".join(argument_errors),
+                error="; ".join(preflight_errors),
             )
         else:
             sandbox_result = self._validate_in_sandbox(
@@ -1475,14 +1964,14 @@ class ReportEngine:
                 state["runtime"],
                 validation_inputs,
             )
-        contract_errors = list(argument_errors)
+        contract_errors = list(preflight_errors)
+        output_contract_errors: list[str] = []
         if sandbox_result.status == "completed":
-            contract_errors.extend(
-                self._output_contract_errors(
-                    sandbox_result.result,
-                    interface.output_schema,
-                )
+            output_contract_errors = self._output_contract_errors(
+                sandbox_result.result,
+                interface.output_schema,
             )
+            contract_errors.extend(output_contract_errors)
         state["runtime"].run_context.record_step(
             "sandbox_validate",
             status=(
@@ -1504,27 +1993,71 @@ class ReportEngine:
             sandbox_logs = f"{sandbox_logs}\nContract errors: " + "; ".join(
                 contract_errors
             )
-        validation = self.validator_agent.run(
-            _json_dumps(state["step"]),
-            str(state["code_spec"].get("source_code", "")),
-            sandbox_logs,
-            sandbox_result.result,
+        deterministic_pass = (
+            sandbox_result.status == "completed" and not contract_errors
         )
+        if deterministic_pass:
+            validation = self.validator_agent.run(
+                _json_dumps(state["step"]),
+                str(state["code_spec"].get("source_code", "")),
+                sandbox_logs,
+                sandbox_result.result,
+            )
+        else:
+            validation = {
+                "status": "Fail",
+                "feedback": (
+                    "Deterministic validation failed before ValidatorAgent: "
+                    + sandbox_logs
+                ),
+                "validated_code": None,
+                "skipped": True,
+            }
         validator_passed = str(validation.get("status", "")).lower() == "pass"
         effective_pass = (
             sandbox_result.status == "completed"
             and not contract_errors
             and validator_passed
         )
+        failure_kind = self._validation_failure_kind(
+            code_spec=state["code_spec"],
+            binding_errors=binding_errors,
+            argument_errors=argument_errors,
+            sandbox_result=sandbox_result,
+            output_contract_errors=output_contract_errors,
+            validation=validation,
+        )
+        failure_fingerprints = list(
+            state.get("validation_failure_fingerprints", [])
+        )
+        if failure_kind:
+            fingerprint_payload = {
+                "kind": failure_kind,
+                "contract_errors": contract_errors,
+                "sandbox_error": sandbox_result.error,
+                "validator_feedback": validation.get("feedback"),
+            }
+            failure_fingerprints.append(
+                hashlib.sha256(
+                    _json_dumps(fingerprint_payload).encode("utf-8")
+                ).hexdigest()
+            )
         state["runtime"].run_context.record_step(
             "validator_agent",
-            status="completed" if effective_pass else "failed",
+            status=(
+                "completed"
+                if effective_pass
+                else "skipped"
+                if validation.get("skipped")
+                else "failed"
+            ),
             inputs={"step_description": state["step"].get("description", "")},
             outputs={
                 "validation": validation,
                 "sandbox_status": sandbox_result.status,
                 "contract_errors": contract_errors,
                 "effective_pass": effective_pass,
+                "failure_kind": failure_kind,
             },
         )
         return {
@@ -1532,6 +2065,8 @@ class ReportEngine:
             "sandbox_result": sandbox_result,
             "contract_errors": contract_errors,
             "validation": validation,
+            "validation_failure_kind": failure_kind,
+            "validation_failure_fingerprints": failure_fingerprints,
             "error_logs": sandbox_logs,
             "validation_feedback": str(validation.get("feedback", "")),
         }
@@ -1546,9 +2081,56 @@ class ReportEngine:
         )
         if sandbox_passed and validator_passed and not state.get("contract_errors"):
             return "execute"
+        if state.get("validation_failure_kind") in {
+            "input_binding_error",
+            "sandbox_infrastructure_error",
+        }:
+            return "failed"
+        fingerprints = state.get("validation_failure_fingerprints", [])
+        if fingerprints and fingerprints.count(fingerprints[-1]) > 1:
+            return "failed"
         if int(state.get("attempt", 0)) < self.max_generation_attempts:
             return "retry"
         return "failed"
+
+    @staticmethod
+    def _validation_failure_kind(
+        *,
+        code_spec: dict[str, Any],
+        binding_errors: list[str],
+        argument_errors: list[str],
+        sandbox_result: SandboxRunResult,
+        output_contract_errors: list[str],
+        validation: dict[str, Any],
+    ) -> str:
+        if any(
+            "sandbox artifact path" in error.lower()
+            for error in [*binding_errors, *argument_errors]
+        ):
+            return "input_binding_error"
+        if binding_errors or argument_errors:
+            return "generated_contract_error"
+        if sandbox_result.status != "completed":
+            error = str(sandbox_result.error or "").lower()
+            infrastructure_markers = (
+                "sandbox executor is not configured",
+                "connection refused",
+                "connection reset",
+                "service unavailable",
+                "docker daemon",
+                "container is not running",
+                "sandbox is not running",
+            )
+            if any(marker in error for marker in infrastructure_markers):
+                return "sandbox_infrastructure_error"
+            return "generated_runtime_error"
+        if output_contract_errors:
+            return "output_contract_error"
+        if str(validation.get("status", "")).lower() != "pass":
+            return "semantic_validation_error"
+        if code_spec.get("generation_error"):
+            return "generated_contract_error"
+        return ""
 
     def _data_execute_generated(self, state: _DataStepState) -> dict[str, Any]:
         result = self.tool_executor.execute_generated(
@@ -1582,8 +2164,79 @@ class ReportEngine:
                 "error": state.get("error_logs")
                 or state.get("validation_feedback")
                 or "Generated tool validation failed.",
+                "failure_kind": state.get("validation_failure_kind"),
             }
         }
+
+    def _data_finalize_execution_failure(
+        self,
+        state: _DataStepState,
+    ) -> dict[str, Any]:
+        """Create a deterministic failed step result without another LLM call."""
+
+        execution_result = state.get("execution_result", {})
+        step_id = str(state.get("step", {}).get("step_id") or "step")
+        error = str(
+            execution_result.get("error")
+            or "The PlanStep execution contract could not be completed."
+        )
+        result = {
+            "schema_version": "1.0",
+            "status": "failed",
+            "step_id": step_id,
+            "step_result_artifact": {
+                "artifact_ref": f"memory://report/{_safe_id(step_id)}",
+                "outputs": [],
+                "schema": {"shape": "empty", "fields": []},
+                "profile": {
+                    "row_count": 0,
+                    "sampled_profile_rows": 0,
+                    "null_counts": {},
+                    "cardinality": {},
+                    "numeric_stats": {},
+                },
+                "sample": [],
+                "execution_status": "failed",
+                "execution_error": error,
+            },
+            "data_outputs": [],
+            "analysis": {
+                "summary": "",
+                "observations": [],
+                "report_content": {},
+            },
+            "analysis_summary": "",
+            "report_content": {},
+            "aggregated_data": {},
+            "aggregated_metrics": [],
+            "chart_datasets": [],
+            "chart_decision": {
+                "render": False,
+                "reason": "The data step did not produce a validated result.",
+            },
+            "warnings": [error],
+            "lineage": {
+                "source_refs": [
+                    item.get("ref")
+                    for item in _normalize_plan_inputs(
+                        state.get("step", {}).get("inputs")
+                    )
+                    if item.get("ref")
+                ],
+                "upstream_step_refs": [
+                    item.get("step_id")
+                    for item in state.get("upstream_step_results", [])
+                ],
+                "tool_name": execution_result.get("tool_name"),
+            },
+        }
+        state["runtime"].run_context.record_step(
+            "data_step_finalize",
+            status="failed",
+            inputs={"step_id": step_id},
+            outputs={"status": "failed", "error": error},
+        )
+        return {"data_step_result": result}
 
     def _data_analyze(self, state: _DataStepState) -> dict[str, Any]:
         result = self.datascience_processor.process(
@@ -1629,34 +2282,69 @@ class ReportEngine:
         ]
         declared = code_spec.get("output_schema")
         declared = deepcopy(declared) if isinstance(declared, dict) else {}
-        if len(outputs) != 1:
-            return declared or {"type": "object"}
-
-        shape = str(outputs[0].get("shape", "table"))
-        expected_type = (
-            "array"
-            if shape in {"table", "time_series", "category_series"}
-            else "object" if shape == "record" else None
-        )
-        if expected_type is None:
+        if not outputs:
             return declared or {}
-        if declared.get("type") == expected_type:
-            resolved = declared
-        elif expected_type == "array":
-            resolved = {"type": "array", "items": {"type": "object"}}
-        else:
-            resolved = {"type": "object"}
-        semantic_roles = {
-            str(item)
-            for item in _list_value(outputs[0].get("semantic_roles"))
+
+        def schema_for_output(output: dict[str, Any]) -> dict[str, Any]:
+            shape = str(output.get("shape", "table"))
+            expected_type = (
+                "array"
+                if shape in {"array", "list", "table", "time_series", "category_series"}
+                else "object" if shape == "record" else str(output.get("type") or "")
+            )
+            raw_schema = output.get("schema")
+            raw_schema = deepcopy(raw_schema) if isinstance(raw_schema, dict) else {}
+            if raw_schema.get("type") == expected_type:
+                resolved = raw_schema
+            elif expected_type == "array":
+                item_schema: dict[str, Any] = {"type": "object"}
+                columns = raw_schema.get("columns")
+                if isinstance(columns, list) and columns:
+                    item_schema["properties"] = {
+                        str(column): {} for column in columns if str(column)
+                    }
+                resolved = {"type": "array", "items": item_schema}
+            elif expected_type == "object":
+                resolved = {"type": "object"}
+            else:
+                resolved = {"type": expected_type} if expected_type else {}
+            semantic_roles = {
+                str(item)
+                for item in _list_value(output.get("semantic_roles"))
+            }
+            if (
+                resolved.get("type") == "array"
+                and bool(step.get("required", True))
+                and "source_content" in semantic_roles
+            ):
+                resolved.setdefault("minItems", 1)
+            return resolved
+
+        if len(outputs) == 1:
+            expected = schema_for_output(outputs[0])
+            if declared.get("type") == expected.get("type"):
+                resolved = deepcopy(declared)
+                for key, value in expected.items():
+                    resolved.setdefault(key, deepcopy(value))
+                return resolved
+            return expected
+
+        properties = {
+            str(output.get("name")): schema_for_output(output)
+            for output in outputs
+            if output.get("name")
         }
-        if (
-            expected_type == "array"
-            and bool(step.get("required", True))
-            and "source_content" in semantic_roles
-        ):
-            resolved.setdefault("minItems", 1)
-        return resolved
+        required = [
+            str(output.get("name"))
+            for output in outputs
+            if output.get("name") and bool(output.get("required", True))
+        ]
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
 
     def _validate_in_sandbox(
         self,
@@ -1804,12 +2492,24 @@ class ReportEngine:
         schema = code_spec.get("parameters_schema")
         if not isinstance(schema, dict):
             return ["Generated parameters_schema must be an object."]
+        try:
+            Draft202012Validator.check_schema(schema)
+        except SchemaError as exc:
+            return [f"Generated parameters_schema is invalid: {exc.message}"]
+        if schema.get("type") != "object":
+            return ["Generated parameters_schema.type must be 'object'."]
         required = schema.get("required", [])
         if not isinstance(required, list):
             return ["parameters_schema.required must be an array."]
         properties = schema.get("properties", {})
         if not isinstance(properties, dict):
             return ["parameters_schema.properties must be an object."]
+        undeclared_required = sorted(set(map(str, required)) - set(properties))
+        if undeclared_required:
+            return [
+                "parameters_schema.required references undeclared properties: "
+                + ", ".join(undeclared_required)
+            ]
         errors = [
             f"Missing required execution argument: {name}"
             for name in map(str, required)
@@ -1841,6 +2541,11 @@ class ReportEngine:
                 errors.append(f"Missing required function execution argument: {name}")
         if function_node.args.kwarg is None:
             errors.extend(
+                f"parameters_schema declares argument absent from generated "
+                f"function: {name}"
+                for name in sorted(set(map(str, properties)) - function_parameters)
+            )
+            errors.extend(
                 f"Unexpected execution argument for generated function: {name}"
                 for name in arguments
                 if name not in function_parameters
@@ -1849,6 +2554,54 @@ class ReportEngine:
             errors.append(
                 "Generated report tools cannot declare positional-only arguments."
             )
+        for name, value in arguments.items():
+            if not isinstance(value, str):
+                continue
+            parameter_role = ToolArgumentBinder._parameter_role(
+                str(name), properties.get(name, {})
+            )
+            if parameter_role == "path" and re.match(
+                r"^[a-zA-Z][a-zA-Z0-9+.-]*://", value.strip()
+            ):
+                errors.append(
+                    f"Generated-code parameter {name!r} requires a sandbox "
+                    "artifact path; a corpus or remote URI cannot be opened as "
+                    "a local file."
+                )
+        for error in Draft202012Validator(schema).iter_errors(arguments):
+            location = ".".join(str(item) for item in error.absolute_path)
+            errors.append(
+                "Generated execution_arguments do not satisfy parameters_schema"
+                + (f" at {location}" if location else "")
+                + f": {error.message}"
+            )
+        argument_bindings = code_spec.get("argument_bindings")
+        if isinstance(argument_bindings, dict):
+            parameters_by_input: dict[str, list[str]] = {}
+            for parameter_name, declaration in argument_bindings.items():
+                if not isinstance(declaration, dict):
+                    continue
+                input_ref = str(declaration.get("input_ref") or "").strip()
+                if input_ref:
+                    parameters_by_input.setdefault(input_ref, []).append(
+                        str(parameter_name)
+                    )
+            for input_ref, parameter_names in parameters_by_input.items():
+                if len(parameter_names) > 1:
+                    errors.append(
+                        f"Generated function binds upstream input {input_ref!r} "
+                        "to multiple parameters: "
+                        + ", ".join(sorted(parameter_names))
+                        + ". Declare exactly one parameter per resolved input."
+                    )
+        output_schema = code_spec.get("output_schema")
+        if not isinstance(output_schema, dict) or not output_schema:
+            errors.append("Generated output_schema must be a non-empty object.")
+        else:
+            try:
+                Draft202012Validator.check_schema(output_schema)
+            except SchemaError as exc:
+                errors.append(f"Generated output_schema is invalid: {exc.message}")
         return list(dict.fromkeys(errors))
 
     @classmethod
@@ -1858,52 +2611,50 @@ class ReportEngine:
         output_schema: Any,
     ) -> list[str]:
         if not isinstance(output_schema, dict) or not output_schema:
-            return []
-        expected_type = output_schema.get("type")
-        if isinstance(expected_type, list):
-            expected_types = [str(item) for item in expected_type]
-        elif expected_type:
-            expected_types = [str(expected_type)]
-        else:
-            expected_types = []
-        if expected_types and not any(
-            cls._matches_json_type(result, item) for item in expected_types
-        ):
-            rendered = ", ".join(expected_types)
-            return [
-                f"Generated output must have JSON type {rendered}; "
-                f"received {type(result).__name__}."
-            ]
+            return ["Generated output_schema must be a non-empty object."]
+        try:
+            Draft202012Validator.check_schema(output_schema)
+        except SchemaError as exc:
+            return [f"Generated output_schema is invalid: {exc.message}"]
 
         errors: list[str] = []
-        if isinstance(result, list):
-            minimum_items = output_schema.get("minItems")
-            if (
-                isinstance(minimum_items, int)
-                and not isinstance(minimum_items, bool)
-                and len(result) < minimum_items
-            ):
+        validator = Draft202012Validator(output_schema)
+        for error in sorted(
+            validator.iter_errors(result),
+            key=lambda item: tuple(str(part) for part in item.absolute_path),
+        )[:100]:
+            path = list(error.absolute_path)
+            if error.validator == "minItems":
                 errors.append(
                     "Generated output must contain at least "
-                    f"{minimum_items} item(s); received {len(result)}."
+                    f"{error.validator_value} item(s); received "
+                    f"{len(error.instance)}."
                 )
-        if isinstance(result, dict):
-            errors.extend(cls._required_field_errors(result, output_schema))
-        if isinstance(result, list):
-            item_schema = output_schema.get("items")
-            if isinstance(item_schema, dict):
-                for index, item in enumerate(result[:100]):
-                    if not cls._matches_declared_schema(item, item_schema):
-                        errors.append(
-                            f"Generated output item {index} does not match its "
-                            "declared JSON type."
-                        )
-                        continue
-                    if isinstance(item, dict):
-                        errors.extend(
-                            f"Generated output item {index}: {error}"
-                            for error in cls._required_field_errors(item, item_schema)
-                        )
+                continue
+            if error.validator == "type":
+                expected = error.validator_value
+                expected_text = (
+                    ", ".join(map(str, expected))
+                    if isinstance(expected, list)
+                    else str(expected)
+                )
+                if len(path) == 1 and isinstance(path[0], str):
+                    subject = f"Generated output field {path[0]!r}"
+                elif path:
+                    rendered_path = ".".join(map(str, path))
+                    subject = f"Generated output at {rendered_path}"
+                else:
+                    subject = "Generated output"
+                errors.append(
+                    f"{subject} must have JSON type {expected_text}; received "
+                    f"{type(error.instance).__name__}."
+                )
+                continue
+            rendered_path = ".".join(map(str, path)) or "<root>"
+            errors.append(
+                f"Generated output violates output_schema at {rendered_path}: "
+                f"{error.message}"
+            )
         return errors
 
     @staticmethod

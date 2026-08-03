@@ -17,6 +17,7 @@
       "name": "Document Analysis",
       "description": "Format-oriented document analysis retained for explicit requests and compatibility.",
       "domain": "cross-domain documents",
+      "llm_candidate": true,
       "tags": ["document", "pdf", "text", "content", "insight"],
       "source_extensions": [".pdf", ".txt", ".md", ".markdown", ".doc", ".docx", ".rtf"],
       "selection_hint": "Use for PDF, text, Markdown, and document sources that need goal-driven analysis of subjects, claims, evidence, relationships, and limitations."
@@ -28,6 +29,7 @@
       "name": "Data Analysis",
       "description": "Format-oriented tabular analysis retained for explicit requests and compatibility.",
       "domain": "cross-domain datasets",
+      "llm_candidate": true,
       "tags": ["dataset", "table", "csv", "spreadsheet", "analysis"],
       "source_extensions": [".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".jsonl"],
       "selection_hint": "Use for CSV, TSV, Excel, Parquet, and JSON tables that need goal-driven patterns, comparisons, relationships, anomalies, and limitations."
@@ -39,6 +41,7 @@
       "name": "Executive Overview",
       "description": "Compact decision-facing overview for management audiences.",
       "domain": "cross-domain executive",
+      "llm_candidate": true,
       "tags": ["executive", "overview", "kpi", "trend"],
       "source_extensions": [],
       "selection_hint": "Use for concise management reports that prioritize KPIs, movement over time, drivers, and actions."
@@ -50,6 +53,7 @@
       "name": "Time-series Analysis",
       "description": "Evidence-led analysis centered on ordered change and temporal patterns.",
       "domain": "cross-domain temporal",
+      "llm_candidate": true,
       "tags": ["time-series", "trend", "growth", "anomaly"],
       "source_extensions": [],
       "selection_hint": "Use when the report goal centers on how one or more measures change over an ordered time dimension."
@@ -61,6 +65,7 @@
       "name": "Segment Comparison",
       "description": "Comparative analysis of categories, cohorts, regions, products, or other segments.",
       "domain": "cross-domain comparison",
+      "llm_candidate": true,
       "tags": ["comparison", "ranking", "segment", "composition"],
       "source_extensions": [],
       "selection_hint": "Use when the report compares categories, cohorts, regions, products, or other business segments."
