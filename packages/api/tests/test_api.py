@@ -11,6 +11,8 @@ from data_intelligence_api.main import create_app
 from data_intelligence_api.application.query_orchestrator import (
     DelegateToDataFlow,
     DirectGeneralAnswer,
+    DirectGeneralAnswerDelta,
+    DirectGeneralAnswerDone,
 )
 from data_intelligence_api.infrastructure.persistence.memory.run_repository import (
     InMemoryRunRepository,
@@ -178,6 +180,16 @@ class FakeQueryOrchestrator:
             raise self.error
         return self.result
 
+class FakeStreamingQueryOrchestrator:
+    def __init__(self, events) -> None:
+        self.events = events
+        self.calls = []
+
+    async def route_stream(self, query, session_context=None):
+        self.calls.append((query, session_context))
+        for event in self.events:
+            yield event
+
 
 class BackendApiTests(unittest.TestCase):
     def make_app(self, root, *, store=None, factory=None, orchestrator=None):
@@ -257,6 +269,50 @@ class BackendApiTests(unittest.TestCase):
             events[-1][1]["response"]["output_text"],
             "PostgreSQL is a relational database.",
         )
+        self.assertEqual(factory.prepare_calls, 0)
+        self.assertEqual(store.runs, {})
+
+    def test_general_question_forwards_orchestrator_stream_deltas(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            factory = RecordingFactory()
+            store = InMemoryRunRepository()
+            orchestrator = FakeStreamingQueryOrchestrator(
+                [
+                    DirectGeneralAnswerDelta("Postgre"),
+                    DirectGeneralAnswerDelta("SQL"),
+                    DirectGeneralAnswerDone("PostgreSQL"),
+                ]
+            )
+            app = self.make_app(
+                temp_dir,
+                store=store,
+                factory=factory,
+                orchestrator=orchestrator,
+            )
+
+            response = asyncio.run(
+                asgi_request(
+                    app,
+                    "POST",
+                    "/api/v1/responses",
+                    json_body={"input": "What is PostgreSQL?", "session_id": "s-1"},
+                )
+            )
+            events = parse_sse(response)
+
+        self.assertEqual(
+            [event for event, _ in events],
+            [
+                "response.created",
+                "response.output_text.delta",
+                "response.output_text.delta",
+                "response.output_text.done",
+                "response.completed",
+            ],
+        )
+        self.assertEqual(events[1][1]["delta"], "Postgre")
+        self.assertEqual(events[2][1]["delta"], "SQL")
+        self.assertEqual(events[-1][1]["response"]["output_text"], "PostgreSQL")
         self.assertEqual(factory.prepare_calls, 0)
         self.assertEqual(store.runs, {})
 

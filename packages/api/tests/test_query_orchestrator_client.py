@@ -17,6 +17,16 @@ class RecordingTransport:
         self.calls.append((url, headers, payload, timeout_seconds))
         return self.response
 
+class RecordingStreamTransport:
+    def __init__(self, events: list[dict]) -> None:
+        self.events = events
+        self.calls = []
+
+    async def __call__(self, url, headers, payload, timeout_seconds):
+        self.calls.append((url, headers, payload, timeout_seconds))
+        for event in self.events:
+            yield event
+
 
 class OpenAIQueryOrchestratorClientTests(unittest.TestCase):
     def client(self, response: dict):
@@ -29,6 +39,18 @@ class OpenAIQueryOrchestratorClientTests(unittest.TestCase):
                 transport=transport,
             ),
             transport,
+        )
+
+    def stream_client(self, events: list[dict]):
+        stream_transport = RecordingStreamTransport(events)
+        return (
+            OpenAIQueryOrchestratorClient(
+                base_url="https://provider.example/v1",
+                api_key="secret",
+                model="router-model",
+                stream_transport=stream_transport,
+            ),
+            stream_transport,
         )
 
     def test_request_exposes_only_the_delegation_tool(self) -> None:
@@ -92,6 +114,62 @@ class OpenAIQueryOrchestratorClientTests(unittest.TestCase):
         )
 
         self.assertEqual(result.tool_calls, ("__malformed_tool_call__",))
+
+    def test_streams_direct_answer_deltas(self) -> None:
+        client, transport = self.stream_client(
+            [
+                {"choices": [{"delta": {"content": "Postgre"}}]},
+                {"choices": [{"delta": {"content": "SQL"}}]},
+            ]
+        )
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in client.decide_stream(
+                    messages=[],
+                    tool_name="delegate_to_data_flow",
+                )
+            ]
+
+        chunks = asyncio.run(collect())
+
+        self.assertEqual([chunk.text_delta for chunk in chunks], ["Postgre", "SQL"])
+        self.assertTrue(transport.calls[0][2]["stream"])
+
+    def test_streams_delegation_tool_call(self) -> None:
+        client, _ = self.stream_client(
+            [
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "function": {
+                                            "name": "delegate_to_data_flow",
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
+
+        async def collect():
+            return [
+                chunk
+                async for chunk in client.decide_stream(
+                    messages=[],
+                    tool_name="delegate_to_data_flow",
+                )
+            ]
+
+        chunks = asyncio.run(collect())
+
+        self.assertEqual(chunks[0].tool_calls, ("delegate_to_data_flow",))
 
     def test_missing_message_is_rejected(self) -> None:
         client, _ = self.client({"choices": []})

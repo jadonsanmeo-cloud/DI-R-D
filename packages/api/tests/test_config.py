@@ -71,17 +71,31 @@ class ApiSettingsTests(unittest.TestCase):
             Path("/app/configs/custom-openrouter.toml"),
         )
 
-    def test_openrouter_environment_configures_the_compatible_chat_client(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "OPENROUTER_API_KEY": "secret",
-                "OPENROUTER_BASE_URL": "https://openrouter.example/api/v1",
-                "LLM_MODEL_NAME": "qwen/qwen3-30b-a3b",
-            },
-            clear=True,
-        ):
-            settings = ApiSettings.from_env()
+    def test_openrouter_toml_configures_the_compatible_chat_client(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "proxy-openrouter.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[models]",
+                        "[[models.llms]]",
+                        'name = "qwen/qwen3-30b-a3b"',
+                        'provider = "proxy/openrouter"',
+                        'api_base = "https://openrouter.example/api/v1"',
+                        'api_key = "${env:OPENROUTER_API_KEY}"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MODEL_CONFIG_PATH": str(config_path),
+                    "OPENROUTER_API_KEY": "secret",
+                },
+                clear=True,
+            ):
+                settings = ApiSettings.from_env()
 
         self.assertEqual(settings.openai_compatible_api_key, "secret")
         self.assertEqual(

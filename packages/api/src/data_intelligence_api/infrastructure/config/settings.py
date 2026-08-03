@@ -29,7 +29,7 @@ class ApiSettings:
     method_hub_endpoint: str = "http://localhost:8000/mcp"
     openai_compatible_base_url: str = "http://localhost:20128/v1"
     openai_compatible_api_key: str = ""
-    openai_compatible_model: str = "cx/gpt-5.5"
+    openai_compatible_model: str = ""
     default_organization_id: str = "test-org"
 
     @classmethod
@@ -39,6 +39,7 @@ class ApiSettings:
         config_manager = ConfigManager(model_config_path)
         payload = config_manager.load()
         method_hub = config_manager.method_hub_settings()
+        openrouter = config_manager.openrouter_settings()
         api_payload = payload.get("api", {})
         if not isinstance(api_payload, dict):
             raise ValueError("The [api] configuration must be a TOML table.")
@@ -92,14 +93,6 @@ class ApiSettings:
         if max_upload_bytes <= 0:
             raise ValueError("api.max_upload_bytes must be greater than zero.")
 
-        openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-        compatible_base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL")
-        if not compatible_base_url:
-            compatible_base_url = (
-                os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-                if openrouter_key
-                else "http://localhost:20128/v1"
-            )
         return cls(
             data_corpus_root=root,
             cors_origins=origins,
@@ -112,15 +105,9 @@ class ApiSettings:
             artifact_root=Path(config_manager.artifact_settings().root).resolve(),
             method_hub_default_enabled=method_hub.enabled,
             method_hub_endpoint=method_hub.endpoint,
-            openai_compatible_base_url=compatible_base_url,
-            openai_compatible_api_key=(
-                os.getenv("OPENAI_COMPATIBLE_API_KEY") or openrouter_key
-            ),
-            openai_compatible_model=(
-                os.getenv("OPENAI_COMPATIBLE_MODEL")
-                or os.getenv("LLM_MODEL_NAME")
-                or "cx/gpt-5.5"
-            ),
+            openai_compatible_base_url=openrouter.base_url,
+            openai_compatible_api_key=openrouter.api_key or "",
+            openai_compatible_model=openrouter.model or "",
             default_organization_id=os.getenv(
                 "DEFAULT_ORGANIZATION_ID",
                 str(api_payload.get("default_organization_id", "test-org")),

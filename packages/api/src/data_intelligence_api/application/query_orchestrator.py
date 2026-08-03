@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -16,6 +17,14 @@ DELEGATION_TOOL_NAME = "delegate_to_data_flow"
 class DirectGeneralAnswer:
     text: str
 
+@dataclass(frozen=True, slots=True)
+class DirectGeneralAnswerDelta:
+    text: str
+
+@dataclass(frozen=True, slots=True)
+class DirectGeneralAnswerDone:
+    text: str
+
 
 @dataclass(frozen=True, slots=True)
 class DelegateToDataFlow:
@@ -27,6 +36,11 @@ class OrchestratorModelResponse:
     text: str | None = None
     tool_calls: tuple[str, ...] = ()
 
+@dataclass(frozen=True, slots=True)
+class OrchestratorModelStreamChunk:
+    text_delta: str = ""
+    tool_calls: tuple[str, ...] = ()
+
 
 class QueryOrchestratorClient(Protocol):
     async def decide(
@@ -35,6 +49,13 @@ class QueryOrchestratorClient(Protocol):
         messages: list[dict[str, str]],
         tool_name: str,
     ) -> OrchestratorModelResponse: ...
+
+    async def decide_stream(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        tool_name: str,
+    ) -> AsyncIterator[OrchestratorModelStreamChunk]: ...
 
 
 class GeneralQueryOrchestrator:
@@ -84,6 +105,50 @@ class GeneralQueryOrchestrator:
             {"answer_character_count": len(text)},
         )
         return DirectGeneralAnswer(text)
+
+    async def route_stream(
+        self,
+        query: UserQuery,
+        session_context: SessionContext | None = None,
+    ) -> AsyncIterator[
+        DirectGeneralAnswerDelta | DirectGeneralAnswerDone | DelegateToDataFlow
+    ]:
+        self._log("orchestrator.started", {"query_character_count": len(query.text)})
+        text_parts: list[str] = []
+        try:
+            async for chunk in self.client.decide_stream(
+                messages=_build_messages(query, session_context),
+                tool_name=DELEGATION_TOOL_NAME,
+            ):
+                if chunk.tool_calls:
+                    self._log(
+                        "orchestrator.data_flow.delegated",
+                        {
+                            "tool_call_count": len(chunk.tool_calls),
+                            "recognized_tool": DELEGATION_TOOL_NAME
+                            in chunk.tool_calls,
+                        },
+                    )
+                    yield DelegateToDataFlow()
+                    return
+                if chunk.text_delta:
+                    text_parts.append(chunk.text_delta)
+                    yield DirectGeneralAnswerDelta(chunk.text_delta)
+        except Exception as exc:
+            self._log("orchestrator.failed", {"error_type": type(exc).__name__})
+            raise
+
+        text = "".join(text_parts).strip()
+        if not text:
+            error = RuntimeError("Orchestrator returned an empty answer.")
+            self._log("orchestrator.failed", {"error_type": type(error).__name__})
+            raise error
+
+        self._log(
+            "orchestrator.direct_answer.selected",
+            {"answer_character_count": len(text)},
+        )
+        yield DirectGeneralAnswerDone(text)
 
     def _log(self, event: str, payload: dict[str, object]) -> None:
         if self.logger is not None:

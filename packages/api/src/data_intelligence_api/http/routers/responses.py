@@ -63,6 +63,8 @@ from data_intelligence_api.application.workflow import (
 from data_intelligence_api.application.query_orchestrator import (
     DelegateToDataFlow,
     DirectGeneralAnswer,
+    DirectGeneralAnswerDelta,
+    DirectGeneralAnswerDone,
 )
 from data_intelligence_sdk.core.types import FinalResponse
 
@@ -311,10 +313,54 @@ def create_responses_router(
                 },
             )
             try:
-                route = await query_orchestrator.route(  # type: ignore[attr-defined]
-                    invocation.query,
-                    invocation.session_context,
-                )
+                route = None
+                route_stream = getattr(query_orchestrator, "route_stream", None)
+                if callable(route_stream):
+                    async for route_event in route_stream(
+                        invocation.query,
+                        invocation.session_context,
+                    ):
+                        if isinstance(route_event, DirectGeneralAnswerDelta):
+                            yield encode_sse(
+                                "response.output_text.delta",
+                                {
+                                    "type": "response.output_text.delta",
+                                    "response_id": response_id,
+                                    "delta": route_event.text,
+                                },
+                            )
+                            continue
+                        if isinstance(route_event, DirectGeneralAnswerDone):
+                            yield encode_sse(
+                                "response.output_text.done",
+                                {
+                                    "type": "response.output_text.done",
+                                    "response_id": response_id,
+                                    "text": route_event.text,
+                                },
+                            )
+                            yield encode_sse(
+                                "response.completed",
+                                {
+                                    "type": "response.completed",
+                                    "response_id": response_id,
+                                    "response": {
+                                        "id": response_id,
+                                        "status": "completed",
+                                        "output_text": route_event.text,
+                                    },
+                                    "evidence": None,
+                                    "metadata": {"route": "general_direct"},
+                                },
+                            )
+                            return
+                        route = route_event
+                        break
+                else:
+                    route = await query_orchestrator.route(  # type: ignore[attr-defined]
+                        invocation.query,
+                        invocation.session_context,
+                    )
             except Exception as exc:
                 logger.error(
                     "Query orchestration failed error_type=%s",
