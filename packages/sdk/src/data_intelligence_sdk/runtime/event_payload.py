@@ -85,14 +85,22 @@ def bounded_event_preview(
 
 def _generated_code_payload(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     outputs = payload.get("outputs")
-    if not isinstance(outputs, Mapping):
+    inputs = payload.get("inputs")
+    raw_source: Any = None
+    if isinstance(outputs, Mapping):
+        raw_source = outputs.get("source_code")
+    if not raw_source and isinstance(inputs, Mapping):
+        raw_source = inputs.get("source_code")
+    if raw_source is None:
         return None
-    raw_source = outputs.get("source_code")
     if not isinstance(raw_source, str) or not raw_source.strip():
         return None
-    inputs = payload.get("inputs")
     attempt = inputs.get("attempt") if isinstance(inputs, Mapping) else None
-    tool_name = str(outputs.get("tool_name") or "generated_code")
+    tool_name = str(
+        (outputs.get("tool_name") if isinstance(outputs, Mapping) else None)
+        or payload.get("method_name")
+        or "generated_code"
+    )
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_name).strip("-.")
     suffix = f"-attempt-{attempt}" if attempt is not None else ""
     content = raw_source[:_MAX_CODE_STRING]
@@ -145,6 +153,12 @@ def runtime_event_payload(event: Mapping[str, Any]) -> dict[str, Any]:
             key: value
             for key, value in detail_payload["outputs"].items()
             if key not in {"artifact_refs", "source_code"}
+        }
+    if isinstance(detail_payload.get("inputs"), Mapping):
+        detail_payload["inputs"] = {
+            key: value
+            for key, value in detail_payload["inputs"].items()
+            if key != "source_code"
         }
     subscriber_payload = {
         "event_id": event.get("event_id"),

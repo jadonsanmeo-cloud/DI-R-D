@@ -73,7 +73,8 @@ def create_execute_python_tool(runtime: EngineRuntimeContext) -> BaseTool:
                 key: observation[key]
                 for key in ("attempt", "code_artifact_ref")
                 if observation.get(key) is not None
-            },
+            }
+            | {"source_code": code},
             outputs=observation,
             artifact_refs=artifact_refs,
             log_refs=(

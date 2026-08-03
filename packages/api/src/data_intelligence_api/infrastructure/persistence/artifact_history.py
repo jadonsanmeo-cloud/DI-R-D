@@ -41,6 +41,11 @@ class ArtifactHistoryReader:
     ) -> list[dict[str, Any]]:
         events = self._read_events(artifact_ref)
         code_artifacts = self._read_code_artifacts(artifact_ref)
+        code_artifacts_by_ref = {
+            str(code.get("artifact_ref")): code
+            for code in code_artifacts
+            if code.get("artifact_ref")
+        }
         timeline: list[dict[str, Any]] = []
         for event in events:
             event_type = str(event.get("event_type") or "")
@@ -78,6 +83,20 @@ class ArtifactHistoryReader:
                     **runtime_event_payload(event),
                 }
             )
+
+        for event in timeline:
+            if event.get("type") != "pipeline.runtime_event" or event.get("code"):
+                continue
+            details = event.get("details")
+            if not isinstance(details, dict):
+                continue
+            inputs = details.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            code_ref = inputs.get("code_artifact_ref")
+            code = code_artifacts_by_ref.get(str(code_ref))
+            if code is not None:
+                event["code"] = code
 
         missing_code_indexes = [
             index
