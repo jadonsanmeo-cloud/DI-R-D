@@ -350,6 +350,29 @@ class _RetryingSandbox:
         raise AssertionError("Validated generated code must not execute twice.")
 
 
+class _UnavailableSandbox:
+    def __init__(self):
+        self.validate_calls = 0
+
+    def validate(self, interface, inputs, resource_policy=None):
+        del interface, inputs, resource_policy
+        self.validate_calls += 1
+        return SandboxRunResult(
+            status="failed",
+            error="Sandbox executor is not configured.",
+        )
+
+
+class _RepeatedRuntimeFailureSandbox:
+    def __init__(self):
+        self.validate_calls = 0
+
+    def validate(self, interface, inputs, resource_policy=None):
+        del interface, inputs, resource_policy
+        self.validate_calls += 1
+        return SandboxRunResult(status="failed", error="division by zero")
+
+
 class _AlwaysPassValidator:
     def run(self, step_description, source_code, sandbox_logs, sample_data):
         del step_description, source_code, sandbox_logs, sample_data
@@ -1195,7 +1218,7 @@ def load_rows(path: str) -> list[dict]:
         compile(repaired, "<test-generated-source>", "exec")
         self.assertIn("def load_rows", repaired)
 
-    def test_code_agent_canonicalizes_and_fills_source_path_arguments(self):
+    def test_code_agent_only_canonicalizes_declared_source_path_arguments(self):
         source = "G:\\repo\\.uploads\\document.pdf"
 
         arguments = CodeAgent._normalize_execution_arguments(
@@ -1211,9 +1234,9 @@ def load_rows(path: str) -> list[dict]:
         )
 
         self.assertEqual(arguments["pdf_path"], source)
-        self.assertEqual(arguments["backup_path"], source)
+        self.assertNotIn("backup_path", arguments)
 
-    def test_code_agent_replaces_placeholder_source_path(self):
+    def test_code_agent_does_not_replace_placeholder_source_path(self):
         source = "G:\\repo\\.uploads\\document.pdf"
 
         arguments = CodeAgent._normalize_execution_arguments(
@@ -1226,9 +1249,9 @@ def load_rows(path: str) -> list[dict]:
             [source],
         )
 
-        self.assertEqual(arguments["source_path"], source)
+        self.assertEqual(arguments["source_path"], "<source_path>")
 
-    def test_code_agent_binds_multiple_generic_source_paths(self):
+    def test_code_agent_does_not_invent_multiple_source_paths(self):
         sources = [
             "G:\\repo\\.uploads\\records.csv",
             "G:\\repo\\.uploads\\notes.txt",
@@ -1247,7 +1270,7 @@ def load_rows(path: str) -> list[dict]:
             sources,
         )
 
-        self.assertEqual(arguments["paths"], sources)
+        self.assertEqual(arguments["paths"], ["<path>"])
         self.assertEqual(arguments["output_path"], "result.json")
 
     def test_code_agent_fails_closed_when_generation_is_unavailable(self):
@@ -1861,6 +1884,7 @@ def load_rows(path: str) -> list[dict]:
         engine = ReportEngine(llm=object())
         engine.router_agent = _GeneratedRouteAgent()
         engine.code_agent = _SumCodeAgent()
+        engine.validator_agent = _AlwaysPassValidator()
         sandbox = _ExecutingSandbox()
         runtime = EngineRuntimeContext(sandbox_executor=sandbox)
         registry = _StepOutputRegistry()
@@ -1915,6 +1939,7 @@ def load_rows(path: str) -> list[dict]:
         engine.router_agent = _GeneratedRouteAgent()
         code_agent = _ConstantCodeAgent()
         engine.code_agent = code_agent
+        engine.validator_agent = _AlwaysPassValidator()
         sandbox = _RetryingSandbox()
 
         state = engine._data_step_graph.invoke(
@@ -1986,6 +2011,70 @@ def load_rows(path: str) -> list[dict]:
         )
         self.assertEqual(sandbox.validate_calls, 1)
         self.assertEqual(sandbox.run_calls, 0)
+
+    def test_sandbox_infrastructure_failure_does_not_regenerate_code(self):
+        engine = ReportEngine(llm=object(), max_generation_attempts=4)
+        engine.router_agent = _GeneratedRouteAgent()
+        code_agent = _ConstantCodeAgent()
+        engine.code_agent = code_agent
+        sandbox = _UnavailableSandbox()
+
+        state = engine._data_step_graph.invoke(
+            {
+                "step": {
+                    "step_id": "sum",
+                    "description": "Produce a total.",
+                    "depends_on": [],
+                    "inputs": [],
+                    "outputs": [{"name": "totals", "shape": "table"}],
+                },
+                "spec": ExecutionSpec(intent="report", objective="Calculate a total"),
+                "corpus_package": DataCorpusPackage(),
+                "runtime": EngineRuntimeContext(sandbox_executor=sandbox),
+                "output_registry": _StepOutputRegistry(),
+                "template_requirements": [],
+                "upstream_step_results": [],
+                "attempt": 0,
+            },
+            config={"recursion_limit": 30},
+        )
+
+        self.assertEqual(state["data_step_result"]["status"], "failed")
+        self.assertEqual(state["validation_failure_kind"], "sandbox_infrastructure_error")
+        self.assertEqual(code_agent.calls, 1)
+        self.assertEqual(sandbox.validate_calls, 1)
+
+    def test_identical_generated_runtime_failure_stops_retry_early(self):
+        engine = ReportEngine(llm=object(), max_generation_attempts=4)
+        engine.router_agent = _GeneratedRouteAgent()
+        code_agent = _ConstantCodeAgent()
+        engine.code_agent = code_agent
+        sandbox = _RepeatedRuntimeFailureSandbox()
+
+        state = engine._data_step_graph.invoke(
+            {
+                "step": {
+                    "step_id": "sum",
+                    "description": "Produce a total.",
+                    "depends_on": [],
+                    "inputs": [],
+                    "outputs": [{"name": "totals", "shape": "table"}],
+                },
+                "spec": ExecutionSpec(intent="report", objective="Calculate a total"),
+                "corpus_package": DataCorpusPackage(),
+                "runtime": EngineRuntimeContext(sandbox_executor=sandbox),
+                "output_registry": _StepOutputRegistry(),
+                "template_requirements": [],
+                "upstream_step_results": [],
+                "attempt": 0,
+            },
+            config={"recursion_limit": 30},
+        )
+
+        self.assertEqual(state["data_step_result"]["status"], "failed")
+        self.assertEqual(state["validation_failure_kind"], "generated_runtime_error")
+        self.assertEqual(code_agent.calls, 2)
+        self.assertEqual(sandbox.validate_calls, 2)
 
 
 if __name__ == "__main__":

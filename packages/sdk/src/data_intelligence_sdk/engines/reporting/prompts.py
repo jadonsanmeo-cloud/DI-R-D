@@ -360,7 +360,8 @@ one validated PlanStep.
    provided `argument_name`; when `sandbox_path` exists, declare an
    `<argument_name>_path` string parameter and load the JSON artifact from that path.
    Use `json_type`, `schema`, and `profile` exactly as declared; table artifacts
-   are JSON arrays of row objects.
+   are JSON arrays of row objects. Choose exactly one representation for each
+   resolved input; never declare both the value parameter and its path alias.
    Use a flat function signature with one named parameter per input. Never wrap
    those parameters in a catch-all `execution_arguments`, `arguments`, `payload`,
    or similarly invented container parameter.
@@ -377,6 +378,18 @@ one validated PlanStep.
     one top-level function with exactly that name.
 13. Import only standard-library modules or packages declared by
     `sandbox_environment.available_packages`. Never invent a package alias.
+14. `parameters_schema` must be valid JSON Schema for an object and must declare
+    every function parameter under `properties`. Its `required` fields must match
+    parameters that have no Python default. Do not add parameters that the function
+    cannot consume.
+15. `output_schema` must be valid JSON Schema and describe the returned value,
+    including item fields and required fields when they are known from the PlanStep.
+16. Never put `corpus://`, `artifact://`, HTTP, or another URI into a file/path
+    argument. Use only a supplied sandbox path. If no usable input value or sandbox
+    path exists, do not invent one.
+17. Do not wrap the JSON response in Markdown and do not substitute alternate field
+    names. Every field listed below is mandatory, including empty
+    `execution_arguments` when runtime binding supplies every input.
 
 # OUTPUT
 Return only JSON with `tool_name`, `parameters_schema`, `output_schema`,
@@ -409,7 +422,8 @@ and the original PlanStep.
    collection. A read failure is not a valid no-data result.
 
 # OUTPUT
-Return only JSON with `status` (`Pass`, `Fail`, or `NeedsRevision`) and `feedback`.
+Return only JSON with `status` (`Pass` or `Fail`) and `feedback`. An invalid or
+missing decision is treated as `Fail`.
 """.strip()
 
 DATASCIENCE_AGENT_PROMPT = """

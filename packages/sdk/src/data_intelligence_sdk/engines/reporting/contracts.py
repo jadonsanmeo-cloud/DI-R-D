@@ -169,6 +169,14 @@ class ToolArgumentBinder:
                     "the artifact_path adapter."
                 )
                 continue
+            if adapter == "artifact_path" and sandbox and not binding.get(
+                "sandbox_path"
+            ):
+                errors.append(
+                    f"Input {binding_ref!r} has no sandbox artifact path for "
+                    f"generated-code parameter {name!r}."
+                )
+                continue
             value = self._adapt_value(
                 binding,
                 adapter,
@@ -314,6 +322,12 @@ class ToolArgumentBinder:
             if not isinstance(binding, dict) or not binding.get("ref"):
                 continue
             for adapter in ARGUMENT_ADAPTERS:
+                if (
+                    adapter == "artifact_path"
+                    and sandbox
+                    and not binding.get("sandbox_path")
+                ):
+                    continue
                 if not self._binding_contract_matches_schema(
                     binding,
                     adapter,

@@ -17,6 +17,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, START, StateGraph
@@ -134,6 +136,8 @@ class _DataStepState(TypedDict, total=False):
     sandbox_result: SandboxRunResult
     contract_errors: list[str]
     validation: dict[str, Any]
+    validation_failure_kind: str
+    validation_failure_fingerprints: list[str]
     execution_result: dict[str, Any]
     data_step_result: dict[str, Any]
 
@@ -1892,7 +1896,6 @@ class ReportEngine:
             error_logs=state.get("error_logs"),
             validation_feedback=state.get("validation_feedback"),
         )
-        code_spec = self._align_generated_parameter_schema(code_spec)
         code_spec["execution_arguments"] = CodeAgent._normalize_execution_arguments(
             code_spec.get("execution_arguments"),
             code_spec.get("parameters_schema", {}),
@@ -1924,114 +1927,23 @@ class ReportEngine:
                 "language": "python",
                 "source_code": code_spec.get("source_code", ""),
                 "generation_error": code_spec.get("generation_error"),
+                "generation_error_kind": code_spec.get("generation_error_kind"),
+                "binding_errors": code_spec.get("binding_errors", []),
                 "response_fields": code_spec.get("response_fields", []),
             },
         )
         return {"attempt": attempt, "code_spec": code_spec}
-
-    @staticmethod
-    def _align_generated_parameter_schema(
-        code_spec: dict[str, Any],
-    ) -> dict[str, Any]:
-        aligned = deepcopy(code_spec)
-        source = str(aligned.get("source_code") or "")
-        tool_name = str(aligned.get("tool_name") or "")
-        try:
-            syntax_tree = ast.parse(source)
-        except SyntaxError:
-            return aligned
-        function_node = next(
-            (
-                node
-                for node in syntax_tree.body
-                if isinstance(node, ast.FunctionDef) and node.name == tool_name
-            ),
-            None,
-        )
-        if function_node is None:
-            return aligned
-
-        positional = function_node.args.posonlyargs + function_node.args.args
-        parameters = positional + function_node.args.kwonlyargs
-        parameter_names = [argument.arg for argument in parameters]
-        default_count = len(function_node.args.defaults)
-        required_positional = positional[: len(positional) - default_count]
-        required_keyword_only = [
-            argument
-            for argument, default in zip(
-                function_node.args.kwonlyargs,
-                function_node.args.kw_defaults,
-            )
-            if default is None
-        ]
-        required_names = [
-            argument.arg for argument in required_positional + required_keyword_only
-        ]
-
-        raw_schema = aligned.get("parameters_schema")
-        schema = deepcopy(raw_schema) if isinstance(raw_schema, dict) else {}
-        raw_properties = schema.get("properties")
-        properties = (
-            deepcopy(raw_properties) if isinstance(raw_properties, dict) else {}
-        )
-        if function_node.args.kwarg is None:
-            properties = {
-                name: value
-                for name, value in properties.items()
-                if name in parameter_names
-            }
-        for argument in parameters:
-            properties.setdefault(
-                argument.arg,
-                {
-                    "type": ReportEngine._annotation_json_type(
-                        argument.annotation,
-                        argument.arg,
-                    )
-                },
-            )
-        schema.update(
-            {
-                "type": "object",
-                "properties": properties,
-                "required": required_names,
-            }
-        )
-        aligned["parameters_schema"] = schema
-        execution_arguments = aligned.get("execution_arguments")
-        if isinstance(execution_arguments, dict) and function_node.args.kwarg is None:
-            aligned["execution_arguments"] = {
-                name: value
-                for name, value in execution_arguments.items()
-                if name in parameter_names
-            }
-        return aligned
-
-    @staticmethod
-    def _annotation_json_type(
-        annotation: ast.expr | None,
-        parameter_name: str,
-    ) -> str:
-        if parameter_name == "path" or parameter_name.endswith("_path"):
-            return "string"
-        rendered = ast.unparse(annotation).lower() if annotation is not None else ""
-        if "list" in rendered or "sequence" in rendered or "tuple" in rendered:
-            return "array"
-        if "dict" in rendered or "mapping" in rendered:
-            return "object"
-        if "bool" in rendered:
-            return "boolean"
-        if "int" in rendered:
-            return "integer"
-        if "float" in rendered or "number" in rendered:
-            return "number"
-        return "string" if "str" in rendered else "object"
 
     def _data_validate_code(self, state: _DataStepState) -> dict[str, Any]:
         interface = self._build_generated_interface(state["step"], state["code_spec"])
         validation_inputs = state["code_spec"].get("execution_arguments", {})
         if not isinstance(validation_inputs, dict):
             validation_inputs = {}
+        binding_errors = [
+            str(error)
+            for error in state["code_spec"].get("binding_errors", [])
+            if str(error).strip()
+        ]
         argument_errors = self._execution_argument_errors(
             state["code_spec"],
             validation_inputs,
@@ -2040,14 +1952,11 @@ class ReportEngine:
                 state["runtime"].sandbox_environment or SandboxEnvironment()
             ).to_prompt_payload(),
         )
-        argument_errors = [
-            *state["code_spec"].get("binding_errors", []),
-            *argument_errors,
-        ]
-        if argument_errors:
+        preflight_errors = [*binding_errors, *argument_errors]
+        if preflight_errors:
             sandbox_result = SandboxRunResult(
                 status="failed",
-                error="; ".join(argument_errors),
+                error="; ".join(preflight_errors),
             )
         else:
             sandbox_result = self._validate_in_sandbox(
@@ -2055,14 +1964,14 @@ class ReportEngine:
                 state["runtime"],
                 validation_inputs,
             )
-        contract_errors = list(argument_errors)
+        contract_errors = list(preflight_errors)
+        output_contract_errors: list[str] = []
         if sandbox_result.status == "completed":
-            contract_errors.extend(
-                self._output_contract_errors(
-                    sandbox_result.result,
-                    interface.output_schema,
-                )
+            output_contract_errors = self._output_contract_errors(
+                sandbox_result.result,
+                interface.output_schema,
             )
+            contract_errors.extend(output_contract_errors)
         state["runtime"].run_context.record_step(
             "sandbox_validate",
             status=(
@@ -2084,27 +1993,71 @@ class ReportEngine:
             sandbox_logs = f"{sandbox_logs}\nContract errors: " + "; ".join(
                 contract_errors
             )
-        validation = self.validator_agent.run(
-            _json_dumps(state["step"]),
-            str(state["code_spec"].get("source_code", "")),
-            sandbox_logs,
-            sandbox_result.result,
+        deterministic_pass = (
+            sandbox_result.status == "completed" and not contract_errors
         )
+        if deterministic_pass:
+            validation = self.validator_agent.run(
+                _json_dumps(state["step"]),
+                str(state["code_spec"].get("source_code", "")),
+                sandbox_logs,
+                sandbox_result.result,
+            )
+        else:
+            validation = {
+                "status": "Fail",
+                "feedback": (
+                    "Deterministic validation failed before ValidatorAgent: "
+                    + sandbox_logs
+                ),
+                "validated_code": None,
+                "skipped": True,
+            }
         validator_passed = str(validation.get("status", "")).lower() == "pass"
         effective_pass = (
             sandbox_result.status == "completed"
             and not contract_errors
             and validator_passed
         )
+        failure_kind = self._validation_failure_kind(
+            code_spec=state["code_spec"],
+            binding_errors=binding_errors,
+            argument_errors=argument_errors,
+            sandbox_result=sandbox_result,
+            output_contract_errors=output_contract_errors,
+            validation=validation,
+        )
+        failure_fingerprints = list(
+            state.get("validation_failure_fingerprints", [])
+        )
+        if failure_kind:
+            fingerprint_payload = {
+                "kind": failure_kind,
+                "contract_errors": contract_errors,
+                "sandbox_error": sandbox_result.error,
+                "validator_feedback": validation.get("feedback"),
+            }
+            failure_fingerprints.append(
+                hashlib.sha256(
+                    _json_dumps(fingerprint_payload).encode("utf-8")
+                ).hexdigest()
+            )
         state["runtime"].run_context.record_step(
             "validator_agent",
-            status="completed" if effective_pass else "failed",
+            status=(
+                "completed"
+                if effective_pass
+                else "skipped"
+                if validation.get("skipped")
+                else "failed"
+            ),
             inputs={"step_description": state["step"].get("description", "")},
             outputs={
                 "validation": validation,
                 "sandbox_status": sandbox_result.status,
                 "contract_errors": contract_errors,
                 "effective_pass": effective_pass,
+                "failure_kind": failure_kind,
             },
         )
         return {
@@ -2112,6 +2065,8 @@ class ReportEngine:
             "sandbox_result": sandbox_result,
             "contract_errors": contract_errors,
             "validation": validation,
+            "validation_failure_kind": failure_kind,
+            "validation_failure_fingerprints": failure_fingerprints,
             "error_logs": sandbox_logs,
             "validation_feedback": str(validation.get("feedback", "")),
         }
@@ -2126,9 +2081,56 @@ class ReportEngine:
         )
         if sandbox_passed and validator_passed and not state.get("contract_errors"):
             return "execute"
+        if state.get("validation_failure_kind") in {
+            "input_binding_error",
+            "sandbox_infrastructure_error",
+        }:
+            return "failed"
+        fingerprints = state.get("validation_failure_fingerprints", [])
+        if fingerprints and fingerprints.count(fingerprints[-1]) > 1:
+            return "failed"
         if int(state.get("attempt", 0)) < self.max_generation_attempts:
             return "retry"
         return "failed"
+
+    @staticmethod
+    def _validation_failure_kind(
+        *,
+        code_spec: dict[str, Any],
+        binding_errors: list[str],
+        argument_errors: list[str],
+        sandbox_result: SandboxRunResult,
+        output_contract_errors: list[str],
+        validation: dict[str, Any],
+    ) -> str:
+        if any(
+            "sandbox artifact path" in error.lower()
+            for error in [*binding_errors, *argument_errors]
+        ):
+            return "input_binding_error"
+        if binding_errors or argument_errors:
+            return "generated_contract_error"
+        if sandbox_result.status != "completed":
+            error = str(sandbox_result.error or "").lower()
+            infrastructure_markers = (
+                "sandbox executor is not configured",
+                "connection refused",
+                "connection reset",
+                "service unavailable",
+                "docker daemon",
+                "container is not running",
+                "sandbox is not running",
+            )
+            if any(marker in error for marker in infrastructure_markers):
+                return "sandbox_infrastructure_error"
+            return "generated_runtime_error"
+        if output_contract_errors:
+            return "output_contract_error"
+        if str(validation.get("status", "")).lower() != "pass":
+            return "semantic_validation_error"
+        if code_spec.get("generation_error"):
+            return "generated_contract_error"
+        return ""
 
     def _data_execute_generated(self, state: _DataStepState) -> dict[str, Any]:
         result = self.tool_executor.execute_generated(
@@ -2162,6 +2164,7 @@ class ReportEngine:
                 "error": state.get("error_logs")
                 or state.get("validation_feedback")
                 or "Generated tool validation failed.",
+                "failure_kind": state.get("validation_failure_kind"),
             }
         }
 
@@ -2489,12 +2492,24 @@ class ReportEngine:
         schema = code_spec.get("parameters_schema")
         if not isinstance(schema, dict):
             return ["Generated parameters_schema must be an object."]
+        try:
+            Draft202012Validator.check_schema(schema)
+        except SchemaError as exc:
+            return [f"Generated parameters_schema is invalid: {exc.message}"]
+        if schema.get("type") != "object":
+            return ["Generated parameters_schema.type must be 'object'."]
         required = schema.get("required", [])
         if not isinstance(required, list):
             return ["parameters_schema.required must be an array."]
         properties = schema.get("properties", {})
         if not isinstance(properties, dict):
             return ["parameters_schema.properties must be an object."]
+        undeclared_required = sorted(set(map(str, required)) - set(properties))
+        if undeclared_required:
+            return [
+                "parameters_schema.required references undeclared properties: "
+                + ", ".join(undeclared_required)
+            ]
         errors = [
             f"Missing required execution argument: {name}"
             for name in map(str, required)
@@ -2526,6 +2541,11 @@ class ReportEngine:
                 errors.append(f"Missing required function execution argument: {name}")
         if function_node.args.kwarg is None:
             errors.extend(
+                f"parameters_schema declares argument absent from generated "
+                f"function: {name}"
+                for name in sorted(set(map(str, properties)) - function_parameters)
+            )
+            errors.extend(
                 f"Unexpected execution argument for generated function: {name}"
                 for name in arguments
                 if name not in function_parameters
@@ -2534,6 +2554,54 @@ class ReportEngine:
             errors.append(
                 "Generated report tools cannot declare positional-only arguments."
             )
+        for name, value in arguments.items():
+            if not isinstance(value, str):
+                continue
+            parameter_role = ToolArgumentBinder._parameter_role(
+                str(name), properties.get(name, {})
+            )
+            if parameter_role == "path" and re.match(
+                r"^[a-zA-Z][a-zA-Z0-9+.-]*://", value.strip()
+            ):
+                errors.append(
+                    f"Generated-code parameter {name!r} requires a sandbox "
+                    "artifact path; a corpus or remote URI cannot be opened as "
+                    "a local file."
+                )
+        for error in Draft202012Validator(schema).iter_errors(arguments):
+            location = ".".join(str(item) for item in error.absolute_path)
+            errors.append(
+                "Generated execution_arguments do not satisfy parameters_schema"
+                + (f" at {location}" if location else "")
+                + f": {error.message}"
+            )
+        argument_bindings = code_spec.get("argument_bindings")
+        if isinstance(argument_bindings, dict):
+            parameters_by_input: dict[str, list[str]] = {}
+            for parameter_name, declaration in argument_bindings.items():
+                if not isinstance(declaration, dict):
+                    continue
+                input_ref = str(declaration.get("input_ref") or "").strip()
+                if input_ref:
+                    parameters_by_input.setdefault(input_ref, []).append(
+                        str(parameter_name)
+                    )
+            for input_ref, parameter_names in parameters_by_input.items():
+                if len(parameter_names) > 1:
+                    errors.append(
+                        f"Generated function binds upstream input {input_ref!r} "
+                        "to multiple parameters: "
+                        + ", ".join(sorted(parameter_names))
+                        + ". Declare exactly one parameter per resolved input."
+                    )
+        output_schema = code_spec.get("output_schema")
+        if not isinstance(output_schema, dict) or not output_schema:
+            errors.append("Generated output_schema must be a non-empty object.")
+        else:
+            try:
+                Draft202012Validator.check_schema(output_schema)
+            except SchemaError as exc:
+                errors.append(f"Generated output_schema is invalid: {exc.message}")
         return list(dict.fromkeys(errors))
 
     @classmethod
@@ -2543,92 +2611,50 @@ class ReportEngine:
         output_schema: Any,
     ) -> list[str]:
         if not isinstance(output_schema, dict) or not output_schema:
-            return []
-        expected_type = output_schema.get("type")
-        if isinstance(expected_type, list):
-            expected_types = [str(item) for item in expected_type]
-        elif expected_type:
-            expected_types = [str(expected_type)]
-        else:
-            expected_types = []
-        if expected_types and not any(
-            cls._matches_json_type(result, item) for item in expected_types
-        ):
-            rendered = ", ".join(expected_types)
-            return [
-                f"Generated output must have JSON type {rendered}; "
-                f"received {type(result).__name__}."
-            ]
+            return ["Generated output_schema must be a non-empty object."]
+        try:
+            Draft202012Validator.check_schema(output_schema)
+        except SchemaError as exc:
+            return [f"Generated output_schema is invalid: {exc.message}"]
 
         errors: list[str] = []
-        if isinstance(result, list):
-            minimum_items = output_schema.get("minItems")
-            if (
-                isinstance(minimum_items, int)
-                and not isinstance(minimum_items, bool)
-                and len(result) < minimum_items
-            ):
+        validator = Draft202012Validator(output_schema)
+        for error in sorted(
+            validator.iter_errors(result),
+            key=lambda item: tuple(str(part) for part in item.absolute_path),
+        )[:100]:
+            path = list(error.absolute_path)
+            if error.validator == "minItems":
                 errors.append(
                     "Generated output must contain at least "
-                    f"{minimum_items} item(s); received {len(result)}."
+                    f"{error.validator_value} item(s); received "
+                    f"{len(error.instance)}."
                 )
-        if isinstance(result, dict):
-            errors.extend(cls._required_field_errors(result, output_schema))
-            properties = output_schema.get("properties")
-            if isinstance(properties, dict):
-                for name, property_schema in properties.items():
-                    if name not in result or not isinstance(property_schema, dict):
-                        continue
-                    if not cls._matches_declared_schema(
-                        result[name], property_schema
-                    ):
-                        expected = property_schema.get("type")
-                        errors.append(
-                            f"Generated output field {str(name)!r} must have "
-                            f"JSON type {expected}; received "
-                            f"{type(result[name]).__name__}."
-                        )
-                        continue
-                    if isinstance(result[name], dict):
-                        errors.extend(
-                            f"Generated output field {str(name)!r}: {error}"
-                            for error in cls._required_field_errors(
-                                result[name], property_schema
-                            )
-                        )
-                    if isinstance(result[name], list):
-                        item_schema = property_schema.get("items")
-                        if isinstance(item_schema, dict):
-                            for index, item in enumerate(result[name][:100]):
-                                if not cls._matches_declared_schema(
-                                    item, item_schema
-                                ):
-                                    errors.append(
-                                        f"Generated output field {str(name)!r} "
-                                        f"item {index} does not match its declared "
-                                        "JSON type."
-                                    )
-                if output_schema.get("additionalProperties") is False:
-                    unexpected = sorted(set(result) - set(map(str, properties)))
-                    errors.extend(
-                        f"Generated output contains undeclared field {name!r}."
-                        for name in unexpected
-                    )
-        if isinstance(result, list):
-            item_schema = output_schema.get("items")
-            if isinstance(item_schema, dict):
-                for index, item in enumerate(result[:100]):
-                    if not cls._matches_declared_schema(item, item_schema):
-                        errors.append(
-                            f"Generated output item {index} does not match its "
-                            "declared JSON type."
-                        )
-                        continue
-                    if isinstance(item, dict):
-                        errors.extend(
-                            f"Generated output item {index}: {error}"
-                            for error in cls._required_field_errors(item, item_schema)
-                        )
+                continue
+            if error.validator == "type":
+                expected = error.validator_value
+                expected_text = (
+                    ", ".join(map(str, expected))
+                    if isinstance(expected, list)
+                    else str(expected)
+                )
+                if len(path) == 1 and isinstance(path[0], str):
+                    subject = f"Generated output field {path[0]!r}"
+                elif path:
+                    rendered_path = ".".join(map(str, path))
+                    subject = f"Generated output at {rendered_path}"
+                else:
+                    subject = "Generated output"
+                errors.append(
+                    f"{subject} must have JSON type {expected_text}; received "
+                    f"{type(error.instance).__name__}."
+                )
+                continue
+            rendered_path = ".".join(map(str, path)) or "<root>"
+            errors.append(
+                f"Generated output violates output_schema at {rendered_path}: "
+                f"{error.message}"
+            )
         return errors
 
     @staticmethod

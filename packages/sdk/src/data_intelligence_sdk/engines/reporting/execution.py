@@ -815,12 +815,12 @@ class SemanticAnalysisAgent(_PromptAgent):
 
 
 class CodeAgent(_PromptAgent):
-    _SOURCE_KEYS = (
+    _REQUIRED_SPEC_FIELDS = (
+        "tool_name",
+        "parameters_schema",
+        "output_schema",
         "source_code",
-        "python_code",
-        "code",
-        "implementation",
-        "function_source",
+        "execution_arguments",
     )
 
     def __init__(self, llm: object | None) -> None:
@@ -839,182 +839,83 @@ class CodeAgent(_PromptAgent):
             error_logs=error_logs,
             validation_feedback=validation_feedback,
         )
-        payload: Any = None
-        parse_error: str | None = None
-        if response_text is not None:
-            try:
-                payload = _parse_json_payload(response_text)
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                parse_error = f"{type(exc).__name__}: {exc}"
-        if isinstance(payload, dict):
-            source_code = self._source_from_payload(payload)
-            if not source_code:
-                source_code = self._source_from_fenced_response(response_text)
-            payload["source_code"] = _normalize_generated_source(source_code)
-            payload["tool_name"] = self._entrypoint_name(
-                payload.get("tool_name"),
-                payload["source_code"],
+        if response_text is None:
+            return self._invalid_spec(
                 step_request,
+                "CodeAgent did not return a response.",
+                "response_missing",
             )
-            payload.setdefault(
-                "parameters_schema",
-                {"type": "object", "properties": {}, "required": []},
+        try:
+            payload = _parse_json_payload(response_text)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            return self._invalid_spec(
+                step_request,
+                f"CodeAgent response is not valid JSON: {type(exc).__name__}: {exc}",
+                "response_parse_error",
             )
-            payload.setdefault("output_schema", {"type": "array"})
-            payload["execution_arguments"] = self._normalize_execution_arguments(
-                payload.get("execution_arguments"),
-                payload.get("parameters_schema"),
-                schema_catalog.get("sources", []),
+        if not isinstance(payload, dict):
+            return self._invalid_spec(
+                step_request,
+                "CodeAgent response must be a JSON object.",
+                "response_contract_error",
             )
-            payload["response_fields"] = sorted(str(key) for key in payload)
-            if not payload["source_code"]:
-                payload["generation_error"] = (
-                    "CodeAgent returned a structured response without Python source "
-                    "in a supported code field."
-                )
-            return payload
-        source_code = self._source_from_fenced_response(response_text)
-        if source_code:
-            normalized_source = _normalize_generated_source(source_code)
-            return {
-                "tool_name": self._entrypoint_name(
-                    None,
-                    normalized_source,
+
+        response_fields = sorted(str(key) for key in payload)
+        missing_fields = [
+            field for field in self._REQUIRED_SPEC_FIELDS if field not in payload
+        ]
+        if missing_fields:
+            invalid = dict(payload)
+            invalid.update(
+                self._invalid_spec(
                     step_request,
-                ),
-                "parameters_schema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                },
-                "output_schema": {"type": "array"},
-                "execution_arguments": {},
-                "source_code": normalized_source,
-                "response_fields": [],
-            }
+                    "CodeAgent response is missing required fields: "
+                    + ", ".join(missing_fields),
+                    "response_contract_error",
+                )
+            )
+            invalid["response_fields"] = response_fields
+            return invalid
+
+        normalized = dict(payload)
+        normalized["source_code"] = _normalize_generated_source(
+            str(payload.get("source_code") or "")
+        )
+        normalized["execution_arguments"] = self._normalize_execution_arguments(
+            payload.get("execution_arguments"),
+            payload.get("parameters_schema"),
+            schema_catalog.get("sources", []),
+        )
+        normalized["response_fields"] = response_fields
+        if not normalized["source_code"].strip():
+            normalized["generation_error"] = (
+                "CodeAgent returned an empty source_code field."
+            )
+            normalized["generation_error_kind"] = "response_contract_error"
+        return normalized
+
+    @classmethod
+    def _invalid_spec(
+        cls,
+        step_request: dict[str, Any],
+        message: str,
+        error_kind: str,
+    ) -> dict[str, Any]:
         return {
-            "tool_name": self._default_tool_name(step_request),
-            "parameters_schema": {"type": "object", "properties": {}, "required": []},
-            "output_schema": {"type": "array"},
+            "tool_name": cls._default_tool_name(step_request),
+            "parameters_schema": {},
+            "output_schema": {},
             "execution_arguments": {},
             "source_code": "",
             "response_fields": [],
-            "generation_error": (
-                "CodeAgent did not return usable Python source"
-                + (f" ({parse_error})." if parse_error else ".")
-            ),
+            "generation_error": message,
+            "generation_error_kind": error_kind,
         }
-
-    @classmethod
-    def _source_from_payload(cls, payload: dict[str, Any]) -> str:
-        """Find a code value by structural aliases without assuming a data domain."""
-
-        visited: set[int] = set()
-
-        def visit(value: Any) -> str:
-            if not isinstance(value, dict) or id(value) in visited:
-                return ""
-            visited.add(id(value))
-            for key in cls._SOURCE_KEYS:
-                candidate = value.get(key)
-                if isinstance(candidate, str) and candidate.strip():
-                    return candidate
-                if isinstance(candidate, dict):
-                    nested = visit(candidate)
-                    if nested:
-                        return nested
-            for nested_value in value.values():
-                if isinstance(nested_value, dict):
-                    nested = visit(nested_value)
-                    if nested:
-                        return nested
-            for nested_value in value.values():
-                if (
-                    isinstance(nested_value, str)
-                    and cls._contains_python_function(nested_value)
-                ):
-                    return nested_value
-            return ""
-
-        return visit(payload)
-
-    @staticmethod
-    def _source_from_fenced_response(response_text: str | None) -> str:
-        if not response_text:
-            return ""
-        fenced = re.search(
-            r"```(?:python|py)?\s*(.*?)```",
-            response_text,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        if fenced:
-            return fenced.group(1).strip()
-        return (
-            response_text.strip()
-            if CodeAgent._contains_python_function(response_text)
-            else ""
-        )
-
-    @staticmethod
-    def _contains_python_function(value: str) -> bool:
-        source = _normalize_generated_source(value)
-        try:
-            syntax_tree = ast.parse(source)
-        except SyntaxError:
-            return False
-        return any(
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for node in syntax_tree.body
-        )
 
     @staticmethod
     def _default_tool_name(step_request: dict[str, Any]) -> str:
         step_id = _safe_id(step_request.get("step_id", "report_tool"))
         return f"generated_{step_id.replace('-', '_').replace('.', '_')}"
-
-    @classmethod
-    def _entrypoint_name(
-        cls,
-        proposed_name: Any,
-        source_code: str,
-        step_request: dict[str, Any],
-    ) -> str:
-        rendered = str(proposed_name or "").strip()
-        try:
-            syntax_tree = ast.parse(source_code)
-        except SyntaxError:
-            syntax_tree = None
-        function_names = (
-            [
-                node.name
-                for node in syntax_tree.body
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            ]
-            if syntax_tree is not None
-            else []
-        )
-        if rendered.isidentifier() and rendered in function_names:
-            return rendered
-        normalized = re.sub(r"\W+", "_", rendered).strip("_")
-        if normalized.isidentifier() and normalized in function_names:
-            return normalized
-        operation = step_request.get("operation", {})
-        operation = operation if isinstance(operation, dict) else {}
-        for contract_name in (
-            operation.get("kind"),
-            operation.get("capability"),
-        ):
-            normalized_contract = re.sub(
-                r"\W+", "_", str(contract_name or "")
-            ).strip("_")
-            if normalized_contract in function_names:
-                return normalized_contract
-        public_functions = [name for name in function_names if not name.startswith("_")]
-        if len(public_functions) == 1:
-            return public_functions[0]
-        if len(function_names) == 1:
-            return function_names[0]
-        return cls._default_tool_name(step_request)
 
     @staticmethod
     def _normalize_execution_arguments(
@@ -1046,68 +947,6 @@ class CodeAgent(_PromptAgent):
             return item
 
         arguments = {key: canonicalize(item) for key, item in arguments.items()}
-        properties = (
-            parameters_schema.get("properties", {})
-            if isinstance(parameters_schema, dict)
-            else {}
-        )
-        if allowed_sources and isinstance(properties, dict):
-            path_parameters = [
-                str(name)
-                for name in properties
-                if (
-                    str(name)
-                    in {
-                        "file",
-                        "file_path",
-                        "input_file",
-                        "input_path",
-                        "path",
-                        "source",
-                        "source_file",
-                        "source_path",
-                    }
-                    or str(name).endswith(("_file", "_path"))
-                )
-                and not str(name).startswith(("output_", "destination_"))
-            ]
-            path_list_parameters = [
-                str(name)
-                for name in properties
-                if str(name) in {"files", "input_files", "paths", "sources"}
-                or str(name).endswith(("_files", "_paths"))
-            ]
-            for name in path_parameters:
-                value = arguments.get(name)
-                rendered = str(value or "").strip().lower()
-                placeholder = (
-                    not rendered
-                    or rendered
-                    in {
-                        "file",
-                        "file_path",
-                        "path",
-                        "source",
-                        "source_path",
-                        "string",
-                    }
-                    or (rendered.startswith("<") and rendered.endswith(">"))
-                )
-                if placeholder:
-                    arguments[name] = allowed_sources[0]
-                elif len(allowed_sources) == 1 and value not in allowed_sources:
-                    arguments[name] = allowed_sources[0]
-            for name in path_list_parameters:
-                value = arguments.get(name)
-                if not isinstance(value, list) or not value:
-                    arguments[name] = list(allowed_sources)
-                    continue
-                allowed = [
-                    item
-                    for item in value
-                    if isinstance(item, str) and item in allowed_sources
-                ]
-                arguments[name] = allowed or list(allowed_sources)
         return arguments
 
 
@@ -1129,10 +968,17 @@ class ValidatorAgent(_PromptAgent):
             sample_data=sample_data,
         )
         if isinstance(payload, dict) and "status" in payload:
-            return payload
-        if "failed" in sandbox_logs.lower() or "error" in sandbox_logs.lower():
-            return {"status": "Fail", "feedback": sandbox_logs, "validated_code": None}
-        return {"status": "Pass", "feedback": None, "validated_code": source_code}
+            status = str(payload.get("status") or "").strip().lower()
+            if status in {"pass", "fail"}:
+                return payload
+        return {
+            "status": "Fail",
+            "feedback": (
+                "ValidatorAgent did not return a valid Pass/Fail decision. "
+                f"Sandbox evidence: {sandbox_logs}"
+            ),
+            "validated_code": None,
+        }
 
 
 class DataScienceAgent(_PromptAgent):

@@ -22,7 +22,10 @@ from data_intelligence_sdk.engines.reporting.contracts import (
     ReportContractValidator,
     ToolArgumentBinder,
 )
-from data_intelligence_sdk.engines.reporting.execution import DataScienceAgent
+from data_intelligence_sdk.engines.reporting.execution import (
+    DataScienceAgent,
+    ValidatorAgent,
+)
 from data_intelligence_sdk.engines.reporting.utils import (
     _bind_dependency_inputs,
     _normalize_plan_inputs,
@@ -199,7 +202,7 @@ class ReportHardcodePolicyTests(unittest.TestCase):
         self.assertIn("Risk: The test may not cover seasonal demand.", text)
         self.assertIn("Validation signal: No saturation", text)
 
-    def test_code_agent_accepts_nested_structural_code_alias(self):
+    def test_code_agent_rejects_nested_structural_code_alias(self):
         class AliasCodeAgent(CodeAgent):
             def _invoke_text(self, **inputs):
                 del inputs
@@ -214,11 +217,11 @@ class ReportHardcodePolicyTests(unittest.TestCase):
             {"sources": []},
         )
 
-        self.assertEqual(result["tool_name"], "extract_values")
-        self.assertIn("def extract_values", result["source_code"])
-        self.assertNotIn("generation_error", result)
+        self.assertEqual(result["generation_error_kind"], "response_contract_error")
+        self.assertIn("missing required fields", result["generation_error"])
+        self.assertEqual(result["source_code"], "")
 
-    def test_code_agent_accepts_raw_fenced_python_response(self):
+    def test_code_agent_rejects_raw_fenced_python_response(self):
         class FencedCodeAgent(CodeAgent):
             def _invoke_text(self, **inputs):
                 del inputs
@@ -229,11 +232,10 @@ class ReportHardcodePolicyTests(unittest.TestCase):
             {"sources": []},
         )
 
-        self.assertEqual(result["tool_name"], "transform")
-        self.assertIn("def transform", result["source_code"])
-        self.assertNotIn("generation_error", result)
+        self.assertEqual(result["generation_error_kind"], "response_parse_error")
+        self.assertEqual(result["source_code"], "")
 
-    def test_code_agent_detects_python_in_unknown_structural_field(self):
+    def test_code_agent_rejects_python_in_unknown_structural_field(self):
         class UnknownFieldCodeAgent(CodeAgent):
             def _invoke_text(self, **inputs):
                 del inputs
@@ -247,9 +249,8 @@ class ReportHardcodePolicyTests(unittest.TestCase):
             {"sources": []},
         )
 
-        self.assertEqual(result["tool_name"], "compute")
-        self.assertIn("def compute", result["source_code"])
-        self.assertNotIn("generation_error", result)
+        self.assertEqual(result["generation_error_kind"], "response_contract_error")
+        self.assertEqual(result["source_code"], "")
 
     def test_code_agent_reports_structured_response_without_source(self):
         class EmptyCodeAgent(CodeAgent):
@@ -263,14 +264,19 @@ class ReportHardcodePolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(result["source_code"], "")
-        self.assertIn("without Python source", result["generation_error"])
+        self.assertIn("missing required fields", result["generation_error"])
 
-    def test_code_agent_uses_declared_operation_entrypoint_with_helpers(self):
+    def test_code_agent_does_not_rewrite_declared_entrypoint(self):
         class HelperCodeAgent(CodeAgent):
             def _invoke_text(self, **inputs):
                 del inputs
                 return (
                     '{"tool_name":"generated-step",'
+                    '"parameters_schema":{"type":"object",'
+                    '"properties":{"rows":{"type":"array"}},'
+                    '"required":["rows"]},'
+                    '"output_schema":{"type":"array"},'
+                    '"execution_arguments":{},'
                     '"source_code":"def transform(rows):\\n    return rows\\n\\n'
                     'def _helper(value):\\n    return value"}'
                 )
@@ -283,7 +289,78 @@ class ReportHardcodePolicyTests(unittest.TestCase):
             {"sources": []},
         )
 
-        self.assertEqual(result["tool_name"], "transform")
+        self.assertEqual(result["tool_name"], "generated-step")
+        self.assertIn("def transform", result["source_code"])
+
+    def test_code_agent_accepts_only_complete_declared_code_spec(self):
+        class CompleteCodeAgent(CodeAgent):
+            def _invoke_text(self, **inputs):
+                del inputs
+                return (
+                    '{"tool_name":"transform_rows",'
+                    '"parameters_schema":{"type":"object",'
+                    '"properties":{"rows":{"type":"array"}},'
+                    '"required":["rows"]},'
+                    '"output_schema":{"type":"array",'
+                    '"items":{"type":"object"}},'
+                    '"execution_arguments":{},'
+                    '"source_code":"def transform_rows(rows):\\n    return rows"}'
+                )
+
+        result = CompleteCodeAgent(None).run(
+            {"step_id": "transform-rows"},
+            {"sources": []},
+        )
+
+        self.assertEqual(result["tool_name"], "transform_rows")
+        self.assertNotIn("generation_error", result)
+
+    def test_validator_agent_fails_closed_on_invalid_decision(self):
+        class InvalidValidatorAgent(ValidatorAgent):
+            def _invoke_json(self, **inputs):
+                del inputs
+                return {"status": "NeedsRevision", "feedback": "retry"}
+
+        result = InvalidValidatorAgent(None).run(
+            "{}",
+            "def transform():\n    return []\n",
+            "Success",
+            [],
+        )
+
+        self.assertEqual(result["status"], "Fail")
+        self.assertIn("valid Pass/Fail decision", result["feedback"])
+
+    def test_generated_binding_requires_real_sandbox_path(self):
+        result = ToolArgumentBinder().bind(
+            {
+                "arguments": {},
+                "argument_bindings": {
+                    "source_path": {
+                        "input_ref": "step-output://load/rows",
+                        "adapter": "artifact_path",
+                    }
+                },
+            },
+            {
+                "type": "object",
+                "properties": {"source_path": {"type": "string"}},
+                "required": ["source_path"],
+            },
+            [
+                {
+                    "ref": "step-output://load/rows",
+                    "argument_name": "rows",
+                    "artifact_ref": "corpus://organization/document",
+                    "json_type": "array",
+                    "value": [],
+                }
+            ],
+            sandbox=True,
+        )
+
+        self.assertIn("no sandbox artifact path", "; ".join(result.errors))
+        self.assertNotIn("source_path", result.arguments)
 
     def test_legacy_step_uri_is_canonicalized_without_duplicate_prefix(self):
         steps = [

@@ -1806,8 +1806,8 @@ class ReportTemplateTests(unittest.TestCase):
             errors,
         )
 
-    def test_generated_schema_is_aligned_to_function_signature(self):
-        aligned = ReportEngine._align_generated_parameter_schema(
+    def test_generated_schema_mismatch_is_rejected_instead_of_aligned(self):
+        errors = ReportEngine._execution_argument_errors(
             {
                 "tool_name": "build_density",
                 "source_code": (
@@ -1819,21 +1819,97 @@ class ReportTemplateTests(unittest.TestCase):
                     "properties": {"inspect_result": {"type": "array"}},
                     "required": ["inspect_result"],
                 },
+                "output_schema": {"type": "array", "items": {"type": "number"}},
                 "execution_arguments": {"inspect_result": []},
-            }
+            },
+            {"inspect_result": []},
         )
 
-        self.assertEqual(
-            aligned["parameters_schema"],
+        self.assertIn(
+            "parameters_schema must declare required function argument: "
+            "inspect_result_path",
+            errors,
+        )
+        self.assertIn(
+            "parameters_schema declares argument absent from generated function: "
+            "inspect_result",
+            errors,
+        )
+
+    def test_generated_code_rejects_corpus_uri_as_local_path(self):
+        errors = ReportEngine._execution_argument_errors(
+            {
+                "tool_name": "load_rows",
+                "source_code": "def load_rows(source_path: str):\n    return []\n",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {"source_path": {"type": "string"}},
+                    "required": ["source_path"],
+                },
+                "output_schema": {"type": "array"},
+            },
+            {"source_path": "corpus://organization/document"},
+        )
+
+        self.assertIn("requires a sandbox artifact path", "; ".join(errors))
+
+    def test_generated_code_rejects_duplicate_parameters_for_one_input(self):
+        errors = ReportEngine._execution_argument_errors(
+            {
+                "tool_name": "calculate",
+                "source_code": (
+                    "def calculate(rows, rows_path):\n"
+                    "    return len(rows)\n"
+                ),
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "rows": {"type": "array"},
+                        "rows_path": {"type": "string"},
+                    },
+                    "required": ["rows", "rows_path"],
+                },
+                "output_schema": {"type": "integer"},
+                "argument_bindings": {
+                    "rows": {
+                        "input_ref": "step-output://load/rows",
+                        "adapter": "identity",
+                    },
+                    "rows_path": {
+                        "input_ref": "step-output://load/rows",
+                        "adapter": "artifact_path",
+                    },
+                },
+            },
+            {"rows": [], "rows_path": "/workspace/input/rows.json"},
+        )
+
+        self.assertIn("exactly one parameter per resolved input", "; ".join(errors))
+
+    def test_generated_output_uses_full_nested_json_schema_validation(self):
+        errors = ReportEngine._output_contract_errors(
+            {"series": [{"label": "January", "value": "not-a-number"}]},
             {
                 "type": "object",
                 "properties": {
-                    "inspect_result_path": {"type": "string"},
+                    "series": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "value": {"type": "number"},
+                            },
+                            "required": ["label", "value"],
+                            "additionalProperties": False,
+                        },
+                    }
                 },
-                "required": ["inspect_result_path"],
+                "required": ["series"],
             },
         )
-        self.assertEqual(aligned["execution_arguments"], {})
+
+        self.assertIn("series.0.value", "; ".join(errors))
 
     def test_chart_fallback_distinguishes_empty_output_from_missing_output(self):
         chart_id = "profile.primary.chart"
