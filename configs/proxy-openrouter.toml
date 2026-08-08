@@ -19,7 +19,7 @@ token = "${env:SANDBOX_TOKEN}"
 
 [method_hub]
 enabled = true
-endpoint = "http://host.docker.internal:8000/mcp"
+endpoint = "http://host.docker.internal:38000/mcp"
 
 [intent_service]
 enabled = true
