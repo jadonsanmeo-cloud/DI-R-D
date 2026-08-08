@@ -36,4 +36,5 @@ artifacts/
 AXIOM-main/
 .uploads/
 .api.*.log
+LAMBDA/
 #############
