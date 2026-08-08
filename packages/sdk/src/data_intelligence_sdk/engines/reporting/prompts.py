@@ -209,7 +209,7 @@ evidence for selection rather than assuming every report belongs to one domain.
    resolved. Preserve valid IDs and choices where possible.
 
 # OUTPUT
-If `task` is `resolve_presentation_contract`, perform only the focused semantic
+If `task` is `resolve_requested_content_roles`, perform only the focused semantic
 classification requested by that task. Read the confirmed objective/spec,
 return JSON with exactly `requested_content_roles`, and select only explicitly
 requested capabilities from `advertised_content_roles`. Do not choose a

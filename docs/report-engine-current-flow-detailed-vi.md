@@ -19,8 +19,7 @@ Luồng được thiết kế để không mặc định rằng mọi dữ liệ
 Các đầu vào chính:
 
 - `UserQuery`: yêu cầu của người dùng.
-- `ExecutionSpec`: objective, scope, capability requirements, constraints và
-  presentation contract đã được xác nhận.
+- `ExecutionSpec`: objective, scope, capability requirements và constraints.
 - `DataCorpusPackage`: scope dữ liệu ban đầu mà request cung cấp cho engine.
 - `EngineRuntimeContext`: Method Hub, sandbox, artifact store, run context và
   danh sách tool đang được expose.
@@ -269,24 +268,11 @@ ExecutionSpec cần trả lời tối thiểu các câu hỏi:
 - Output cần những loại nội dung nào?
 - Có ràng buộc về nguồn, evidence, audience hoặc format không?
 
-Markdown spec hiện có thể chứa `Presentation Contract`, ví dụ:
+Markdown spec chỉ mô tả yêu cầu thực thi, hướng dẫn chuẩn bị, hướng dẫn chạy và
+kết quả mong đợi. Nó không yêu cầu section hoặc field riêng cho contract trình
+bày.
 
-```json
-{
-  "report_content_roles": [
-    "executive_summary",
-    "narrative",
-    "chart",
-    "recommendation",
-    "limitations"
-  ]
-}
-```
-
-Danh sách trên mô tả nhu cầu trình bày, không phải bố cục section cố định và
-không quyết định executor nào sẽ được gọi.
-
-Nếu Spec Builder lỗi hoặc thiếu contract bắt buộc, run có thể dừng trước Report
+Nếu Spec Builder lỗi hoặc thiếu heading bắt buộc, run có thể dừng trước Report
 Engine với thông báo như `The execution spec could not be prepared`.
 
 ## 4. Phase 1 - Ingested Corpus Resolver

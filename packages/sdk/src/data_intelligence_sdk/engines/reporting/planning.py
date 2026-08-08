@@ -1627,7 +1627,7 @@ class TemplateAgent(_PromptAgent):
                 sections = deepcopy(neutral.get("sections", []))
                 design_source = "adaptive_fallback"
                 role_definition = neutral
-        agent_requested_roles = self._resolve_presentation_contract(
+        agent_requested_roles = self._resolve_requested_content_roles(
             spec,
             plan,
             scoped,
@@ -1696,7 +1696,7 @@ class TemplateAgent(_PromptAgent):
             "trade-offs, or consequences appropriate to the objective."
         ]
 
-    def _resolve_presentation_contract(
+    def _resolve_requested_content_roles(
         self,
         spec: ExecutionSpec,
         plan: dict[str, Any],
@@ -1705,12 +1705,12 @@ class TemplateAgent(_PromptAgent):
         adaptation_payload: dict[str, Any],
         previous_instance: dict[str, Any] | None,
     ) -> list[str]:
-        """Resolve explicit presentation capabilities at the Markdown boundary.
+        """Resolve explicit content-role requests at the Markdown boundary.
 
-        Structured callers publish ``report_content_roles`` directly. The web
-        confirmation flow currently preserves a human-readable Markdown spec,
-        so TemplateAgent performs one focused semantic resolution and records
-        the result in instance provenance for later negotiation passes.
+        Structured callers can publish generic ``content_roles``. The web
+        confirmation flow preserves a human-readable Markdown spec, so
+        TemplateAgent performs one focused semantic resolution and records the
+        result in instance provenance for later negotiation passes.
         """
 
         roles = set(self._requested_content_roles(spec))
@@ -1755,7 +1755,7 @@ class TemplateAgent(_PromptAgent):
                 }
             )
             resolution = self._invoke_json(
-                task="resolve_presentation_contract",
+                task="resolve_requested_content_roles",
                 user_goal=spec.objective,
                 confirmed_spec_markdown=confirmed_markdown,
                 plan=plan,
@@ -1854,7 +1854,7 @@ class TemplateAgent(_PromptAgent):
         constraints = (
             spec.constraints if isinstance(spec.constraints, dict) else {}
         )
-        candidates: list[Any] = [constraints.get("report_content_roles")]
+        candidates: list[Any] = []
         output_requirements = constraints.get("output_requirements")
         if isinstance(output_requirements, dict):
             candidates.append(output_requirements.get("content_roles"))
@@ -1865,7 +1865,6 @@ class TemplateAgent(_PromptAgent):
                 requirement.output_schema,
             ):
                 if isinstance(container, dict):
-                    candidates.append(container.get("report_content_roles"))
                     candidates.append(container.get("content_roles"))
         return {
             str(role)

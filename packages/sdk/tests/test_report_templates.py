@@ -73,7 +73,7 @@ class ReportTemplateTests(unittest.TestCase):
             def invoke(self, prompt):
                 self.calls += 1
                 rendered = prompt.to_string()
-                if "resolve_presentation_contract" in rendered:
+                if "resolve_requested_content_roles" in rendered:
                     return SimpleNamespace(
                         content=json.dumps(
                             {
@@ -162,7 +162,9 @@ class ReportTemplateTests(unittest.TestCase):
             intent="report",
             objective="Create an operational report",
             constraints={
-                "report_content_roles": ["chart", "recommendation"],
+                "output_requirements": {
+                    "content_roles": ["chart", "recommendation"],
+                },
             },
         )
 

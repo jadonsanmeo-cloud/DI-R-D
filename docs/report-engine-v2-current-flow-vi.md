@@ -423,7 +423,7 @@ Processor hiển thị tối đa bốn metric theo thứ tự:
    hoặc character count.
 
 Tên metric không bị cố định theo PDF. Tuy nhiên policy "bốn ô" và fallback
-metric là hardcode ở tầng presentation contract.
+metric vẫn là logic hardcode của tầng trình bày.
 
 ### Chart dataset
 

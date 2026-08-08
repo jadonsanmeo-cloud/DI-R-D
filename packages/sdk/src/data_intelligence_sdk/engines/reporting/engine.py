@@ -38,9 +38,6 @@ from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manag
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.sandbox import SandboxEnvironment
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
-from data_intelligence_sdk.spec.markdown_builder import (
-    extract_presentation_contract,
-)
 from data_intelligence_sdk.tools import create_mcp_tools
 
 from data_intelligence_sdk.engines.reporting.composition import (
@@ -411,7 +408,6 @@ class ReportEngine:
         markdown = spec_markdown.strip()
         resolved_query = user_query or UserQuery(text=markdown)
         objective = resolved_query.text.strip() or markdown
-        presentation_contract = extract_presentation_contract(markdown)
         output = self.run(
             EngineInput(
                 query=resolved_query,
@@ -423,7 +419,6 @@ class ReportEngine:
                     constraints={
                         "output_format": "markdown",
                         "confirmed_spec_markdown": markdown,
-                        **presentation_contract,
                     },
                 ),
                 corpus_package=DataCorpusPackage(

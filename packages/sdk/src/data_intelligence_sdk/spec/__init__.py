@@ -34,7 +34,6 @@ from data_intelligence_sdk.spec.llm_builder import LLMSpecBuilder
 from data_intelligence_sdk.spec.markdown import render_spec_markdown
 from data_intelligence_sdk.spec.markdown_builder import (
     LLMMarkdownSpecBuilder,
-    extract_presentation_contract,
     validate_spec_markdown,
 )
 from data_intelligence_sdk.spec.prompts import DataSelectionPrompt, SpecBuilderPrompt
@@ -53,7 +52,6 @@ __all__ = [
     "LLMSpecBuilder",
     "render_spec_markdown",
     "LLMMarkdownSpecBuilder",
-    "extract_presentation_contract",
     "validate_spec_markdown",
     "SelectedDataContext",
     "SessionBrief",
