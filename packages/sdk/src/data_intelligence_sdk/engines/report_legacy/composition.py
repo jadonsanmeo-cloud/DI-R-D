@@ -34,18 +34,18 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
-from data_intelligence_sdk.engines.reporting.base import _PromptAgent
-from data_intelligence_sdk.engines.reporting.policies import (
+from data_intelligence_sdk.engines.report_legacy.base import _PromptAgent
+from data_intelligence_sdk.engines.report_legacy.policies import (
     ReportPresentationPolicy,
     legacy_content_role,
     normalize_content_role,
 )
-from data_intelligence_sdk.engines.reporting.prompts import (
+from data_intelligence_sdk.engines.report_legacy.prompts import (
     CHART_AGENT_PROMPT,
     REPORT_AGENT_PROMPT,
     STRUCTURED_REPORT_AGENT_PROMPT,
 )
-from data_intelligence_sdk.engines.reporting.utils import (
+from data_intelligence_sdk.engines.report_legacy.utils import (
     _STEP_OUTPUT_REF,
     _dataset_summary,
     _int_value,

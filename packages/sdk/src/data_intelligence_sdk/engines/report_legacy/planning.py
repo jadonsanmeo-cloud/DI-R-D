@@ -36,8 +36,8 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
-from data_intelligence_sdk.engines.reporting.base import _PromptAgent
-from data_intelligence_sdk.engines.reporting.contracts import (
+from data_intelligence_sdk.engines.report_legacy.base import _PromptAgent
+from data_intelligence_sdk.engines.report_legacy.contracts import (
     AUTO_EXECUTION_CLASS,
     DETERMINISTIC_TRANSFORM_CLASS,
     EXECUTION_CLASSES,
@@ -47,10 +47,10 @@ from data_intelligence_sdk.engines.reporting.contracts import (
     execution_class_for_capability,
     execution_class_for_step,
 )
-from data_intelligence_sdk.engines.reporting.corpus import (
+from data_intelligence_sdk.engines.report_legacy.corpus import (
     CORPUS_MATERIALIZE_OPERATION,
 )
-from data_intelligence_sdk.engines.reporting.policies import (
+from data_intelligence_sdk.engines.report_legacy.policies import (
     CONTENT_ROLES,
     DEFAULT_SOURCE_MATERIALIZATION_REGISTRY,
     REPORT_BLOCK_TYPES,
@@ -59,12 +59,12 @@ from data_intelligence_sdk.engines.reporting.policies import (
     legacy_content_role,
     normalize_content_role,
 )
-from data_intelligence_sdk.engines.reporting.prompts import (
+from data_intelligence_sdk.engines.report_legacy.prompts import (
     PLAN_AGENT_PROMPT,
     TEMPLATE_AGENT_PROMPT,
     TEMPLATE_POOL_PACKAGE,
 )
-from data_intelligence_sdk.engines.reporting.utils import (
+from data_intelligence_sdk.engines.report_legacy.utils import (
     _STEP_OUTPUT_REF,
     _bind_dependency_inputs,
     _compatible_plan_outputs,

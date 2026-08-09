@@ -29,17 +29,17 @@ from data_intelligence_sdk.core.types import (
     InterfaceDefinition,
     UserContext,
 )
-from data_intelligence_sdk.engines.reporting.base import _PromptAgent
-from data_intelligence_sdk.engines.reporting.composition import (
+from data_intelligence_sdk.engines.report_legacy.base import _PromptAgent
+from data_intelligence_sdk.engines.report_legacy.composition import (
     ChartAgent,
     ReportAgent,
 )
-from data_intelligence_sdk.engines.reporting.engine import (
+from data_intelligence_sdk.engines.report_legacy.engine import (
     ReportEngine,
     _DataStepState,
     _ReportGraphState,
 )
-from data_intelligence_sdk.engines.reporting.execution import (
+from data_intelligence_sdk.engines.report_legacy.execution import (
     CodeAgent,
     DataScienceAgent,
     RouterAgent,
@@ -47,12 +47,12 @@ from data_intelligence_sdk.engines.reporting.execution import (
     ToolExecutor,
     ValidatorAgent,
 )
-from data_intelligence_sdk.engines.reporting.planning import (
+from data_intelligence_sdk.engines.report_legacy.planning import (
     PlanAgent,
     TemplateAgent,
     TemplatePool,
 )
-from data_intelligence_sdk.engines.reporting.policies import (
+from data_intelligence_sdk.engines.report_legacy.policies import (
     AnalysisSamplingPolicy,
     ChartPolicy,
     LocalePolicy,
@@ -63,11 +63,11 @@ from data_intelligence_sdk.engines.reporting.policies import (
     SourceHandlerPolicy,
     SourceMaterializationRegistry,
 )
-from data_intelligence_sdk.engines.reporting.processing import (
+from data_intelligence_sdk.engines.report_legacy.processing import (
     ChartInputAssembler,
     DataScienceProcessor,
 )
-from data_intelligence_sdk.engines.reporting.prompts import (
+from data_intelligence_sdk.engines.report_legacy.prompts import (
     CHART_AGENT_PROMPT,
     CODE_AGENT_PROMPT,
     DATASCIENCE_AGENT_PROMPT,
@@ -80,8 +80,8 @@ from data_intelligence_sdk.engines.reporting.prompts import (
     TEMPLATE_POOL_PACKAGE,
     VALIDATOR_AGENT_PROMPT,
 )
-from data_intelligence_sdk.engines.reporting.rendering import ReportRenderer
-from data_intelligence_sdk.engines.reporting.utils import (
+from data_intelligence_sdk.engines.report_legacy.rendering import ReportRenderer
+from data_intelligence_sdk.engines.report_legacy.utils import (
     _DOWNSTREAM_OWNED_OPERATIONS,
     _STEP_OUTPUT_REF,
     _StepInputResolver,

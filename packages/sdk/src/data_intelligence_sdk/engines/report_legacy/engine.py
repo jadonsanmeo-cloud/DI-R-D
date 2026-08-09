@@ -40,11 +40,11 @@ from data_intelligence_sdk.runtime.sandbox import SandboxEnvironment
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
-from data_intelligence_sdk.engines.reporting.composition import (
+from data_intelligence_sdk.engines.report_legacy.composition import (
     ChartAgent,
     ReportAgent,
 )
-from data_intelligence_sdk.engines.reporting.contracts import (
+from data_intelligence_sdk.engines.report_legacy.contracts import (
     DETERMINISTIC_TRANSFORM_CLASS,
     GENERATED_CODE_ROUTE,
     METHOD_HUB_ROUTE,
@@ -55,7 +55,7 @@ from data_intelligence_sdk.engines.reporting.contracts import (
     ToolArgumentBinder,
     execution_class_for_step,
 )
-from data_intelligence_sdk.engines.reporting.corpus import (
+from data_intelligence_sdk.engines.report_legacy.corpus import (
     CORPUS_GET_FILE_INGESTED_DATA,
     CORPUS_MATERIALIZED_ROUTE,
     ReportCorpusResolutionError,
@@ -64,7 +64,7 @@ from data_intelligence_sdk.engines.reporting.corpus import (
     ingested_document_route,
     is_ingested_data_tool,
 )
-from data_intelligence_sdk.engines.reporting.execution import (
+from data_intelligence_sdk.engines.report_legacy.execution import (
     CodeAgent,
     DataScienceAgent,
     RouterAgent,
@@ -72,12 +72,12 @@ from data_intelligence_sdk.engines.reporting.execution import (
     ToolExecutor,
     ValidatorAgent,
 )
-from data_intelligence_sdk.engines.reporting.planning import (
+from data_intelligence_sdk.engines.report_legacy.planning import (
     PlanAgent,
     TemplateAgent,
     TemplatePool,
 )
-from data_intelligence_sdk.engines.reporting.policies import (
+from data_intelligence_sdk.engines.report_legacy.policies import (
     AnalysisSamplingPolicy,
     ChartPolicy,
     DEFAULT_SOURCE_MATERIALIZATION_REGISTRY,
@@ -88,15 +88,15 @@ from data_intelligence_sdk.engines.reporting.policies import (
     ReportPresentationPolicy,
     SourceMaterializationRegistry,
 )
-from data_intelligence_sdk.engines.reporting.processing import (
+from data_intelligence_sdk.engines.report_legacy.processing import (
     ChartInputAssembler,
     DataScienceProcessor,
 )
-from data_intelligence_sdk.engines.reporting.prompts import (
+from data_intelligence_sdk.engines.report_legacy.prompts import (
     GENERATED_TOOL_CAPABILITY,
 )
-from data_intelligence_sdk.engines.reporting.rendering import ReportRenderer
-from data_intelligence_sdk.engines.reporting.utils import (
+from data_intelligence_sdk.engines.report_legacy.rendering import ReportRenderer
+from data_intelligence_sdk.engines.report_legacy.utils import (
     _STEP_OUTPUT_REF,
     _StepInputResolver,
     _StepOutputRegistry,

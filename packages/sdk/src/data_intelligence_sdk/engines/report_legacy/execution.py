@@ -34,8 +34,8 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
-from data_intelligence_sdk.engines.reporting.base import _PromptAgent
-from data_intelligence_sdk.engines.reporting.contracts import (
+from data_intelligence_sdk.engines.report_legacy.base import _PromptAgent
+from data_intelligence_sdk.engines.report_legacy.contracts import (
     AUTO_EXECUTION_CLASS,
     DETERMINISTIC_TRANSFORM_CLASS,
     EXECUTION_MODES,
@@ -48,26 +48,26 @@ from data_intelligence_sdk.engines.reporting.contracts import (
     ToolArgumentBinder,
     execution_class_for_step,
 )
-from data_intelligence_sdk.engines.reporting.corpus import (
+from data_intelligence_sdk.engines.report_legacy.corpus import (
     ingested_data_analysis_records,
     ingested_data_has_content,
     ingested_document_route,
     is_ingested_data_tool,
     unwrap_ingested_data_result,
 )
-from data_intelligence_sdk.engines.reporting.policies import (
+from data_intelligence_sdk.engines.report_legacy.policies import (
     DEFAULT_SOURCE_MATERIALIZATION_REGISTRY,
     SourceMaterializationRegistry,
     normalize_content_role,
 )
-from data_intelligence_sdk.engines.reporting.prompts import (
+from data_intelligence_sdk.engines.report_legacy.prompts import (
     CODE_AGENT_PROMPT,
     DATASCIENCE_AGENT_PROMPT,
     ROUTER_AGENT_PROMPT,
     SEMANTIC_ANALYSIS_AGENT_PROMPT,
     VALIDATOR_AGENT_PROMPT,
 )
-from data_intelligence_sdk.engines.reporting.utils import (
+from data_intelligence_sdk.engines.report_legacy.utils import (
     _extract_message_content,
     _first_source,
     _first_source_with_suffixes,

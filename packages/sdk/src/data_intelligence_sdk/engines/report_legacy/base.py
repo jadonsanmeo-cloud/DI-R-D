@@ -34,7 +34,7 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.sandbox.executor import SandboxRunResult
 from data_intelligence_sdk.tools import create_mcp_tools
 
-from data_intelligence_sdk.engines.reporting.utils import (
+from data_intelligence_sdk.engines.report_legacy.utils import (
     _extract_message_content,
     _json_dumps,
     _parse_json_payload,
