@@ -114,13 +114,11 @@ Model IDs, provider endpoints, CORS, timeout và upload limits được cấu h�
 Các cấu hình local quan trọng đã có sẵn trong `docker/.env.example`:
 
 ```env
-SANDBOX_TOKEN=<sandbox-service-client-token>
 REPORT_FORCE_CODE_AGENT=false
 ```
 
 Ý nghĩa:
 
-- `SANDBOX_TOKEN`: credential để API gọi AXIOM Sandbox Service qua gateway.
 - `REPORT_FORCE_CODE_AGENT=false`: Router ưu tiên method deterministic có sẵn trong
   Method Hub, bao gồm reader `.xls`/`.xlsx`. Chỉ đổi thành `true` khi cần kiểm thử
   riêng nhánh sinh code.
@@ -128,7 +126,7 @@ REPORT_FORCE_CODE_AGENT=false
 
 Đặt `[sandbox].enabled = true` trong `configs/proxy-openrouter.toml` để bật
 sandbox. AXIOM Sandbox Service quản lý container, network và resource limits; SDK
-chỉ giữ endpoint, workspace ID và client token cần cho luồng QA.
+chỉ giữ endpoint và workspace ID cần cho luồng QA.
 
 Không commit `docker/.env`. File `docker/.env.example` chỉ chứa tên biến và được
 phép commit.
@@ -349,9 +347,9 @@ uv pip install -e packages/sdk -e packages/api
 
 ### Không kết nối được Sandbox Service
 
-Kiểm tra `[sandbox].endpoint`, `workspace_id`, `SANDBOX_TOKEN` và network route từ
-API tới AXIOM Sandbox Service. Resource limits phải được cấu hình ở Sandbox
-Service, không đặt trong SDK/API.
+Kiểm tra `[sandbox].endpoint`, `workspace_id` và network route từ API tới AXIOM
+Sandbox Service. Resource limits phải được cấu hình ở Sandbox Service, không đặt
+trong SDK/API.
 
 ### LLM trả 401, 403 hoặc model not found
 
@@ -512,14 +510,13 @@ creates one sandbox for the entire request. Configure it in
 enabled = true
 endpoint = "http://host.docker.internal:8004"
 workspace_id = "00000000-0000-0000-0000-000000000001"
-token = "${env:SANDBOX_TOKEN}"
 ```
 
 The CLI example discovers the sibling client source directly for local
 development. Production applications should install `axiom-sandbox-client`.
 The general engine requires `[sandbox].enabled = true` and a workspace ID.
 AXIOM Sandbox Service owns sandbox lifecycle, isolation, and resource limits;
-the SDK/API only supplies the endpoint and client credentials.
+the SDK/API only supplies the endpoint and workspace ID.
 
 The API defaults `REPORT_FORCE_CODE_AGENT` to `false` so deterministic Method Hub
 tools are preferred when their contracts match. Set it to `true` only to exercise

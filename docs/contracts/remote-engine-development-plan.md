@@ -96,9 +96,8 @@ The API provides a runtime handle with:
   `method_hub`, `artifacts`, and `trace`.
 - `method_hub`: optional MCP endpoint, scoped MCP token, and tool catalog for
   direct Method Hub calls.
-- `sandbox`: optional sandbox endpoint, workspace/session identifiers, and
-  scoped sandbox token for the request sandbox that the API/runtime already
-  created.
+- `sandbox`: optional sandbox endpoint and workspace/session identifiers for the
+  request sandbox that the API/runtime already created.
 
 This handle is the remote engine's runtime access. It should be treated as a
 request-scoped secret.
@@ -153,8 +152,8 @@ and return an `EngineOutput`-compatible response.
 3. Provision the request sandbox before calling the remote engine when sandbox is
    enabled.
 4. Create a short-lived runtime handle for each run.
-5. Include sandbox endpoint, workspace/session identifiers, and scoped sandbox
-   token in the runtime handle when sandbox is enabled.
+5. Include sandbox endpoint and workspace/session identifiers in the runtime
+   handle when sandbox is enabled.
 6. Include Method Hub MCP endpoint, scoped MCP token, and available tool catalog
    in the runtime handle when Method Hub is enabled.
 7. Expose Runtime Gateway endpoints for trace, artifacts, and run events.
@@ -173,8 +172,7 @@ and return an `EngineOutput`-compatible response.
 6. Use the MCP client to call Method Hub directly when Method Hub is enabled.
 7. Use Runtime Gateway for artifacts, trace events, and run events.
 8. Return `EngineOutput`-compatible JSON.
-9. Keep runtime, sandbox, and MCP tokens secret and do not persist them beyond
-   the request.
+9. Keep runtime and MCP tokens secret and do not persist them beyond the request.
 
 ## Security Rules
 
@@ -183,8 +181,8 @@ and return an `EngineOutput`-compatible response.
 - Remote engines should only receive capabilities enabled for the current run.
 - Do not send permanent MCP credentials to the remote engine; send only scoped
   request tokens when direct MCP access is enabled.
-- Do not send permanent sandbox provider credentials to the remote engine; send
-  only scoped request/session tokens for the already-created sandbox.
+- Do not send sandbox provider credentials to the remote engine; send only
+  scoped request/session identifiers for the already-created sandbox.
 - Do not send local filesystem paths as runtime authority.
 
 ## First Milestone

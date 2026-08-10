@@ -44,18 +44,6 @@ class UserQuery:
 
 
 @dataclass(slots=True)
-class DataCorpusPackage:
-    """Data, metadata, and semantic context available to the system."""
-
-    sources: list[str] = field(default_factory=list)
-    schemas: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-DataHubContext = DataCorpusPackage
-
-
-@dataclass(slots=True)
 class UserContext:
     """Long-lived user memory and preferences across tasks."""
 
@@ -170,7 +158,6 @@ class EngineInput:
     query: UserQuery
     spec: ExecutionSpec
     runtime: EngineRuntimeContext
-    corpus_package: DataCorpusPackage = field(default_factory=DataCorpusPackage)
     user_context: UserContext | None = None
 
 

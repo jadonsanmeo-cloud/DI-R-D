@@ -238,7 +238,7 @@ def _configure_axiom_sandbox_provider(
             "installed. Install the local AXIOM client package."
         ) from exc
 
-    sandbox_client = SandboxClient(settings.endpoint, token=settings.token)
+    sandbox_client = SandboxClient(settings.endpoint)
     keep_sandbox = str(os.environ.get("AXIOM_SANDBOX_KEEP", "false")).lower() in {
         "1",
         "true",
