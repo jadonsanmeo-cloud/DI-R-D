@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
 class DataCorpusPackageRequest(BaseModel):
@@ -16,6 +16,15 @@ class DataCorpusPackageRequest(BaseModel):
 class RuntimeOptionsRequest(BaseModel):
     method_hub_enabled: bool | None = None
     engine: Literal["auto", "general", "reason", "report"] | None = None
+
+class UploadedFileRequest(BaseModel):
+    filename: str
+    relative_path: str = Field(
+        validation_alias=AliasChoices("relative_path", "relativePath")
+    )
+    size: int = 0
+    content_type: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class MethodHubCapabilityResponse(BaseModel):
@@ -30,6 +39,7 @@ class RuntimeCapabilitiesResponse(BaseModel):
 class CreateResponseRequest(BaseModel):
     input: str | None = None
     data_corpus_package: DataCorpusPackageRequest | None = None
+    uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     user_id: str | None = None
     session_id: str | None = None
     runtime_options: RuntimeOptionsRequest = Field(

@@ -22,6 +22,9 @@ from data_intelligence_api.infrastructure.persistence.artifact_history import (
 from data_intelligence_api.application.runtime_capabilities import (
     MethodHubUnavailableError,
 )
+from data_intelligence_api.application.gen_report_bridge import (
+    stream_gen_report_response,
+)
 from data_intelligence_api.application.ports.run_repository import RunRepository
 from data_intelligence_api.domain.workflow import WorkflowRuntimeOptions
 from data_intelligence_api.domain.runs import (
@@ -286,6 +289,18 @@ def create_responses_router(
 
     @router.post("/api/v1/responses")
     async def create_response(payload: CreateResponseRequest) -> StreamingResponse:
+        response_id = f"resp_{uuid.uuid4().hex}"
+        if payload.runtime_options.engine == "report":
+            return StreamingResponse(
+                stream_gen_report_response(
+                    payload=payload,
+                    settings=settings,
+                    run_repository=run_repository,
+                    response_id=response_id,
+                ),
+                media_type="text/event-stream",
+            )
+
         try:
             invocation = build_workflow_invocation(
                 payload,
@@ -295,7 +310,6 @@ def create_responses_router(
         except SourceValidationError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
-        response_id = f"resp_{uuid.uuid4().hex}"
         confirmation_token = secrets.token_urlsafe(32)
         expires_at = datetime.now(timezone.utc) + timedelta(
             seconds=settings.spec_confirmation_ttl_seconds
