@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     Intent,
     SessionContext,
     UserContext,
@@ -47,7 +46,6 @@ class IntentAnalyzer(Protocol):
     def analyze(
         self,
         query: UserQuery,
-        corpus_package: DataCorpusPackage,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
     ) -> Intent:

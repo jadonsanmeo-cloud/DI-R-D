@@ -15,7 +15,7 @@ from data_intelligence_sdk.spec.context import (
     SpecBuildContext,
     SpecContextBuilder,
     UserBrief,
-    build_corpus_summary,
+    build_uploaded_files_summary,
 )
 from data_intelligence_sdk.spec.data_selection import (
     DataSelector,
@@ -61,7 +61,7 @@ __all__ = [
     "SpecConfirmation",
     "SpecContextBuilder",
     "UserBrief",
-    "build_corpus_summary",
+    "build_uploaded_files_summary",
     "ConsoleSpecConfirmationProvider",
     "SpecConfirmationDecision",
     "SpecConfirmationProvider",

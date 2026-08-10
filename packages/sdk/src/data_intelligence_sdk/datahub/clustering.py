@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from data_intelligence_sdk.core.types import DataCorpusPackage
+from data_intelligence_sdk.core.types import UploadedFile
 from data_intelligence_sdk.datahub.prompts import DataHubClusteringPrompt
 from data_intelligence_sdk.runtime.llm_client import LLMClient
 
@@ -43,10 +43,10 @@ class DataHubClusteringResult:
 
 
 class DataHubClusterer(Protocol):
-    """Clusters a parsed datahub/corpus package into related asset groups."""
+    """Clusters uploaded files into related asset groups."""
 
-    def cluster(self, corpus_package: DataCorpusPackage) -> DataHubClusteringResult:
-        """Return semantic clusters for the package."""
+    def cluster(self, uploaded_files: list[UploadedFile]) -> DataHubClusteringResult:
+        """Return semantic clusters for uploaded files."""
 
 
 class LLMDataHubClusterer:
@@ -58,9 +58,9 @@ class LLMDataHubClusterer:
         self.llm_client = llm_client
         self.prompt = prompt or DataHubClusteringPrompt()
 
-    def cluster(self, corpus_package: DataCorpusPackage) -> DataHubClusteringResult:
+    def cluster(self, uploaded_files: list[UploadedFile]) -> DataHubClusteringResult:
         payload = self.llm_client.complete_json(
-            self.prompt.cluster_messages(corpus_package),
+            self.prompt.cluster_messages(uploaded_files),
             stage="datahub-clusterer",
         )
         return self._payload_to_result(payload)

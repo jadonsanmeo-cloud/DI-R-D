@@ -15,7 +15,7 @@ _PYTHON_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class RequestSandboxExecutor:
-    """Execute generated ReportEngine interfaces in the active request sandbox."""
+    """Execute generated report interfaces in the active request sandbox."""
 
     def __init__(
         self,

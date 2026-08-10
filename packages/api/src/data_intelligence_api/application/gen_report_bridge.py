@@ -63,7 +63,12 @@ def _resolve_uploaded_files(
     upload_root = (root / ".uploads").resolve()
     files: list[dict[str, Any]] = []
     for item in payload.uploaded_files:
-        relative_path = item.relative_path.strip()
+        filename = Path(item.filename.strip() or "upload").name
+        relative_path = (
+            item.relative_path.strip()
+            if item.relative_path and item.relative_path.strip()
+            else f".uploads/{filename}"
+        )
         source_path = Path(relative_path)
         if source_path.is_absolute() or not relative_path.startswith(".uploads/"):
             raise HTTPException(status_code=400, detail="Invalid uploaded file path.")
@@ -78,7 +83,7 @@ def _resolve_uploaded_files(
             raise HTTPException(status_code=404, detail="Uploaded file not found.")
         files.append(
             {
-                "filename": item.filename or candidate.name,
+                "filename": filename,
                 "relative_path": relative_path,
                 "path": candidate,
                 "content_type": item.content_type,

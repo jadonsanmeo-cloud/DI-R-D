@@ -52,6 +52,13 @@ class UserContext:
     history: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True, slots=True)
+class UploadedFile:
+    """User-uploaded file visible inside the request sandbox by filename."""
+
+    filename: str
+
+
 @dataclass(slots=True)
 class SessionContext:
     """Short-lived context for the current conversation or task session."""

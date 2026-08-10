@@ -8,10 +8,10 @@ from typing import Any
 
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
-    DataCorpusPackage,
     ExecutionSpec,
     Intent,
     SessionContext,
+    UploadedFile,
     UserContext,
     UserQuery,
 )
@@ -73,7 +73,7 @@ class LLMSpecBuilder:
         return self._build(
             query=query,
             intent=intent,
-            corpus_package=DataCorpusPackage(),
+            uploaded_files=_uploaded_files_from_query(query),
             session_context=session_context,
             user_context=user_context,
         )
@@ -90,7 +90,7 @@ class LLMSpecBuilder:
         return self._build(
             query=query,
             intent=intent_analysis.intent,
-            corpus_package=DataCorpusPackage(),
+            uploaded_files=_uploaded_files_from_query(query),
             session_context=session_context,
             user_context=user_context,
             intent_analysis=intent_analysis,
@@ -101,7 +101,7 @@ class LLMSpecBuilder:
         *,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         session_context: SessionContext | None,
         user_context: UserContext | None,
         intent_analysis: IntentAnalysis | None = None,
@@ -110,7 +110,7 @@ class LLMSpecBuilder:
             return self._build_from_selected_cluster_spec(
                 query=query,
                 intent=intent,
-                corpus_package=corpus_package,
+                uploaded_files=uploaded_files,
                 session_context=session_context,
                 user_context=user_context,
             )
@@ -118,7 +118,7 @@ class LLMSpecBuilder:
         spec_build_context = self.context_builder.build(
             query,
             intent,
-            corpus_package,
+            uploaded_files,
             session_context,
             user_context,
             intent_analysis,
@@ -128,7 +128,7 @@ class LLMSpecBuilder:
         messages = self.prompt.build_messages(
             spec_build_context=spec_build_context,
             selected_data_context=selected_data_context,
-            corpus_package=corpus_package,
+            uploaded_files=uploaded_files,
             session_context=session_context,
             user_context=user_context,
         )
@@ -136,7 +136,7 @@ class LLMSpecBuilder:
             messages,
             intent,
             selected_data_context,
-            available_sources=corpus_package.sources,
+            available_sources=_uploaded_file_names(uploaded_files),
         )
 
     def revise(
@@ -154,7 +154,7 @@ class LLMSpecBuilder:
             user_feedback=user_feedback,
             query=query,
             intent=intent,
-            corpus_package=DataCorpusPackage(),
+            uploaded_files=_uploaded_files_from_query(query),
             session_context=session_context,
             user_context=user_context,
         )
@@ -176,7 +176,7 @@ class LLMSpecBuilder:
             user_feedback=user_feedback,
             query=query,
             intent=intent_analysis.intent,
-            corpus_package=DataCorpusPackage(),
+            uploaded_files=_uploaded_files_from_query(query),
             session_context=session_context,
             user_context=user_context,
             intent_analysis=intent_analysis,
@@ -189,7 +189,7 @@ class LLMSpecBuilder:
         user_feedback: str,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         session_context: SessionContext | None,
         user_context: UserContext | None,
         intent_analysis: IntentAnalysis | None = None,
@@ -198,7 +198,7 @@ class LLMSpecBuilder:
             return self._build_from_selected_cluster_spec(
                 query=query,
                 intent=intent,
-                corpus_package=corpus_package,
+                uploaded_files=uploaded_files,
                 session_context=session_context,
                 user_context=user_context,
                 previous_spec=previous_spec,
@@ -208,7 +208,7 @@ class LLMSpecBuilder:
         spec_build_context = self.context_builder.build(
             query,
             intent,
-            corpus_package,
+            uploaded_files,
             session_context,
             user_context,
             intent_analysis,
@@ -224,7 +224,7 @@ class LLMSpecBuilder:
             user_feedback=user_feedback,
             spec_build_context=spec_build_context,
             selected_data_context=selected_data_context,
-            corpus_package=corpus_package,
+            uploaded_files=uploaded_files,
             session_context=session_context,
             user_context=user_context,
         )
@@ -232,7 +232,7 @@ class LLMSpecBuilder:
             messages,
             intent,
             selected_data_context,
-            available_sources=corpus_package.sources,
+            available_sources=_uploaded_file_names(uploaded_files),
         )
 
     def _complete_valid_spec(
@@ -393,7 +393,7 @@ class LLMSpecBuilder:
         *,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
         previous_spec: ExecutionSpec | None = None,
@@ -401,9 +401,9 @@ class LLMSpecBuilder:
     ) -> ExecutionSpec:
         if self.datahub_clusterer is None or self.cluster_spec_selector is None:
             raise RuntimeError("Cluster flow requires a clusterer and selector.")
-        clustering_result = self.datahub_clusterer.cluster(corpus_package)
+        clustering_result = self.datahub_clusterer.cluster(uploaded_files)
         cluster_specs = self.cluster_spec_builder.build_specs(
-            corpus_package,
+            uploaded_files,
             clustering_result,
             intent,
         )
@@ -411,7 +411,7 @@ class LLMSpecBuilder:
         selected = self.cluster_spec_selector.select(
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
+            uploaded_files=uploaded_files,
             clustering_result=clustering_result,
             cluster_specs=cluster_specs,
             cluster_specs_by_id=cluster_specs_by_id,
@@ -582,3 +582,22 @@ def _selected_data_to_dict(value: object | None) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {}
+
+def _uploaded_files_from_query(query: UserQuery) -> list[UploadedFile]:
+    raw_files = query.metadata.get("uploaded_files", [])
+    if not isinstance(raw_files, list):
+        return []
+    uploaded_files: list[UploadedFile] = []
+    seen: set[str] = set()
+    for item in raw_files:
+        filename = item.get("filename") if isinstance(item, dict) else item
+        if not isinstance(filename, str):
+            continue
+        normalized = filename.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            uploaded_files.append(UploadedFile(filename=normalized))
+    return uploaded_files
+
+def _uploaded_file_names(uploaded_files: list[UploadedFile]) -> list[str]:
+    return [file.filename for file in uploaded_files]

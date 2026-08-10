@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     Intent,
     SessionContext,
+    UploadedFile,
     UserContext,
     UserQuery,
 )
@@ -87,12 +87,12 @@ class SpecContextBuilder:
         self,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
         intent_analysis: IntentAnalysis | None = None,
     ) -> SpecBuildContext:
-        corpus_summary = build_corpus_summary(corpus_package)
+        corpus_summary = build_uploaded_files_summary(uploaded_files)
         session_brief = self._build_session_brief(session_context)
         user_brief = self._build_user_brief(user_context)
         return SpecBuildContext(
@@ -159,32 +159,22 @@ class SpecContextBuilder:
         )
 
 
-def build_corpus_summary(corpus_package: DataCorpusPackage) -> CorpusSummary:
-    """Create a compact data map from parsed package/schema/catalog metadata."""
+def build_uploaded_files_summary(uploaded_files: list[UploadedFile]) -> CorpusSummary:
+    """Create a compact data map from uploaded filenames."""
 
-    catalog = corpus_package.metadata.get("catalog", {})
-    if not isinstance(catalog, dict):
-        catalog = {}
-    package_refs = corpus_package.metadata.get("package", {})
-    if not isinstance(package_refs, dict):
-        package_refs = {}
     return CorpusSummary(
-        package_refs=package_refs,
-        catalog_summary=_optional_str(catalog.get("summary")),
+        package_refs={},
+        catalog_summary=None,
         sources=[
-            {"ref": source, "kind": infer_source_kind(source)}
-            for source in corpus_package.sources
+            {"ref": file.filename, "kind": infer_source_kind(file.filename)}
+            for file in uploaded_files
         ],
-        tables=summarize_named_schema_entries(corpus_package.schemas.get("tables", {})),
-        vector_collections=summarize_named_schema_entries(
-            corpus_package.schemas.get("vector_collections", {})
-        ),
-        datasets=summarize_catalog_datasets(catalog.get("datasets", [])),
-        raw_files=_dict_or_empty(catalog.get("raw_files")),
-        embedding=_dict_or_empty(
-            catalog.get("embedding") or corpus_package.schemas.get("embedding")
-        ),
-        database=_dict_or_empty(corpus_package.schemas.get("database")),
+        tables=[],
+        vector_collections=[],
+        datasets=[],
+        raw_files={},
+        embedding={},
+        database={},
     )
 
 

@@ -9,7 +9,7 @@ from data_intelligence_sdk.spec.context import (
     SpecBuildContext,
     SpecContextBuilder,
     UserBrief,
-    build_corpus_summary,
+    build_uploaded_files_summary,
 )
 
 __all__ = [
@@ -18,5 +18,5 @@ __all__ = [
     "SpecBuildContext",
     "SpecContextBuilder",
     "UserBrief",
-    "build_corpus_summary",
+    "build_uploaded_files_summary",
 ]

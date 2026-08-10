@@ -13,8 +13,9 @@ class RuntimeOptionsRequest(BaseModel):
 
 class UploadedFileRequest(BaseModel):
     filename: str
-    relative_path: str = Field(
-        validation_alias=AliasChoices("relative_path", "relativePath")
+    relative_path: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("relative_path", "relativePath"),
     )
     size: int = 0
     content_type: str | None = None

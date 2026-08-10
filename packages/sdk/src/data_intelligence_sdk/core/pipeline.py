@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from data_intelligence_sdk.core.types import (
@@ -431,6 +432,7 @@ class DataIntelligencePipeline:
             )
             with sandbox_context as sandbox:
                 phase = "engine_execution"
+                _stage_uploaded_files(sandbox, prepared.session_context)
                 sandbox_executor = self.sandbox_executor
                 if sandbox_executor is None and sandbox is not None:
                     sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
@@ -550,6 +552,7 @@ class DataIntelligencePipeline:
             )
             with sandbox_context as sandbox:
                 phase = "engine_execution"
+                _stage_uploaded_files(sandbox, prepared.session_context)
                 sandbox_executor = self.sandbox_executor
                 if sandbox_executor is None and sandbox is not None:
                     sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
@@ -806,6 +809,29 @@ def _optional_string(value: object) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+def _stage_uploaded_files(
+    sandbox: object | None,
+    session_context: SessionContext | None,
+) -> None:
+    if sandbox is None or session_context is None:
+        return
+    records = session_context.state.get("_uploaded_files_to_stage", [])
+    if not isinstance(records, list):
+        return
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        filename = Path(str(record.get("filename") or "")).name
+        host_path = Path(str(record.get("path") or ""))
+        if not filename or not host_path.is_file():
+            continue
+        write = getattr(sandbox, "write", None)
+        if callable(write):
+            write(filename, host_path.read_bytes())
+        source_paths = getattr(sandbox, "source_paths", None)
+        if isinstance(source_paths, dict):
+            source_paths[filename] = filename
 
 def _final_response_from_engine_output(
     output: EngineOutput,
