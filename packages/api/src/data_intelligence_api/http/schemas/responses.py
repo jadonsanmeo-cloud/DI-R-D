@@ -7,12 +7,6 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
-class DataCorpusPackageRequest(BaseModel):
-    sources: list[str] = Field(default_factory=list)
-    schemas: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class RuntimeOptionsRequest(BaseModel):
     method_hub_enabled: bool | None = None
     engine: Literal["auto", "general", "reason", "report"] | None = None
@@ -38,7 +32,6 @@ class RuntimeCapabilitiesResponse(BaseModel):
 
 class CreateResponseRequest(BaseModel):
     input: str | None = None
-    data_corpus_package: DataCorpusPackageRequest | None = None
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     user_id: str | None = None
     session_id: str | None = None

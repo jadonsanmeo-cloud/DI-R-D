@@ -1,1 +1,0 @@
-Customer segments include enterprise, mid-market, and startup accounts. Segment metadata helps explain different product usage and support needs across the mock corpus.

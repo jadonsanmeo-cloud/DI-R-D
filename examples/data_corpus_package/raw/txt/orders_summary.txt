@@ -1,1 +1,0 @@
-The orders dataset tracks customer purchases by country, status, and revenue. Completed orders from US and CA customers are available for revenue analysis, while pending orders show pipeline activity.

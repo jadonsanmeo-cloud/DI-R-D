@@ -1,1 +1,0 @@
-The product catalog includes analytics dashboards, embedding search, and workflow monitoring products. Product categories connect revenue records to analytics, retrieval, and operations workflows.
