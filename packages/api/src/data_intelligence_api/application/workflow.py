@@ -73,33 +73,23 @@ def _uploaded_file_records(
     request: CreateResponseRequest,
     data_corpus_root: Path,
 ) -> tuple[list[UploadedFile], list[dict[str, Any]]]:
-    root = data_corpus_root.resolve()
-    upload_root = (root / ".uploads").resolve()
+    del data_corpus_root
     uploaded_files: list[UploadedFile] = []
     staging_records: list[dict[str, Any]] = []
     for item in request.uploaded_files:
         filename = Path(item.filename.strip() or "upload").name
-        relative_path = (
-            item.relative_path.strip()
-            if item.relative_path and item.relative_path.strip()
-            else f".uploads/{filename}"
-        )
-        source_path = Path(relative_path)
-        if source_path.is_absolute() or not relative_path.startswith(".uploads/"):
+        file_ref = item.metadata.get("file_ref")
+        if not isinstance(file_ref, dict):
             raise SourceValidationError(
-                f"Uploaded file path is outside .uploads: {relative_path}"
+                f"Uploaded file is missing file_ref metadata: {filename}"
             )
-        candidate = (root / source_path).resolve()
-        try:
-            candidate.relative_to(upload_root)
-        except ValueError as error:
+        url = file_ref.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             raise SourceValidationError(
-                f"Uploaded file path is outside .uploads: {relative_path}"
-            ) from error
-        if not candidate.is_file():
-            raise SourceValidationError(f"Uploaded file does not exist: {filename}")
+                f"Uploaded file is missing a readable file_ref.url: {filename}"
+            )
         uploaded_files.append(UploadedFile(filename=filename))
-        staging_records.append({"filename": filename, "path": str(candidate)})
+        staging_records.append({"filename": filename, "url": url})
     return uploaded_files, staging_records
 
 

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 
 from data_intelligence_api.application.gen_report_client import GenReportClient
@@ -55,41 +56,38 @@ def _failed_payload(response_id: str, code: str, message: str) -> dict[str, Any]
     }
 
 
-def _resolve_uploaded_files(
+async def _resolve_uploaded_files(
     payload: CreateResponseRequest,
     settings: ApiSettings,
 ) -> list[dict[str, Any]]:
-    root = settings.data_corpus_root.resolve()
-    upload_root = (root / ".uploads").resolve()
+    del settings
     files: list[dict[str, Any]] = []
-    for item in payload.uploaded_files:
-        filename = Path(item.filename.strip() or "upload").name
-        relative_path = (
-            item.relative_path.strip()
-            if item.relative_path and item.relative_path.strip()
-            else f".uploads/{filename}"
-        )
-        source_path = Path(relative_path)
-        if source_path.is_absolute() or not relative_path.startswith(".uploads/"):
-            raise HTTPException(status_code=400, detail="Invalid uploaded file path.")
-        candidate = (root / source_path).resolve()
-        try:
-            candidate.relative_to(upload_root)
-        except ValueError as error:
-            raise HTTPException(
-                status_code=400, detail="Invalid uploaded file path."
-            ) from error
-        if not candidate.is_file():
-            raise HTTPException(status_code=404, detail="Uploaded file not found.")
-        files.append(
-            {
-                "filename": filename,
-                "relative_path": relative_path,
-                "path": candidate,
-                "content_type": item.content_type,
-                "size": item.size,
-            }
-        )
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        for item in payload.uploaded_files:
+            filename = Path(item.filename.strip() or "upload").name
+            file_ref = item.metadata.get("file_ref")
+            if not isinstance(file_ref, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Uploaded file is missing file_ref metadata: {filename}",
+                )
+            url = file_ref.get("url")
+            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Uploaded file is missing readable file_ref.url: {filename}",
+                )
+            response = await client.get(url)
+            response.raise_for_status()
+            files.append(
+                {
+                    "filename": filename,
+                    "content": response.content,
+                    "content_type": item.content_type,
+                    "size": item.size or len(response.content),
+                    "file_ref": file_ref,
+                }
+            )
     return files
 
 
@@ -265,7 +263,7 @@ async def stream_gen_report_response(
     )
 
     try:
-        uploaded_files = _resolve_uploaded_files(payload, settings)
+        uploaded_files = await _resolve_uploaded_files(payload, settings)
         gen_conversation_id = await client.create_conversation(query_text)
         conversation_event = {
             "type": "pipeline.lambda.conversation_created",
@@ -282,7 +280,7 @@ async def stream_gen_report_response(
             file_id = await client.upload_file(
                 conversation_id=gen_conversation_id,
                 filename=str(uploaded["filename"]),
-                path=uploaded["path"],
+                content=uploaded["content"],
                 content_type=uploaded["content_type"],
             )
             file_ids.append(file_id)
@@ -294,7 +292,7 @@ async def stream_gen_report_response(
                 "details": {
                     "inputs": {
                         "filename": uploaded["filename"],
-                        "relative_path": uploaded["relative_path"],
+                        "file_ref": uploaded["file_ref"],
                     },
                     "outputs": {"gen_report_file_id": file_id},
                 },
@@ -308,6 +306,11 @@ async def stream_gen_report_response(
             conversation_id=gen_conversation_id,
             message=query_text,
             file_ids=file_ids,
+            runtime_gateway=(
+                payload.runtime_gateway.model_dump(mode="json")
+                if payload.runtime_gateway
+                else None
+            ),
         ):
             for lambda_event in parser.feed(chunk):
                 lambda_type = str(lambda_event.get("type") or "")

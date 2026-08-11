@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class RuntimeOptionsRequest(BaseModel):
@@ -13,13 +13,19 @@ class RuntimeOptionsRequest(BaseModel):
 
 class UploadedFileRequest(BaseModel):
     filename: str
-    relative_path: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("relative_path", "relativePath"),
-    )
     size: int = 0
     content_type: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeGatewayRequest(BaseModel):
+    run_id: str
+    endpoint: str
+    token: str
+    token_type: str = "bearer"
+    expires_at: int
+    workspace_id: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class MethodHubCapabilityResponse(BaseModel):
@@ -32,6 +38,7 @@ class RuntimeCapabilitiesResponse(BaseModel):
 
 
 class CreateResponseRequest(BaseModel):
+    response_id: str | None = None
     input: str | None = None
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     user_id: str | None = None
@@ -39,6 +46,7 @@ class CreateResponseRequest(BaseModel):
     runtime_options: RuntimeOptionsRequest = Field(
         default_factory=RuntimeOptionsRequest
     )
+    runtime_gateway: RuntimeGatewayRequest | None = None
 
 
 class ResponseDecisionRequest(BaseModel):

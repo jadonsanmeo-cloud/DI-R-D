@@ -289,7 +289,7 @@ def create_responses_router(
 
     @router.post("/api/v1/responses")
     async def create_response(payload: CreateResponseRequest) -> StreamingResponse:
-        response_id = f"resp_{uuid.uuid4().hex}"
+        response_id = payload.response_id or f"resp_{uuid.uuid4().hex}"
         if payload.runtime_options.engine == "report":
             return StreamingResponse(
                 stream_gen_report_response(

@@ -7,6 +7,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from data_intelligence_sdk.core.types import (
     EngineInput,
     EngineOutput,
@@ -823,12 +825,18 @@ def _stage_uploaded_files(
         if not isinstance(record, dict):
             continue
         filename = Path(str(record.get("filename") or "")).name
-        host_path = Path(str(record.get("path") or ""))
-        if not filename or not host_path.is_file():
+        url = str(record.get("url") or "")
+        if not filename or not url.startswith(("http://", "https://")):
+            continue
+        try:
+            response = httpx.get(url, timeout=60.0)
+            response.raise_for_status()
+            content = response.content
+        except httpx.HTTPError:
             continue
         write = getattr(sandbox, "write", None)
         if callable(write):
-            write(filename, host_path.read_bytes())
+            write(filename, content)
         source_paths = getattr(sandbox, "source_paths", None)
         if isinstance(source_paths, dict):
             source_paths[filename] = filename

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -39,22 +38,21 @@ class GenReportClient:
         *,
         conversation_id: str,
         filename: str,
-        path: Path,
+        content: bytes,
         content_type: str | None = None,
     ) -> int:
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            with path.open("rb") as file_handle:
-                response = await client.post(
-                    f"{self.base_url}/api/v1/files/upload",
-                    data={"conversation_id": conversation_id},
-                    files={
-                        "file": (
-                            filename,
-                            file_handle,
-                            content_type or "application/octet-stream",
-                        )
-                    },
-                )
+            response = await client.post(
+                f"{self.base_url}/api/v1/files/upload",
+                data={"conversation_id": conversation_id},
+                files={
+                    "file": (
+                        filename,
+                        content,
+                        content_type or "application/octet-stream",
+                    )
+                },
+            )
             response.raise_for_status()
             payload = response.json()
         file_id = payload.get("id")
@@ -68,6 +66,7 @@ class GenReportClient:
         conversation_id: str,
         message: str,
         file_ids: list[int],
+        runtime_gateway: dict[str, Any] | None = None,
         language: str = "en",
     ) -> AsyncIterator[str]:
         payload: dict[str, Any] = {
@@ -77,6 +76,8 @@ class GenReportClient:
             "analysis_mode": "auto",
             "language": language,
         }
+        if runtime_gateway is not None:
+            payload["runtime_gateway"] = runtime_gateway
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             async with client.stream(
                 "POST",
