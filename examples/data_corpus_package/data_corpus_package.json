@@ -1,6 +1,0 @@
-{
-  "vectordb": "postgresql://data_intelligence:data_intelligence@localhost:2345/data_corpus?schema=vectordb",
-  "db": "postgresql://data_intelligence:data_intelligence@localhost:2345/data_corpus",
-  "schema": "schema.json",
-  "catalog": "catalog.json"
-}

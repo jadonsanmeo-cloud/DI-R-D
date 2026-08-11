@@ -111,24 +111,11 @@ DATA_CORPUS_ROOT=.
 Model IDs, provider endpoints, CORS, timeout và upload limits được cấu hình trong
 `configs/proxy-openrouter.toml`, không lặp lại trong `.env`.
 
-Các cấu hình local quan trọng đã có sẵn trong `docker/.env.example`:
-
-```env
-SANDBOX_TOKEN=<sandbox-service-client-token>
-REPORT_FORCE_CODE_AGENT=false
-```
-
-Ý nghĩa:
-
-- `SANDBOX_TOKEN`: credential để API gọi AXIOM Sandbox Service qua gateway.
-- `REPORT_FORCE_CODE_AGENT=false`: Router ưu tiên method deterministic có sẵn trong
-  Method Hub, bao gồm reader `.xls`/`.xlsx`. Chỉ đổi thành `true` khi cần kiểm thử
-  riêng nhánh sinh code.
 - `DATA_CORPUS_ROOT=.`: file upload được lưu dưới `.uploads/` trong repository.
 
 Đặt `[sandbox].enabled = true` trong `configs/proxy-openrouter.toml` để bật
 sandbox. AXIOM Sandbox Service quản lý container, network và resource limits; SDK
-chỉ giữ endpoint, workspace ID và client token cần cho luồng QA.
+chỉ giữ endpoint và workspace ID cần cho luồng QA.
 
 Không commit `docker/.env`. File `docker/.env.example` chỉ chứa tên biến và được
 phép commit.
@@ -238,12 +225,6 @@ Với một file local:
 uv run python examples/create_report.py --source "C:\path\to\data.pdf" --query "Create a report about this data file"
 ```
 
-Với package mẫu:
-
-```powershell
-uv run python examples/create_report.py --package examples/data_corpus_package/data_corpus_package.json --query "Create a report about this data corpus"
-```
-
 CLI và API đọc secret cùng các cờ process-local từ `docker/.env`; cấu hình model vẫn lấy
 từ `configs/proxy-openrouter.toml`.
 
@@ -349,9 +330,9 @@ uv pip install -e packages/sdk -e packages/api
 
 ### Không kết nối được Sandbox Service
 
-Kiểm tra `[sandbox].endpoint`, `workspace_id`, `SANDBOX_TOKEN` và network route từ
-API tới AXIOM Sandbox Service. Resource limits phải được cấu hình ở Sandbox
-Service, không đặt trong SDK/API.
+Kiểm tra `[sandbox].endpoint`, `workspace_id` và network route từ API tới AXIOM
+Sandbox Service. Resource limits phải được cấu hình ở Sandbox Service, không đặt
+trong SDK/API.
 
 ### LLM trả 401, 403 hoặc model not found
 
@@ -393,14 +374,13 @@ User Query
 Supporting layers:
 
 - `runtime`: request orchestration, `EngineRuntimeContext`, logging, MCP access, artifacts, and sandbox execution.
-- `sandbox`: one isolated AXIOM execution environment per request for generated code. It is not a staged file workspace for engine input data.
+- `sandbox`: one isolated AXIOM execution environment per request for generated code and staged uploaded files.
 - `artifacts`: one persistent filesystem bundle per pipeline invocation, containing every generated-code attempt and execution observation.
 - `context`: user and session context placeholders.
 
 ## Base Design Notes
 
-- `DataCorpusPackage` describes the available data universe for pipeline/spec-building and compatibility flows. Engines should not depend on direct access to it.
-- `DataHubContext` remains available as a compatibility alias for `DataCorpusPackage` during the transition.
+- `UploadedFile` describes each user-uploaded file by filename. The API stages matching uploaded files into the request sandbox under that filename.
 - `Intent` is a controlled string selected from `SUPPORTED_INTENTS`: `reason` for data questions, `report` for report generation, `general` for general-purpose queries handled by `GeneralPurposeEngine`, and `unknown` for classifier failures or legacy payloads. The spec carries the richer objective, constraints, and capability requirements.
 - `ExecutionSpec.capability_requirements` describes what the selected engine/runtime must resolve.
 - Engines receive `EngineInput(query, spec, runtime, user_context)`. `runtime` owns the request-scoped `EngineRunContext`, sandbox session, MCP/tools, logs, and artifacts.
@@ -415,54 +395,26 @@ Supporting layers:
 The SDK exposes the runtime contracts while the application-owned factory wires OpenRouter, filesystem artifacts, the AXIOM Method Hub MCP server, and AXIOM sandbox-service. `GeneralPurposeEngine` receives only `EngineInput`, then uses `deepagents==0.6.12` to select direct MCP tools or generate, execute, observe, and correct sandboxed Python analysis. The SDK contains no local Method Hub registry or concrete Method Hub implementations.
 
 ```python
-from data_intelligence_sdk import DataCorpusPackage, UserQuery
+from data_intelligence_sdk import UserQuery
 from examples.basic_workflow import create_example_pipeline
 
 pipeline = create_example_pipeline()
 response = pipeline.run(
     UserQuery("What is the total revenue in this file?"),
-    DataCorpusPackage(sources=["sales.csv"]),
 )
 print(response.answer)
 print(response.metadata["artifact_ref"])
 ```
 
-The high-level request starts from `UserQuery`. The compatibility pipeline may
-still accept `DataCorpusPackage` while it prepares a spec, but selected engines
-do not receive that package directly; they receive `EngineInput`.
+The high-level request starts from `UserQuery`. Uploaded filenames are carried
+in `UserQuery.metadata["uploaded_files"]`; selected engines receive
+`EngineInput`.
 
 Run the example pipeline from the command line:
 
 ```bash
 uv run python examples/run_pipeline.py --source sales.csv --query "What is the total revenue?"
-uv run python examples/run_pipeline.py --package examples/data_corpus_package/data_corpus_package.json --query "Summarize this package"
 ```
-
-The `--package` file is compatibility input for the demo pipeline/spec builder.
-It describes a data corpus package by reference:
-
-```json
-{
-  "vectordb": "vectordb",
-  "db": "warehouse.db",
-  "schema": "schema.json",
-  "catalog": "catalog.json"
-}
-```
-
-Relative paths resolve from the package file directory. The example runner maps `vectordb` and `db` into `DataCorpusPackage.sources`, loads `schema.json` into `DataCorpusPackage.schemas`, and loads `catalog.json` into `DataCorpusPackage.metadata["catalog"]` before engine selection. Engines do not access these fields directly.
-
-The checked-in example at `examples/data_corpus_package/` models `db` as a Postgres-style warehouse reference and `vectordb` as persisted document chunk storage with `chunk_id`, `document_id`, `content`, `embedding`, and `metadata` fields. It includes five raw CSV files under `raw/csv/` and five raw text files under `raw/txt/`.
-
-Mock embeddings are deterministic local vectors. The metadata records `OPENROUTER_EMBEDDING_MODEL`, defaulting to `openai/text-embedding-3-small`, so a real ingestion implementation can swap in OpenRouter embeddings later without changing the package shape.
-
-Start the local mock Postgres + pgvector package with:
-
-```bash
-docker compose -f examples/data_corpus_package/docker-compose.yml up -d
-```
-
-The seed SQL creates relational `customers`, `orders`, `products`, `support_tickets`, `web_events`, and `documents` tables plus `vectordb.document_chunks` rows with mock text content and embeddings.
 
 Configure OpenRouter with:
 
@@ -479,10 +431,9 @@ Use the demo to run the complete non-interactive query-to-answer flow:
 
 ```bash
 uv run python examples/demo_workflow_cli.py \
-  --package examples/data_corpus_package/data_corpus_package.json \
   --config configs/proxy-openrouter.toml \
   --env-file docker/.env \
-  --query "Summarize this data corpus package"
+  --query "Summarize these uploaded files"
 ```
 
 The CLI builds the spec, selects the engine, provisions one request-scoped
@@ -512,18 +463,13 @@ creates one sandbox for the entire request. Configure it in
 enabled = true
 endpoint = "http://host.docker.internal:8004"
 workspace_id = "00000000-0000-0000-0000-000000000001"
-token = "${env:SANDBOX_TOKEN}"
 ```
 
 The CLI example discovers the sibling client source directly for local
 development. Production applications should install `axiom-sandbox-client`.
 The general engine requires `[sandbox].enabled = true` and a workspace ID.
 AXIOM Sandbox Service owns sandbox lifecycle, isolation, and resource limits;
-the SDK/API only supplies the endpoint and client credentials.
-
-The API defaults `REPORT_FORCE_CODE_AGENT` to `false` so deterministic Method Hub
-tools are preferred when their contracts match. Set it to `true` only to exercise
-the generated-code route even when a matching tool exists.
+the SDK/API only supplies the endpoint and workspace ID.
 
 ### Per-request Method Hub mode
 
@@ -533,11 +479,7 @@ Method Hub choice with each Responses request:
 ```json
 {
   "input": "Scan the files and normalize the result",
-  "data_corpus_package": {
-    "sources": [],
-    "schemas": {},
-    "metadata": {}
-  },
+  "uploaded_files": [{"filename": "sales.csv"}],
   "runtime_options": {
     "method_hub_enabled": true
   }

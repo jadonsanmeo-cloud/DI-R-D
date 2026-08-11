@@ -7,10 +7,10 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     ExecutionSpec,
     Intent,
     SessionContext,
+    UploadedFile,
     UserContext,
     UserQuery,
 )
@@ -28,7 +28,7 @@ class SpecBuilderPrompt:
         *,
         query: UserQuery | None = None,
         intent: Intent | None = None,
-        corpus_package: DataCorpusPackage | None = None,
+        uploaded_files: list[UploadedFile] | None = None,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
         spec_build_context: SpecBuildContext | None = None,
@@ -38,7 +38,7 @@ class SpecBuilderPrompt:
             mode="build",
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
+            uploaded_files=uploaded_files,
             session_context=session_context,
             user_context=user_context,
             spec_build_context=spec_build_context,
@@ -52,7 +52,7 @@ class SpecBuilderPrompt:
         user_feedback: str,
         query: UserQuery | None = None,
         intent: Intent | None = None,
-        corpus_package: DataCorpusPackage | None = None,
+        uploaded_files: list[UploadedFile] | None = None,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
         spec_build_context: SpecBuildContext | None = None,
@@ -62,7 +62,7 @@ class SpecBuilderPrompt:
             mode="revise",
             query=query,
             intent=intent,
-            corpus_package=corpus_package,
+            uploaded_files=uploaded_files,
             session_context=session_context,
             user_context=user_context,
             spec_build_context=spec_build_context,
@@ -77,7 +77,7 @@ class SpecBuilderPrompt:
         mode: str,
         query: UserQuery | None,
         intent: Intent | None,
-        corpus_package: DataCorpusPackage | None,
+        uploaded_files: list[UploadedFile] | None,
         session_context: SessionContext | None,
         user_context: UserContext | None,
         spec_build_context: SpecBuildContext | None,
@@ -88,7 +88,7 @@ class SpecBuilderPrompt:
         spec_build_context = spec_build_context or self._build_context(
             query,
             intent,
-            corpus_package,
+            uploaded_files,
             session_context,
             user_context,
         )
@@ -114,18 +114,18 @@ class SpecBuilderPrompt:
         self,
         query: UserQuery | None,
         intent: Intent | None,
-        corpus_package: DataCorpusPackage | None,
+        uploaded_files: list[UploadedFile] | None,
         session_context: SessionContext | None,
         user_context: UserContext | None,
     ) -> SpecBuildContext:
-        if query is None or intent is None or corpus_package is None:
+        if query is None or intent is None or uploaded_files is None:
             raise ValueError(
-                "query, intent, and corpus_package are required when spec_build_context is not provided."
+                "query, intent, and uploaded_files are required when spec_build_context is not provided."
             )
         return self.context_builder.build(
             query,
             intent,
-            corpus_package,
+            uploaded_files,
             session_context,
             user_context,
         )
@@ -177,17 +177,10 @@ ExecutionSpec JSON contract:
 
 Field rules:
 - objective: rewrite the user request into one clear executable objective.
-- data_requirements: include only source refs from corpus_package.sources, corpus_summary.sources, or refs explicitly present in corpus metadata.
+- data_requirements: include only uploaded filenames from corpus_summary.sources.
 - capability_requirements: describe capabilities the engine/runtime must resolve; do not name concrete method calls unless the capability itself is method-specific.
 - constraints: structured task constraints such as filters, metrics, group_by,
-  language, output_format, evidence_required, scope, and report_content_roles.
-  For report requests, normalize explicitly requested presentation capabilities
-  into `report_content_roles` using only: `data_profile`, `executive_summary`,
-  `key_findings`, `supporting_evidence`, `implication`, `limitation`,
-  `recommendation`, `narrative`, `metrics`, `chart`, or `table`. This field is the
-  contract consumed by the Template Agent; do not rely on downstream components
-  re-reading keywords from the original prompt. Omit roles the user did not ask
-  for and do not prescribe section IDs, ordering, or a fixed page layout.
+  language, output_format, evidence_required, and scope.
 - engine_hint: use "report" for report tasks; otherwise use null unless a specific engine is clearly required.
 
 Do not include confirmed. The confirmation component owns that field.

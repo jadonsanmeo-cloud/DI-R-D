@@ -26,7 +26,6 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.engines.general import GeneralPurposeEngine
-from data_intelligence_sdk.engines.report import ReportEngine
 from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.registry.engine_selector import (
@@ -52,14 +51,6 @@ from data_intelligence_sdk.spec.markdown_builder import LLMMarkdownSpecBuilder
 from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
 
 DEFAULT_QUERYAI_REASON_URL = "http://localhost:7205/query"
-
-def _env_flag(name: str, *, default: bool) -> bool:
-    raw_value = os.environ.get(name)
-    if raw_value is None:
-        return default
-    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
-
-
 
 class _ReportDefaultsSpecBuilder:
     """Apply API report-delivery defaults without overriding explicit choices."""
@@ -238,7 +229,7 @@ def _configure_axiom_sandbox_provider(
             "installed. Install the local AXIOM client package."
         ) from exc
 
-    sandbox_client = SandboxClient(settings.endpoint, token=settings.token)
+    sandbox_client = SandboxClient(settings.endpoint)
     keep_sandbox = str(os.environ.get("AXIOM_SANDBOX_KEEP", "false")).lower() in {
         "1",
         "true",
@@ -447,7 +438,6 @@ def create_example_pipeline(
     engine_selector: EngineSelector | None = None,
     use_llm_spec_builder: bool = False,
     allow_method_generation: bool = True,
-    force_report_code_agent: bool | None = None,
     mcp_client: MCPMethodClient | None = None,
     mcp_tools: tuple[MCPToolDefinition, ...] = (),
     method_hub_enabled: bool | None = None,
@@ -470,11 +460,6 @@ def create_example_pipeline(
     if method_hub_enabled is None and mcp_client is not None and not resolved_mcp_tools:
         resolved_mcp_tools = tuple(mcp_client.list_tools())
     shared_llm_client = spec_llm_client
-    if force_report_code_agent is None:
-        force_report_code_agent = _env_flag(
-            "REPORT_FORCE_CODE_AGENT",
-            default=False,
-        )
     if artifact_store is None:
         artifact_settings = resolved_config_manager.artifact_settings()
         artifact_store = FilesystemArtifactStore(artifact_settings.root)
@@ -513,10 +498,6 @@ def create_example_pipeline(
         )
         if llm is not None:
             general_engine = GeneralPurposeEngine(llm=llm)
-            report_engine = ReportEngine(
-                llm=llm,
-                force_code_agent=force_report_code_agent,
-            )
         else:
             general_engine = GeneralPurposeEngine(
                 model=model,
@@ -524,13 +505,6 @@ def create_example_pipeline(
                 config_path=config_path,
                 config_manager=resolved_config_manager,
                 allow_method_generation=allow_method_generation,
-            )
-            report_engine = ReportEngine(
-                model=model,
-                api_key=api_key,
-                config_path=config_path,
-                config_manager=resolved_config_manager,
-                force_code_agent=force_report_code_agent,
             )
         if engine_selector is None:
             if shared_llm_client is None:
@@ -547,7 +521,6 @@ def create_example_pipeline(
         )
         registry.register(general_engine)
         registry.register(reason_engine)
-        registry.register(report_engine)
     else:
         registry = InMemoryEngineRegistry(fallback_engine=engine)
         registry.register(engine)
@@ -560,13 +533,6 @@ def create_example_pipeline(
         else ExampleIntentAnalyzer()
     )
     resolved_markdown_report_engine = markdown_report_engine
-    if resolved_markdown_report_engine is None:
-        if use_llm_spec_builder:
-            resolved_markdown_report_engine = (
-                report_engine if uses_default_engine else ReportEngine()
-            )
-        else:
-            resolved_markdown_report_engine = engine
     return DataIntelligencePipeline(
         intent_analyzer=intent_analyzer,
         spec_builder=spec_builder,
@@ -599,16 +565,10 @@ def create_report_pipeline(
     interface_registry: object | None = None,
     logger: RuntimeLogger | None = None,
 ) -> DataIntelligencePipeline:
-    """Create an offline report-generation pipeline for examples."""
+    """Report generation now runs through the external GenReport service."""
 
-    return create_example_pipeline(
-        engine=ReportEngine(
-            force_code_agent=_env_flag(
-                "REPORT_FORCE_CODE_AGENT",
-                default=False,
-            )
-        ),
-        mcp_client=mcp_client,
-        interface_registry=interface_registry,
-        logger=logger,
+    del mcp_client, interface_registry, logger
+    raise RuntimeError(
+        "Local report engine has been removed. Use the Responses API report route, "
+        "which delegates to the external GenReport service."
     )

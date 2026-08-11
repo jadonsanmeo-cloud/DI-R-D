@@ -1,1 +1,0 @@
-Web event logs show user activity such as dashboard views, document searches, and CSV uploads. These events help connect product usage behavior to customer and order records.

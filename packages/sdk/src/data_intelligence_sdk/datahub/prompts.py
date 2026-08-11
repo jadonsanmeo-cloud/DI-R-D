@@ -5,21 +5,21 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from data_intelligence_sdk.core.types import DataCorpusPackage
+from data_intelligence_sdk.core.types import UploadedFile
 
 
 class DataHubClusteringPrompt:
-    """Builds chat messages for clustering a parsed datahub/corpus package."""
+    """Builds chat messages for clustering uploaded files."""
 
     def cluster_messages(
-        self, corpus_package: DataCorpusPackage
+        self, uploaded_files: list[UploadedFile]
     ) -> list[dict[str, str]]:
         return [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": json.dumps(
-                    {"corpus_package": asdict(corpus_package)},
+                    {"uploaded_files": [asdict(item) for item in uploaded_files]},
                     ensure_ascii=True,
                     sort_keys=True,
                 ),
@@ -29,10 +29,9 @@ class DataHubClusteringPrompt:
 
 _SYSTEM_PROMPT = """You are the DataHub Clustering agent for a data intelligence system.
 
-Cluster the parsed datahub into semantic groups of related data assets. Use
-source descriptions, schema descriptions, column names, catalog datasets, raw
-files, vector collections, and relationship hints. Do not answer a user task
-and do not select task-specific files.
+Cluster the uploaded files into semantic groups of related assets. Use filenames
+and file extensions only. Do not answer a user task and do not select
+task-specific files.
 
 DataHubClusteringResult JSON contract:
 {

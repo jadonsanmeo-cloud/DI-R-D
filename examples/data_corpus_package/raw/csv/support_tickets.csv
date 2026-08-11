@@ -1,4 +1,0 @@
-ticket_id,customer_id,status,priority,topic
-ticket_001,cust_001,closed,high,invoice export
-ticket_002,cust_002,open,medium,semantic search
-ticket_003,cust_003,pending,low,csv import

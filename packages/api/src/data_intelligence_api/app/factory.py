@@ -16,7 +16,6 @@ from data_intelligence_api.http.routers.runtime_capabilities import (
     create_runtime_capabilities_router,
 )
 from data_intelligence_api.http.routers.health import create_health_router
-from data_intelligence_api.http.routers.uploads import create_uploads_router
 from data_intelligence_api.application.ports.run_repository import RunRepository
 from data_intelligence_api.infrastructure.persistence.memory.run_repository import (
     InMemoryRunRepository,
@@ -81,7 +80,6 @@ def create_app(
     )
 
     app.include_router(create_health_router(resolved_repository))
-    app.include_router(create_uploads_router(resolved_settings))
     app.include_router(create_runtime_capabilities_router(resolved_settings))
     app.include_router(
         create_responses_router(

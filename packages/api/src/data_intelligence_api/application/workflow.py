@@ -6,12 +6,10 @@ import inspect
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import Callable
-from urllib.parse import urlparse
+from typing import Any, Callable
 
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     CapabilityRequirement,
     ExecutionSpec,
     FinalResponse,
@@ -20,6 +18,7 @@ from data_intelligence_sdk.core.types import (
     PreparedMarkdownExecution,
     PreprocessingStep,
     SessionContext,
+    UploadedFile,
     UserContext,
     UserQuery,
 )
@@ -70,30 +69,28 @@ class SourceValidationError(ValueError):
     """Raised when a requested corpus source is not allowed."""
 
 
-def resolve_sources(sources: list[str], data_corpus_root: Path) -> list[str]:
-    root = data_corpus_root.resolve()
-    resolved_sources: list[str] = []
-    for source in sources:
-        source_path = Path(source)
-        if not source_path.is_absolute() and urlparse(source).scheme:
+def _uploaded_file_records(
+    request: CreateResponseRequest,
+    data_corpus_root: Path,
+) -> tuple[list[UploadedFile], list[dict[str, Any]]]:
+    del data_corpus_root
+    uploaded_files: list[UploadedFile] = []
+    staging_records: list[dict[str, Any]] = []
+    for item in request.uploaded_files:
+        filename = Path(item.filename.strip() or "upload").name
+        file_ref = item.metadata.get("file_ref")
+        if not isinstance(file_ref, dict):
             raise SourceValidationError(
-                f"Remote data source references are not supported: {source}"
+                f"Uploaded file is missing file_ref metadata: {filename}"
             )
-        candidate = (
-            source_path.resolve()
-            if source_path.is_absolute()
-            else (root / source_path).resolve()
-        )
-        try:
-            candidate.relative_to(root)
-        except ValueError as error:
+        url = file_ref.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             raise SourceValidationError(
-                f"Data source is outside DATA_CORPUS_ROOT: {source}"
-            ) from error
-        if not candidate.exists():
-            raise SourceValidationError(f"Data source does not exist: {source}")
-        resolved_sources.append(str(candidate))
-    return resolved_sources
+                f"Uploaded file is missing a readable file_ref.url: {filename}"
+            )
+        uploaded_files.append(UploadedFile(filename=filename))
+        staging_records.append({"filename": filename, "url": url})
+    return uploaded_files, staging_records
 
 
 def build_workflow_invocation(
@@ -103,22 +100,26 @@ def build_workflow_invocation(
     method_hub_default_enabled: bool = False,
 ) -> WorkflowInvocation:
     query_text = (request.input or "").strip() or DEFAULT_QUERY
-    package = request.data_corpus_package
+    uploaded_files, staging_records = _uploaded_file_records(
+        request,
+        data_corpus_root,
+    )
+    public_uploaded_files = [asdict(uploaded) for uploaded in uploaded_files]
     return WorkflowInvocation(
         query=UserQuery(
             text=query_text,
             user_id=request.user_id,
             session_id=request.session_id,
+            metadata={"uploaded_files": public_uploaded_files},
         ),
-        corpus_package=DataCorpusPackage(
-            sources=resolve_sources(
-                package.sources if package is not None else [],
-                data_corpus_root,
-            ),
-            schemas=package.schemas if package is not None else {},
-            metadata=package.metadata if package is not None else {},
+        uploaded_files=uploaded_files,
+        session_context=SessionContext(
+            session_id=request.session_id,
+            state={
+                "uploaded_files": public_uploaded_files,
+                "_uploaded_files_to_stage": staging_records,
+            },
         ),
-        session_context=SessionContext(session_id=request.session_id),
         user_context=UserContext(user_id=request.user_id),
         runtime_options=resolve_runtime_options(
             request.runtime_options,

@@ -6,7 +6,7 @@ from data_intelligence_sdk.spec.context import (
     SpecBuildContext,
     SpecContextBuilder,
     UserBrief,
-    build_corpus_summary,
+    build_uploaded_files_summary,
 )
 from data_intelligence_sdk.context.user_context import UserContextStore
 
@@ -17,5 +17,5 @@ __all__ = [
     "SpecContextBuilder",
     "UserBrief",
     "UserContextStore",
-    "build_corpus_summary",
+    "build_uploaded_files_summary",
 ]

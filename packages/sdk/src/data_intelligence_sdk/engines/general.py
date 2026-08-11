@@ -22,6 +22,7 @@ from data_intelligence_sdk.core.types import (
     EngineInput,
     EngineOutput,
     ExecutionSpec,
+    UserQuery,
 )
 from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manager
 from data_intelligence_sdk.runtime.deep_agent_backend import DeepAgentSandboxBackend
@@ -181,7 +182,7 @@ class GeneralPurposeEngine:
             model=self.llm,
             tools=[*mcp_tools, execute_python],
             middleware=[_recover_tool_errors],
-            system_prompt=self._system_prompt(spec, runtime),
+            system_prompt=self._system_prompt(spec, runtime, input.query),
             backend=DeepAgentSandboxBackend(runtime.sandbox),
             subagents=[],
             name="general-purpose",
@@ -298,6 +299,7 @@ class GeneralPurposeEngine:
         self,
         spec: ExecutionSpec,
         runtime: EngineRuntimeContext,
+        query: UserQuery,
     ) -> str:
         method_hub_enabled = runtime.has_mcp_tools
         method_hub_instructions = (
@@ -320,10 +322,18 @@ class GeneralPurposeEngine:
                 "request that does not need tools, answer directly.\n\n"
             )
         )
+        uploaded_files = _uploaded_file_names(query)
+        uploaded_file_instructions = (
+            "Uploaded files are staged in `/workspace`. Use these filenames "
+            f"directly when reading files: {json.dumps(uploaded_files)}.\n\n"
+            if uploaded_files
+            else ""
+        )
         return (
             "You are the only analysis agent for this request. Use the "
             "available tools to answer the objective.\n\n"
             f"{method_hub_instructions}"
+            f"{uploaded_file_instructions}"
             "When using tools, base the final answer only on "
             "successful tool or sandbox output and never invent data. If an "
             "execution fails, inspect the structured error and correct the next "
@@ -348,6 +358,21 @@ def _message_text(message: object) -> str:
                 text_parts.append(block)
         return "\n".join(text_parts)
     return "" if content is None else str(content)
+
+
+def _uploaded_file_names(query: UserQuery) -> list[str]:
+    raw_files = query.metadata.get("uploaded_files", [])
+    if not isinstance(raw_files, list):
+        return []
+    names: list[str] = []
+    for item in raw_files:
+        filename = item.get("filename") if isinstance(item, dict) else item
+        if not isinstance(filename, str):
+            continue
+        normalized = Path(filename).name
+        if normalized and normalized not in names:
+            names.append(normalized)
+    return names
 
 
 def _last_message_text(result: object) -> str:

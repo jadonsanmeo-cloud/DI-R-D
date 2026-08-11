@@ -7,10 +7,10 @@ from dataclasses import asdict, is_dataclass
 from typing import Any, TYPE_CHECKING
 
 from data_intelligence_sdk.core.types import (
-    DataCorpusPackage,
     ExecutionSpec,
     Intent,
     SessionContext,
+    UploadedFile,
     UserContext,
     UserQuery,
 )
@@ -28,7 +28,7 @@ class ClusterSpecSelectorPrompt:
         *,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         clustering_result: DataHubClusteringResult,
         cluster_specs: list["ClusterExecutionSpec"],
         session_context: SessionContext | None = None,
@@ -39,7 +39,7 @@ class ClusterSpecSelectorPrompt:
         payload: dict[str, Any] = {
             "query": to_jsonable(query),
             "intent": intent,
-            "corpus_package": to_jsonable(corpus_package),
+            "uploaded_files": to_jsonable(uploaded_files),
             "clustering_result": to_jsonable(clustering_result),
             "cluster_specs": to_jsonable(cluster_specs),
             "session_context": to_jsonable(session_context),

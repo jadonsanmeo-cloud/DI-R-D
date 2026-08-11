@@ -7,10 +7,10 @@ from typing import Protocol
 
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
-    DataCorpusPackage,
     ExecutionSpec,
     Intent,
     SessionContext,
+    UploadedFile,
     UserContext,
     UserQuery,
 )
@@ -38,7 +38,7 @@ class ClusterSpecBuilder(Protocol):
 
     def build_specs(
         self,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         clustering_result: DataHubClusteringResult,
         intent: Intent,
     ) -> list[ClusterExecutionSpec]:
@@ -50,11 +50,11 @@ class DefaultClusterSpecBuilder:
 
     def build_specs(
         self,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         clustering_result: DataHubClusteringResult,
         intent: Intent,
     ) -> list[ClusterExecutionSpec]:
-        del corpus_package
+        del uploaded_files
         specs = []
         for cluster in clustering_result.clusters:
             constraints = {
@@ -103,7 +103,7 @@ class ClusterSpecSelector(Protocol):
         *,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         clustering_result: DataHubClusteringResult,
         cluster_specs: list[ClusterExecutionSpec],
         cluster_specs_by_id: dict[str, ClusterExecutionSpec],
@@ -129,7 +129,7 @@ class LLMClusterSpecSelector:
         *,
         query: UserQuery,
         intent: Intent,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
         clustering_result: DataHubClusteringResult,
         cluster_specs: list[ClusterExecutionSpec],
         cluster_specs_by_id: dict[str, ClusterExecutionSpec],
@@ -144,7 +144,7 @@ class LLMClusterSpecSelector:
             self.prompt.select_messages(
                 query=query,
                 intent=intent,
-                corpus_package=corpus_package,
+                uploaded_files=uploaded_files,
                 clustering_result=clustering_result,
                 cluster_specs=cluster_specs,
                 session_context=session_context,

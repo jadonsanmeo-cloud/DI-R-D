@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING
 
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
-    DataCorpusPackage,
-    DataHubContext,
     EngineInput,
     EngineOutput,
     EngineStep,
@@ -26,6 +24,7 @@ from data_intelligence_sdk.core.types import (
     SessionContext,
     TraceStatus,
     TrustLevel,
+    UploadedFile,
     UserContext,
     UserQuery,
 )
@@ -35,8 +34,6 @@ if TYPE_CHECKING:  # pragma: no cover - import-time convenience only.
 
 __all__ = [
     "CapabilityRequirement",
-    "DataCorpusPackage",
-    "DataHubContext",
     "EngineOutput",
     "EngineInput",
     "EngineStep",
@@ -56,6 +53,7 @@ __all__ = [
     "SessionContext",
     "TraceStatus",
     "TrustLevel",
+    "UploadedFile",
     "UserContext",
     "UserQuery",
 ]

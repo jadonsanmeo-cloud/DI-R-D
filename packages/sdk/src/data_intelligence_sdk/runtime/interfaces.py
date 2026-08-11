@@ -6,8 +6,8 @@ from typing import Protocol
 
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
-    DataCorpusPackage,
     InterfaceDefinition,
+    UploadedFile,
 )
 
 
@@ -20,7 +20,7 @@ class InterfaceRegistry(Protocol):
     def find(
         self,
         requirement: CapabilityRequirement,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
     ) -> InterfaceDefinition | None:
         """Return an interface matching the requirement, if one exists."""
 
@@ -34,7 +34,7 @@ class InterfaceBuilder(Protocol):
     def propose(
         self,
         requirement: CapabilityRequirement,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
     ) -> InterfaceDefinition:
         """Return a proposed interface definition for a missing capability."""
 
@@ -51,9 +51,9 @@ class InMemoryInterfaceRegistry:
     def find(
         self,
         requirement: CapabilityRequirement,
-        corpus_package: DataCorpusPackage,
+        uploaded_files: list[UploadedFile],
     ) -> InterfaceDefinition | None:
-        del corpus_package
+        del uploaded_files
         for interface in self._interfaces.values():
             capability_names = interface.metadata.get("capability_names", [])
             if requirement.name in capability_names:

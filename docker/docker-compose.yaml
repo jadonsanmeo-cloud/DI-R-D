@@ -18,6 +18,8 @@ services:
       MODEL_CONFIG_PATH: /app/configs/proxy-openrouter.toml
       PYTHONPATH: /workspace/Data-Intelligence-SDK/packages/api/src:/workspace/Data-Intelligence-SDK/packages/sdk/src
       QUERYAI_REASON_ENDPOINT: ${QUERYAI_REASON_ENDPOINT:-http://host.docker.internal:7205/query}
+      GEN_REPORT_API_URL: ${GEN_REPORT_API_URL:-http://host.docker.internal:8011}
+      GEN_REPORT_PUBLIC_URL: ${GEN_REPORT_PUBLIC_URL:-http://host.docker.internal:8011}
       PYTHONUNBUFFERED: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -45,6 +47,9 @@ services:
       - /workspace/Data-Intelligence-SDK/packages/sdk/src
     stop_grace_period: 30s
     mem_limit: 256m
+    networks:
+      - default
+      - axiom-k8s
 
   db:
     image: postgres:17-alpine
@@ -69,3 +74,8 @@ volumes:
   api_data:
   api_state:
   postgres_data:
+
+networks:
+  axiom-k8s:
+    external: true
+    name: ${AXIOM_DOCKER_NETWORK:-axiom-k8s}

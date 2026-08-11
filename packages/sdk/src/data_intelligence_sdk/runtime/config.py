@@ -46,7 +46,6 @@ class SandboxSettings:
     endpoint: str = "http://localhost:8004"
     enabled: bool = False
     workspace_id: str | None = None
-    token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +147,6 @@ class ConfigManager:
             "on",
         }
         workspace_id = _resolve_env_value(payload.get("workspace_id"))
-        token = _resolve_env_value(payload.get("token"))
         return SandboxSettings(
             endpoint=str(
                 endpoint or os.environ.get("SANDBOX_URL") or "http://localhost:8004"
@@ -157,11 +155,6 @@ class ConfigManager:
             workspace_id=(
                 str(workspace_id or os.environ.get("SANDBOX_WORKSPACE_ID"))
                 if workspace_id or os.environ.get("SANDBOX_WORKSPACE_ID")
-                else None
-            ),
-            token=(
-                str(token or os.environ.get("SANDBOX_TOKEN"))
-                if token or os.environ.get("SANDBOX_TOKEN")
                 else None
             ),
         )

@@ -31,6 +31,8 @@ class ApiSettings:
     openai_compatible_api_key: str = ""
     openai_compatible_model: str = ""
     default_organization_id: str = "test-org"
+    gen_report_api_url: str = "http://host.docker.internal:8011"
+    gen_report_public_url: str = "http://localhost:8011"
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
@@ -111,5 +113,18 @@ class ApiSettings:
             default_organization_id=os.getenv(
                 "DEFAULT_ORGANIZATION_ID",
                 str(api_payload.get("default_organization_id", "test-org")),
+            ),
+            gen_report_api_url=os.getenv(
+                "GEN_REPORT_API_URL",
+                str(
+                    api_payload.get(
+                        "gen_report_api_url",
+                        "http://host.docker.internal:8011",
+                    )
+                ),
+            ),
+            gen_report_public_url=os.getenv(
+                "GEN_REPORT_PUBLIC_URL",
+                str(api_payload.get("gen_report_public_url", "http://localhost:8011")),
             ),
         )
