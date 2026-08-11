@@ -67,6 +67,8 @@ class GenReportClient:
         message: str,
         file_ids: list[int],
         runtime_gateway: dict[str, Any] | None = None,
+        execution_context: dict[str, Any] | None = None,
+        execution_files: list[dict[str, Any]] | None = None,
         language: str = "en",
     ) -> AsyncIterator[str]:
         payload: dict[str, Any] = {
@@ -78,6 +80,9 @@ class GenReportClient:
         }
         if runtime_gateway is not None:
             payload["runtime_gateway"] = runtime_gateway
+        if execution_context is not None:
+            payload["execution_context"] = execution_context
+            payload["execution_files"] = execution_files or []
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             async with client.stream(
                 "POST",

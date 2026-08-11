@@ -23,6 +23,7 @@ from data_intelligence_api.application.runtime_capabilities import (
     MethodHubUnavailableError,
 )
 from data_intelligence_api.application.gen_report_bridge import (
+    _history_request_payload,
     stream_gen_report_response,
 )
 from data_intelligence_api.application.ports.run_repository import RunRepository
@@ -463,7 +464,7 @@ def create_responses_router(
                         response_id=response_id,
                         token_hash=hash_confirmation_token(confirmation_token),
                         request_payload={
-                            **payload.model_dump(mode="json"),
+                            **_history_request_payload(payload),
                             "runtime_options": {
                                 "method_hub_enabled": (
                                     invocation.runtime_options.method_hub_enabled

@@ -2,6 +2,24 @@
 
 ## Purpose
 
+### AXIOM-owned shared sandbox update
+
+For AXIOM report runs, the current ownership model is:
+
+```text
+AXIOM creates and owns SandboxLease.
+Data Intelligence forwards ExecutionContext without file bytes.
+GenReport calls the AXIOM Runtime Gateway.
+AXIOM finalizes declared sandbox outputs into document-service.
+```
+
+The browser uploads once to AXIOM storage and sends explicit artifact IDs on
+each response. AXIOM selectively hydrates only those IDs. A conversation keeps
+one logical lease with at most one active response; response directories remain
+isolated. Physical sandboxes expire after one hour and may be transparently
+rehydrated once during a response. Remote engines must not call sandbox-service
+directly for this flow and must not persist capability tokens.
+
 Build a remote engine service in a separate repo. The service will run in the
 same internal Docker/network environment as the Data Intelligence API, receive
 engine requests over HTTP, call Method Hub through MCP directly, use the

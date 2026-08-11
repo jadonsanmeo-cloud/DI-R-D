@@ -56,6 +56,17 @@ def _failed_payload(response_id: str, code: str, message: str) -> dict[str, Any]
     }
 
 
+def _history_request_payload(payload: CreateResponseRequest) -> dict[str, Any]:
+    value = payload.model_dump(mode="json")
+    execution_context = value.get("execution_context")
+    if isinstance(execution_context, dict):
+        execution_context["capability_token"] = "[REDACTED]"
+    runtime_gateway = value.get("runtime_gateway")
+    if isinstance(runtime_gateway, dict):
+        runtime_gateway["token"] = "[REDACTED]"
+    return value
+
+
 async def _resolve_uploaded_files(
     payload: CreateResponseRequest,
     settings: ApiSettings,
@@ -109,6 +120,12 @@ def _lambda_file_metadata(
                 "filename": name,
                 "url": url,
                 "type": file_info.get("type") or "file",
+                "artifact_id": file_info.get("artifact_id"),
+                "object_key": file_info.get("object_key"),
+                "content_type": file_info.get("content_type"),
+                "size": file_info.get("size"),
+                "purpose": file_info.get("purpose"),
+                "checksum": file_info.get("checksum"),
             }
         )
     return {
@@ -231,7 +248,7 @@ async def stream_gen_report_response(
         settings.gen_report_api_url,
         public_base_url=settings.gen_report_public_url,
     )
-    request_payload = payload.model_dump(mode="json")
+    request_payload = _history_request_payload(payload)
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(
         seconds=settings.spec_confirmation_ttl_seconds
@@ -263,7 +280,6 @@ async def stream_gen_report_response(
     )
 
     try:
-        uploaded_files = await _resolve_uploaded_files(payload, settings)
         gen_conversation_id = await client.create_conversation(query_text)
         conversation_event = {
             "type": "pipeline.lambda.conversation_created",
@@ -276,29 +292,47 @@ async def stream_gen_report_response(
         yield encode_sse("pipeline.lambda.conversation_created", conversation_event)
 
         file_ids: list[int] = []
-        for uploaded in uploaded_files:
-            file_id = await client.upload_file(
-                conversation_id=gen_conversation_id,
-                filename=str(uploaded["filename"]),
-                content=uploaded["content"],
-                content_type=uploaded["content_type"],
-            )
-            file_ids.append(file_id)
-            uploaded_event = {
-                "type": "pipeline.lambda.file_uploaded",
+        if payload.execution_context is not None:
+            sandbox_event = {
+                "type": "pipeline.lambda.sandbox_attached",
                 "response_id": response_id,
                 "status": "completed",
-                "label": "Uploaded file to GenReport",
+                "label": "AXIOM sandbox attached",
                 "details": {
-                    "inputs": {
-                        "filename": uploaded["filename"],
-                        "file_ref": uploaded["file_ref"],
-                    },
-                    "outputs": {"gen_report_file_id": file_id},
+                    "outputs": {
+                        "sandbox_id": str(payload.execution_context.sandbox_id),
+                        "run_id": payload.execution_context.run_id,
+                        "filenames": [item.filename for item in payload.execution_files],
+                    }
                 },
             }
-            process_events.append(uploaded_event)
-            yield encode_sse("pipeline.lambda.file_uploaded", uploaded_event)
+            process_events.append(sandbox_event)
+            yield encode_sse("pipeline.lambda.sandbox_attached", sandbox_event)
+        else:
+            uploaded_files = await _resolve_uploaded_files(payload, settings)
+            for uploaded in uploaded_files:
+                file_id = await client.upload_file(
+                    conversation_id=gen_conversation_id,
+                    filename=str(uploaded["filename"]),
+                    content=uploaded["content"],
+                    content_type=uploaded["content_type"],
+                )
+                file_ids.append(file_id)
+                uploaded_event = {
+                    "type": "pipeline.lambda.file_uploaded",
+                    "response_id": response_id,
+                    "status": "completed",
+                    "label": "Uploaded file to GenReport",
+                    "details": {
+                        "inputs": {
+                            "filename": uploaded["filename"],
+                            "file_ref": uploaded["file_ref"],
+                        },
+                        "outputs": {"gen_report_file_id": file_id},
+                    },
+                }
+                process_events.append(uploaded_event)
+                yield encode_sse("pipeline.lambda.file_uploaded", uploaded_event)
 
         parser = SseEventParser()
         lambda_event_sequence = 0
@@ -311,6 +345,14 @@ async def stream_gen_report_response(
                 if payload.runtime_gateway
                 else None
             ),
+            execution_context=(
+                payload.execution_context.model_dump(mode="json")
+                if payload.execution_context
+                else None
+            ),
+            execution_files=[
+                item.model_dump(mode="json") for item in payload.execution_files
+            ],
         ):
             for lambda_event in parser.feed(chunk):
                 lambda_type = str(lambda_event.get("type") or "")
