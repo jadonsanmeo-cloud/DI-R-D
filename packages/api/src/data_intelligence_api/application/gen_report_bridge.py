@@ -13,6 +13,7 @@ import httpx
 from fastapi import HTTPException
 
 from data_intelligence_api.application.gen_report_client import GenReportClient
+from data_intelligence_api.application.language import extract_language_prefix
 from data_intelligence_api.application.ports.run_repository import RunRepository
 from data_intelligence_api.http.schemas.responses import CreateResponseRequest
 from data_intelligence_api.http.streaming import encode_sse
@@ -243,7 +244,9 @@ async def stream_gen_report_response(
     run_repository: RunRepository,
     response_id: str,
 ) -> AsyncIterator[str]:
-    query_text = (payload.input or "").strip() or "Analyze this data corpus."
+    language, query_text = extract_language_prefix(
+        (payload.input or "").strip() or "Analyze this data corpus."
+    )
     client = GenReportClient(
         settings.gen_report_api_url,
         public_base_url=settings.gen_report_public_url,
@@ -340,6 +343,7 @@ async def stream_gen_report_response(
             conversation_id=gen_conversation_id,
             message=query_text,
             file_ids=file_ids,
+            language=language or "en",
             runtime_gateway=(
                 payload.runtime_gateway.model_dump(mode="json")
                 if payload.runtime_gateway
