@@ -17,7 +17,12 @@ def langsmith_tracing_enabled() -> bool:
     }
 
 
-def traceable_llm_call(function: F, *, name: str) -> F:
+def traceable_llm_call(
+    function: F,
+    *,
+    name: str,
+    reduce_fn: Callable[[list[Any]], Any] | None = None,
+) -> F:
     """Wrap a custom LLM call with LangSmith when tracing is enabled."""
 
     if not langsmith_tracing_enabled():
@@ -30,4 +35,5 @@ def traceable_llm_call(function: F, *, name: str) -> F:
         name=name,
         run_type="llm",
         project_name=os.getenv("LANGCHAIN_PROJECT") or None,
+        reduce_fn=reduce_fn,
     )(function)

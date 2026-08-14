@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+from data_intelligence_sdk.runtime.tracing import traceable_llm_call
 
 from data_intelligence_api.application.query_orchestrator import (
     OrchestratorModelResponse,
@@ -46,8 +47,28 @@ class OpenAIQueryOrchestratorClient:
         self.timeout_seconds = timeout_seconds
         self.transport = transport or _httpx_transport
         self.stream_transport = stream_transport or _httpx_stream_transport
+        self._decide_traced = traceable_llm_call(
+            self._decide_impl,
+            name="query-orchestrator",
+        )
+        self._decide_stream_traced = traceable_llm_call(
+            self._decide_stream_impl,
+            name="query-orchestrator",
+            reduce_fn=_reduce_stream_chunks,
+        )
 
     async def decide(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        tool_name: str,
+    ) -> OrchestratorModelResponse:
+        return await self._decide_traced(
+            messages=messages,
+            tool_name=tool_name,
+        )
+
+    async def _decide_impl(
         self,
         *,
         messages: list[dict[str, str]],
@@ -76,6 +97,18 @@ class OpenAIQueryOrchestratorClient:
         )
 
     async def decide_stream(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        tool_name: str,
+    ) -> AsyncIterator[OrchestratorModelStreamChunk]:
+        async for chunk in self._decide_stream_traced(
+            messages=messages,
+            tool_name=tool_name,
+        ):
+            yield chunk
+
+    async def _decide_stream_impl(
         self,
         *,
         messages: list[dict[str, str]],
@@ -169,6 +202,19 @@ def _tool_call_names(value: object) -> tuple[str, ...]:
         name = function.get("name") if isinstance(function, dict) else None
         names.append(name if isinstance(name, str) and name else "__malformed_tool_call__")
     return tuple(names)
+
+
+def _reduce_stream_chunks(
+    chunks: list[OrchestratorModelStreamChunk],
+) -> dict[str, object]:
+    return {
+        "text": "".join(chunk.text_delta for chunk in chunks),
+        "tool_calls": [
+            tool_call
+            for chunk in chunks
+            for tool_call in chunk.tool_calls
+        ],
+    }
 
 
 async def _httpx_transport(
