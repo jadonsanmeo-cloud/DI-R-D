@@ -27,7 +27,9 @@ from data_intelligence_api.application.workflow import (
     PipelineFactory,
     default_pipeline_factory,
 )
-from data_intelligence_api.application.query_orchestrator import GeneralQueryOrchestrator
+from data_intelligence_api.application.query_orchestrator import (
+    GeneralQueryOrchestrator,
+)
 from data_intelligence_api.infrastructure.llm.query_orchestrator_client import (
     OpenAIQueryOrchestratorClient,
 )

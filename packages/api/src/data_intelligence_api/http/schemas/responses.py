@@ -83,6 +83,9 @@ class CreateResponseRequest(BaseModel):
     input: str | None = None
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     user_id: str | None = None
+    organization_id: str | None = None
+    workspace_id: str | None = None
+    workspace_ids: list[str] | None = Field(default=None, min_length=1)
     session_id: str | None = None
     runtime_options: RuntimeOptionsRequest = Field(
         default_factory=RuntimeOptionsRequest
