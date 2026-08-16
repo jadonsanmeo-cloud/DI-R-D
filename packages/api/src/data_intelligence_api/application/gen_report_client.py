@@ -69,20 +69,23 @@ class GenReportClient:
         runtime_gateway: dict[str, Any] | None = None,
         execution_context: dict[str, Any] | None = None,
         execution_files: list[dict[str, Any]] | None = None,
+        organization_id: str | None = None,
+        workspace_id: str | None = None,
+        discover_workspace_files: bool = False,
         language: str = "en",
     ) -> AsyncIterator[str]:
-        payload: dict[str, Any] = {
-            "message": message,
-            "conversation_id": conversation_id,
-            "files": file_ids,
-            "analysis_mode": "auto",
-            "language": language,
-        }
-        if runtime_gateway is not None:
-            payload["runtime_gateway"] = runtime_gateway
-        if execution_context is not None:
-            payload["execution_context"] = execution_context
-            payload["execution_files"] = execution_files or []
+        payload = _chat_request_payload(
+            conversation_id=conversation_id,
+            message=message,
+            file_ids=file_ids,
+            language=language,
+            runtime_gateway=runtime_gateway,
+            execution_context=execution_context,
+            execution_files=execution_files,
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            discover_workspace_files=discover_workspace_files,
+        )
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             async with client.stream(
                 "POST",
@@ -92,3 +95,36 @@ class GenReportClient:
                 response.raise_for_status()
                 async for chunk in response.aiter_text():
                     yield chunk
+
+
+def _chat_request_payload(
+    *,
+    conversation_id: str,
+    message: str,
+    file_ids: list[int],
+    language: str,
+    runtime_gateway: dict[str, Any] | None,
+    execution_context: dict[str, Any] | None,
+    execution_files: list[dict[str, Any]] | None,
+    organization_id: str | None,
+    workspace_id: str | None,
+    discover_workspace_files: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "message": message,
+        "conversation_id": conversation_id,
+        "files": file_ids,
+        "analysis_mode": "auto",
+        "language": language,
+        "discover_workspace_files": discover_workspace_files,
+    }
+    if organization_id is not None:
+        payload["organization_id"] = organization_id
+    if workspace_id is not None:
+        payload["workspace_id"] = workspace_id
+    if runtime_gateway is not None:
+        payload["runtime_gateway"] = runtime_gateway
+    if execution_context is not None:
+        payload["execution_context"] = execution_context
+        payload["execution_files"] = execution_files or []
+    return payload

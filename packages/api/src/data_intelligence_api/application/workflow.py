@@ -49,6 +49,7 @@ ENGINE_ROUTE_MAP = {
     "report": "report",
 }
 
+
 class RequestedEngineSelector:
     def __init__(self, engine_name: str) -> None:
         self.engine_name = engine_name
@@ -105,12 +106,20 @@ def build_workflow_invocation(
         data_corpus_root,
     )
     public_uploaded_files = [asdict(uploaded) for uploaded in uploaded_files]
+    request_scope = {
+        "organization_id": request.organization_id,
+        "workspace_id": request.workspace_id,
+        "workspace_ids": list(request.workspace_ids or []),
+    }
     return WorkflowInvocation(
         query=UserQuery(
             text=query_text,
             user_id=request.user_id,
             session_id=request.session_id,
-            metadata={"uploaded_files": public_uploaded_files},
+            metadata={
+                "uploaded_files": public_uploaded_files,
+                **request_scope,
+            },
         ),
         uploaded_files=uploaded_files,
         session_context=SessionContext(
@@ -118,6 +127,7 @@ def build_workflow_invocation(
             state={
                 "uploaded_files": public_uploaded_files,
                 "_uploaded_files_to_stage": staging_records,
+                **request_scope,
             },
         ),
         user_context=UserContext(user_id=request.user_id),
@@ -163,7 +173,11 @@ def default_pipeline_factory(
         use_llm_spec_builder=True,
         intent_service_base_url=(
             os.getenv("INTENT_SERVICE_BASE_URL")
-            or (intent_service_settings.endpoint if intent_service_settings.enabled else None)
+            or (
+                intent_service_settings.endpoint
+                if intent_service_settings.enabled
+                else None
+            )
         ),
         default_organization_id=os.getenv("DEFAULT_ORGANIZATION_ID", "test-org"),
         mcp_client=resolved_method_hub.client,
@@ -225,6 +239,7 @@ def prepare_workflow(
         invocation.user_context,
     )
 
+
 def revise_markdown_workflow(
     prepared: PreparedMarkdownExecution,
     spec_markdown: str,
@@ -237,6 +252,7 @@ def revise_markdown_workflow(
     revised = validate_spec_markdown(spec_markdown)
     logger.log("pipeline.spec_revised", {"format": "markdown"})
     return revised
+
 
 def execute_prepared_markdown_workflow(
     prepared: PreparedMarkdownExecution,
@@ -264,6 +280,7 @@ def execute_prepared_markdown_workflow(
         )
         return pipeline.execute_confirmed_spec(prepared_execution, spec)
     return pipeline.execute_confirmed_markdown(prepared, spec_markdown)
+
 
 def _execution_spec_from_markdown(
     prepared: PreparedMarkdownExecution,
@@ -330,13 +347,14 @@ def spec_from_payload(payload: dict) -> ExecutionSpec:
         confirmed=bool(payload.get("confirmed", False)),
         engine_hint=payload.get("engine_hint"),
         preprocessing_steps=[
-            PreprocessingStep(**item)
-            for item in payload.get("preprocessing_steps", [])
+            PreprocessingStep(**item) for item in payload.get("preprocessing_steps", [])
         ],
     )
 
+
 def markdown_spec_to_payload(markdown: str) -> dict[str, str]:
     return {"spec_markdown": validate_spec_markdown(markdown)}
+
 
 def markdown_spec_from_payload(payload: dict) -> str:
     if set(payload) != {"spec_markdown"}:
@@ -394,6 +412,7 @@ def prepared_from_payload(payload: dict, spec: ExecutionSpec) -> PreparedExecuti
         ),
     )
 
+
 def prepared_markdown_to_payload(prepared: PreparedMarkdownExecution) -> dict:
     return {
         "version": 2,
@@ -409,6 +428,7 @@ def prepared_markdown_to_payload(prepared: PreparedMarkdownExecution) -> dict:
         ),
         "run_artifact_id": prepared.run_artifact_id,
     }
+
 
 def prepared_markdown_from_payload(
     payload: dict,

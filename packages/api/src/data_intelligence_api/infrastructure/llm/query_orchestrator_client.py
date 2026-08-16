@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import AsyncIterator
 from collections.abc import Awaitable, Callable
@@ -146,7 +147,7 @@ class OpenAIQueryOrchestratorClient:
     ) -> dict[str, Any]:
         return {
             "model": self.model,
-            "messages": messages,
+            "messages": copy.deepcopy(messages),
             "tools": [
                 {
                     "type": "function",
@@ -178,11 +179,14 @@ def _first_message(response: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("Orchestrator response message must be an object.")
     return message
 
+
 def _first_delta(response: dict[str, Any]) -> dict[str, Any]:
     try:
         delta = response["choices"][0]["delta"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("Orchestrator stream chunk did not contain a delta.") from exc
+        raise RuntimeError(
+            "Orchestrator stream chunk did not contain a delta."
+        ) from exc
     if not isinstance(delta, dict):
         raise RuntimeError("Orchestrator stream delta must be an object.")
     return delta
@@ -200,7 +204,9 @@ def _tool_call_names(value: object) -> tuple[str, ...]:
             continue
         function = call.get("function")
         name = function.get("name") if isinstance(function, dict) else None
-        names.append(name if isinstance(name, str) and name else "__malformed_tool_call__")
+        names.append(
+            name if isinstance(name, str) and name else "__malformed_tool_call__"
+        )
     return tuple(names)
 
 
@@ -209,11 +215,7 @@ def _reduce_stream_chunks(
 ) -> dict[str, object]:
     return {
         "text": "".join(chunk.text_delta for chunk in chunks),
-        "tool_calls": [
-            tool_call
-            for chunk in chunks
-            for tool_call in chunk.tool_calls
-        ],
+        "tool_calls": [tool_call for chunk in chunks for tool_call in chunk.tool_calls],
     }
 
 
@@ -231,6 +233,7 @@ async def _httpx_transport(
         raise RuntimeError("Orchestrator response must be a JSON object.")
     return data
 
+
 async def _httpx_stream_transport(
     url: str,
     headers: dict[str, str],
@@ -238,7 +241,9 @@ async def _httpx_stream_transport(
     timeout_seconds: float,
 ) -> AsyncIterator[dict[str, Any]]:
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        async with client.stream("POST", url, headers=headers, json=payload) as response:
+        async with client.stream(
+            "POST", url, headers=headers, json=payload
+        ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):

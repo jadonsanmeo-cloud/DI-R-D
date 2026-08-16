@@ -305,7 +305,9 @@ async def stream_gen_report_response(
                     "outputs": {
                         "sandbox_id": str(payload.execution_context.sandbox_id),
                         "run_id": payload.execution_context.run_id,
-                        "filenames": [item.filename for item in payload.execution_files],
+                        "filenames": [
+                            item.filename for item in payload.execution_files
+                        ],
                     }
                 },
             }
@@ -357,6 +359,16 @@ async def stream_gen_report_response(
             execution_files=[
                 item.model_dump(mode="json") for item in payload.execution_files
             ],
+            organization_id=payload.organization_id,
+            workspace_id=(
+                payload.runtime_gateway.workspace_id
+                if payload.runtime_gateway
+                else payload.workspace_id
+            ),
+            discover_workspace_files=(
+                not payload.execution_files
+                and payload.runtime_options.method_hub_enabled is not False
+            ),
         ):
             for lambda_event in parser.feed(chunk):
                 lambda_type = str(lambda_event.get("type") or "")
