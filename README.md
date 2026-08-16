@@ -285,29 +285,12 @@ tự:
 `artifacts/`, `.uploads/`, logs, `docker/.env`, `.venv`, `.next` và `node_modules` là dữ
 liệu local, đã được ignore và không nên push lên GitHub.
 
-## PostgreSQL Tùy Chọn
-
-Nếu không đặt `DATABASE_URL`, API dùng in-memory run repository. Cách này đủ để
-upload file và test report local, nhưng trạng thái run mất khi restart API.
-
-PostgreSQL phù hợp khi cần giữ trạng thái response lâu hơn. Có thể khởi động riêng
-database từ Compose:
-
-```powershell
-docker compose -f docker/docker-compose.yaml up -d db
-```
-
-Sau đó thêm vào `docker/.env`:
-
-```env
-DATABASE_URL=postgresql://data_intelligence:data_intelligence@localhost:5432/data_intelligence
-```
-
 ## Lưu Ý Về Docker Compose
 
-`docker/docker-compose.yaml` chỉ cung cấp API container và PostgreSQL. Sandbox
-runtime thuộc AXIOM Sandbox Service; hãy cấu hình endpoint để API container truy
-cập được service đó, ví dụ qua shared Docker network hoặc gateway nội bộ.
+`docker/docker-compose.yaml` chỉ cung cấp stateless API container. Response state
+và confirmation thuộc AXIOM. Sandbox runtime thuộc AXIOM Sandbox Service; hãy cấu
+hình endpoint để API container truy cập được service đó qua shared Docker network
+hoặc gateway nội bộ.
 
 ## Troubleshooting
 
@@ -498,9 +481,9 @@ The capability response exposes only public state:
 ```
 
 If `runtime_options.method_hub_enabled` is omitted, `[method_hub].enabled` in
-`configs/proxy-openrouter.toml` supplies the default. The API persists the
-resolved boolean before spec confirmation so revise and confirm use the same
-mode. Enabled requests discover the MCP catalog immediately; an unavailable
+`configs/proxy-openrouter.toml` supplies the default. AXIOM persists the prepared
+request before confirmation, so revise and execute receive the same resolved
+input. Enabled requests discover the MCP catalog immediately; an unavailable
 server returns `method_hub_unavailable` instead of silently falling back.
 
 Simple operations are exposed to engines as direct MCP tools. Composite work
@@ -553,8 +536,9 @@ uv run python scripts/prepare_spec.py `
 ```
 
 The output is written to `.data/debug-spec/execution-spec.md`. The CLI calls the
-same Markdown preparation path as the Responses API and stops before confirmation
-and engine execution. It does not require local source files or a corpus package.
+same Markdown preparation path as `POST /v1/specs:prepare` and stops before AXIOM
+confirmation and engine execution. It does not require local source files or a
+corpus package.
 
 Useful lifecycle events include:
 
@@ -578,7 +562,7 @@ existing `<document-id>.md` file.
 
 This worker only creates specs. It does not call Intent Service, confirm a spec,
 run an engine, retrieve related documents, generate a report, or update the
-dashboard. Interactive Responses queries use a separate Markdown path.
+dashboard. Interactive AXIOM requests use the stateless runtime operation path.
 
 Run one cycle from Windows CMD:
 
@@ -625,92 +609,46 @@ LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 These variables can be placed in `.env` for local development. The SDK
 does not send traces when `LANGCHAIN_TRACING_V2` is unset or false.
 
-## FastAPI Responses Backend
+## Stateless Runtime API
 
-The repository includes a FastAPI consuming application that runs the example
-Data Intelligence workflow and streams lifecycle and final-output events.
+The FastAPI application executes self-contained operations supplied by AXIOM.
+It does not own response IDs, confirmation tokens, revisions, history, or a run
+database.
 
-Configure the workflow and API:
+Configure the runtime:
 
 ```text
 OPENROUTER_API_KEY=...
 DATA_CORPUS_ROOT=/absolute/path/to/Data-Intelligence-SDK
-DATABASE_URL=postgresql://data_intelligence:data_intelligence@127.0.0.1:5432/data_intelligence
 MODEL_CONFIG_PATH=/absolute/path/to/Data-Intelligence-SDK/configs/proxy-openrouter.toml
+RUNTIME_SERVICE_TOKEN=shared-service-token
+RUNTIME_CONSUMER_SERVICE=intelligence-service
 ```
 
-CORS, timeouts, upload limits, chat model, provider endpoints, Sandbox, and
-Method Hub settings are configured in `configs/proxy-openrouter.toml`.
-
-Start the data_intelligence_api:
+Start the API and check process liveness:
 
 ```bash
 uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Check health:
-
-```bash
 curl http://127.0.0.1:8000/health
 ```
 
-Submit a general or data-dependent response request:
+AXIOM calls three authenticated operations:
 
-```bash
-curl --no-buffer \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "input": "What is the total revenue?",
-    "session_id": "demo"
-  }' \
-  http://127.0.0.1:8000/api/v1/responses
-```
+- `POST /v1/specs:prepare` builds a Markdown spec and serializable prepared input.
+- `POST /v1/specs:revise` validates a replacement Markdown spec.
+- `POST /v1/executions:stream` executes the confirmed prepared input and emits
+  correlated runtime SSE events.
 
-An LLM orchestrator handles the request before the data workflow. It has access
-only to general model knowledge and conversation context; it cannot access
-Method Hub, MCP, Corpus Service, private documents, or a sandbox.
-
-For general questions it streams `response.output_text.delta` followed by
-`response.completed`. This path creates no pending confirmation record.
-
-When the model needs user- or organization-specific data, it calls the native
-`delegate_to_data_flow` tool. The original query and context then enter the
-existing intent and Markdown preparation flow, which ends with
-`response.requires_confirmation`. That event includes a `response_id`,
-`confirmation_token`, revision, intent metadata, and `spec_markdown`. No engine
-runs before confirmation.
-
-The orchestrator reuses `OPENAI_COMPATIBLE_*` settings. When they are absent,
-`OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, and `LLM_MODEL_NAME` are accepted as
-fallbacks.
-
-Revise the pending spec (repeat as needed):
-
-```bash
-curl -N http://127.0.0.1:8000/api/v1/responses/RESP_ID/decision \
-  -H 'Content-Type: application/json' \
-  -H 'X-Confirmation-Token: TOKEN' \
-  -d '{"action":"revise","revision":1,"spec_markdown":"# Interactive Execution Spec\n\n## User Request\n\nWhat is the total revenue?\n\n## Intent\n\nReport.\n\n## Preparation Guidance\n\nFollow intent metadata.\n\n## Execution Instructions\n\nRetrieve every relevant ingested document.\n\n## Expected Output\n\nA cited Markdown report."}'
-```
-
-Confirm and stream the answer/report:
-
-```bash
-curl -N http://127.0.0.1:8000/api/v1/responses/RESP_ID/decision \
-  -H 'Content-Type: application/json' \
-  -H 'X-Confirmation-Token: TOKEN' \
-  -d '{"action":"confirm","revision":2}'
-```
-
-Recover a paused response with `GET /api/v1/responses/RESP_ID` and the same
-`X-Confirmation-Token` header.
+Each payload carries `schema_version`, `operation_id`, `attempt`, `response_id`,
+and a complete `runtime_input`. The runtime never accepts or returns a
+confirmation token. The legacy `/api/v1/responses` paths are intentionally absent
+and return `404`.
 
 ### Backend Docker Service
 
-The Compose configuration at `docker/docker-compose.yaml` runs the FastAPI API
-and a private PostgreSQL 17 service. The API defaults to
-`http://127.0.0.1:8036`; database and persistent application data remain in
-named Docker volumes.
+The Compose configuration at `docker/docker-compose.yaml` runs only the
+stateless FastAPI API. It defaults to `http://127.0.0.1:8036`; corpus data and
+runtime artifacts remain mounted, while response lifecycle state stays in AXIOM.
 
 The Docker build expects the AXIOM platform and Data Intelligence SDK to be
 sibling checkouts:
@@ -730,12 +668,10 @@ cp docker/.env.example docker/.env
 ```
 
 Edit `configs/proxy-openrouter.toml` to change models, provider endpoints,
-Sandbox, Method Hub, CORS, timeouts, or upload limits. Compose bind-mounts this
-file at runtime, so configuration changes require only
+Sandbox, Method Hub, or CORS. Compose bind-mounts this file at runtime, so
+configuration changes require only
 `docker compose -f docker/docker-compose.yaml restart api`, not an image rebuild.
-PostgreSQL stays private inside Docker, while the DI API is available at
-`http://SERVER_IP:8036`. API, upload, artifact, and PostgreSQL data are
-stored in named Docker volumes.
+The DI API is available at `http://SERVER_IP:8036`.
 
 Validate and start the stack:
 
@@ -752,18 +688,27 @@ Inspect API logs:
 docker compose -f docker/docker-compose.yaml logs -f api
 ```
 
-Run a streaming response from the ingested organization corpus:
+Prepare a stateless execution spec:
 
 ```bash
-curl -N http://127.0.0.1:8036/api/v1/responses \
+curl http://127.0.0.1:8036/v1/specs:prepare \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_RUNTIME_SERVICE_TOKEN' \
+  -H 'X-Consumer-Service: intelligence-service' \
   -d '{
-    "input": "Analyze this dataset",
-    "session_id": "docker-test"
+    "schema_version": "1",
+    "operation_id": "op_prepare_demo",
+    "attempt": 1,
+    "response_id": "resp_demo",
+    "runtime_input": {
+      "input": "Analyze this dataset",
+      "session_id": "docker-test",
+      "runtime_options": {"engine": "report"}
+    }
   }'
 ```
 
-Stop the stack while retaining database and API volumes:
+Stop the stack while retaining corpus data:
 
 ```bash
 docker compose -f docker/docker-compose.yaml down

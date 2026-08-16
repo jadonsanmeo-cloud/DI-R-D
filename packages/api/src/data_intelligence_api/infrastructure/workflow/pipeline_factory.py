@@ -7,7 +7,6 @@ from dataclasses import asdict
 import json
 import os
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 import httpx
@@ -565,10 +564,10 @@ def create_report_pipeline(
     interface_registry: object | None = None,
     logger: RuntimeLogger | None = None,
 ) -> DataIntelligencePipeline:
-    """Report generation now runs through the external GenReport service."""
+    """Reject the removed standalone report-pipeline constructor."""
 
     del mcp_client, interface_registry, logger
     raise RuntimeError(
-        "Local report engine has been removed. Use the Responses API report route, "
-        "which delegates to the external GenReport service."
+        "The standalone report pipeline has been removed. Use the authenticated "
+        "stateless runtime operation flow with an available report engine."
     )

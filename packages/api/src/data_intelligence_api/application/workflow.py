@@ -38,7 +38,7 @@ from data_intelligence_api.domain.workflow import (
     WorkflowInvocation,
     WorkflowRuntimeOptions,
 )
-from data_intelligence_api.http.schemas.responses import CreateResponseRequest
+from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
 
 DEFAULT_QUERY = "Analyze this data corpus."
 PipelineFactory = Callable[..., DataIntelligencePipeline]
@@ -70,7 +70,7 @@ class SourceValidationError(ValueError):
 
 
 def _uploaded_file_records(
-    request: CreateResponseRequest,
+    request: WorkflowRequest,
     data_corpus_root: Path,
 ) -> tuple[list[UploadedFile], list[dict[str, Any]]]:
     del data_corpus_root
@@ -94,7 +94,7 @@ def _uploaded_file_records(
 
 
 def build_workflow_invocation(
-    request: CreateResponseRequest,
+    request: WorkflowRequest,
     data_corpus_root: Path,
     *,
     method_hub_default_enabled: bool = False,
