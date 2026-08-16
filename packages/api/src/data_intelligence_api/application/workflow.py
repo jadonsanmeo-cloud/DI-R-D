@@ -25,6 +25,7 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
+from data_intelligence_sdk.memory import MemoryContext
 from data_intelligence_sdk.registry.engine_selector import EngineDescriptor
 from data_intelligence_sdk.spec.markdown_builder import validate_spec_markdown
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
@@ -101,6 +102,7 @@ def build_workflow_invocation(
     data_corpus_root: Path,
     *,
     method_hub_default_enabled: bool = False,
+    memory_context: MemoryContext | None = None,
 ) -> WorkflowInvocation:
     query_text = (request.input or "").strip() or DEFAULT_QUERY
     package = request.data_corpus_package
@@ -124,6 +126,7 @@ def build_workflow_invocation(
             request.runtime_options,
             default_enabled=method_hub_default_enabled,
         ),
+        memory_context=memory_context or MemoryContext(),
     )
 
 
@@ -222,6 +225,7 @@ def prepare_workflow(
         invocation.query,
         invocation.session_context,
         invocation.user_context,
+        memory_context=invocation.memory_context,
     )
 
 def revise_markdown_workflow(

@@ -125,7 +125,15 @@ class FakePipeline:
         self.logger = logger
         self.factory = factory
 
-    def prepare_markdown(self, query, session_context, user_context):
+    def prepare_markdown(
+        self,
+        query,
+        session_context,
+        user_context,
+        *,
+        memory_context=None,
+    ):
+        del memory_context
         self.factory.prepare_calls += 1
         self.factory.last_query = query.text
         self.logger.log("pipeline.start", {})
@@ -172,7 +180,8 @@ class FakeQueryOrchestrator:
         self.error = error
         self.calls = []
 
-    async def route(self, query, session_context=None):
+    async def route(self, query, session_context=None, *, memory_context=None):
+        del memory_context
         self.calls.append((query, session_context))
         if self.error is not None:
             raise self.error
@@ -220,45 +229,52 @@ class BackendApiTests(unittest.TestCase):
         self.assertNotIn("capability_requirements", confirmation)
         self.assertEqual(factory.execute_calls, 0)
 
-    def test_general_question_streams_direct_answer_without_pending_run(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            factory = RecordingFactory()
-            store = InMemoryRunRepository()
-            orchestrator = FakeQueryOrchestrator(
-                DirectGeneralAnswer("PostgreSQL is a relational database.")
-            )
-            app = self.make_app(
-                temp_dir,
-                store=store,
-                factory=factory,
-                orchestrator=orchestrator,
-            )
-
-            response = asyncio.run(
-                asgi_request(
-                    app,
-                    "POST",
-                    "/api/v1/responses",
-                    json_body={"input": "What is PostgreSQL?", "session_id": "s-1"},
+    def test_all_modes_stream_direct_orchestrator_answer_without_pending_run(self):
+        for engine in ("auto", "general", "reason", "report"):
+            with self.subTest(engine=engine), tempfile.TemporaryDirectory() as temp_dir:
+                factory = RecordingFactory()
+                store = InMemoryRunRepository()
+                orchestrator = FakeQueryOrchestrator(
+                    DirectGeneralAnswer("PostgreSQL is a relational database.")
                 )
-            )
-            events = parse_sse(response)
+                app = self.make_app(
+                    temp_dir,
+                    store=store,
+                    factory=factory,
+                    orchestrator=orchestrator,
+                )
 
-        self.assertEqual(
-            [event for event, _ in events],
-            [
-                "response.created",
-                "response.output_text.delta",
-                "response.output_text.done",
-                "response.completed",
-            ],
-        )
-        self.assertEqual(
-            events[-1][1]["response"]["output_text"],
-            "PostgreSQL is a relational database.",
-        )
-        self.assertEqual(factory.prepare_calls, 0)
-        self.assertEqual(store.runs, {})
+                response = asyncio.run(
+                    asgi_request(
+                        app,
+                        "POST",
+                        "/api/v1/responses",
+                        json_body={
+                            "input": "What is PostgreSQL?",
+                            "session_id": "s-1",
+                            "runtime_options": {"engine": engine},
+                        },
+                    )
+                )
+                events = parse_sse(response)
+
+                self.assertEqual(
+                    [event for event, _ in events],
+                    [
+                        "response.created",
+                        "response.output_text.delta",
+                        "response.output_text.done",
+                        "response.completed",
+                    ],
+                )
+                self.assertEqual(
+                    events[-1][1]["response"]["output_text"],
+                    "PostgreSQL is a relational database.",
+                )
+                self.assertEqual(len(orchestrator.calls), 1)
+                self.assertEqual(orchestrator.calls[0][0].text, "What is PostgreSQL?")
+                self.assertEqual(factory.prepare_calls, 0)
+                self.assertEqual(store.runs, {})
 
     def test_delegation_preserves_the_original_query(self):
         with tempfile.TemporaryDirectory() as temp_dir:

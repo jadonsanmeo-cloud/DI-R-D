@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from data_intelligence_sdk.core.types import (
     DataCorpusPackage,
@@ -10,6 +10,7 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
+from data_intelligence_sdk.memory import MemoryContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,3 +26,4 @@ class WorkflowInvocation:
     session_context: SessionContext
     user_context: UserContext
     runtime_options: WorkflowRuntimeOptions
+    memory_context: MemoryContext = field(default_factory=MemoryContext)

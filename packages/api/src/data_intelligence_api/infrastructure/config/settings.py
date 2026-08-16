@@ -31,6 +31,13 @@ class ApiSettings:
     openai_compatible_api_key: str = ""
     openai_compatible_model: str = "cx/gpt-5.5"
     default_organization_id: str = "test-org"
+    memory_enabled: bool = False
+    memory_service_url: str = "http://localhost:8005"
+    memory_tenant_id: str = "test-org"
+    memory_default_user_id: str = "local-dev-user"
+    memory_search_limit: int = 20
+    memory_timeout_seconds: float = 2.0
+    memory_service_token: str = ""
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
@@ -92,6 +99,14 @@ class ApiSettings:
         if max_upload_bytes <= 0:
             raise ValueError("api.max_upload_bytes must be greater than zero.")
 
+        memory_enabled = _parse_boolean_env("MEMORY_ENABLED", default=False)
+        memory_search_limit = int(os.getenv("MEMORY_SEARCH_LIMIT", "20"))
+        if memory_search_limit <= 0:
+            raise ValueError("MEMORY_SEARCH_LIMIT must be greater than zero.")
+        memory_timeout_seconds = float(os.getenv("MEMORY_TIMEOUT_SECONDS", "2"))
+        if memory_timeout_seconds <= 0:
+            raise ValueError("MEMORY_TIMEOUT_SECONDS must be greater than zero.")
+
         openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
         compatible_base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL")
         if not compatible_base_url:
@@ -125,4 +140,30 @@ class ApiSettings:
                 "DEFAULT_ORGANIZATION_ID",
                 str(api_payload.get("default_organization_id", "test-org")),
             ),
+            memory_enabled=memory_enabled,
+            memory_service_url=os.getenv(
+                "MEMORY_SERVICE_URL", "http://localhost:8005"
+            ),
+            memory_tenant_id=os.getenv("MEMORY_TENANT_ID", "test-org"),
+            memory_default_user_id=os.getenv(
+                "MEMORY_DEFAULT_USER_ID", "local-dev-user"
+            ),
+            memory_search_limit=memory_search_limit,
+            memory_timeout_seconds=memory_timeout_seconds,
+            memory_service_token=os.getenv("MEMORY_SERVICE_TOKEN", ""),
         )
+
+
+def _parse_boolean_env(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"{name} must be one of true/false, 1/0, yes/no, or on/off."
+    )

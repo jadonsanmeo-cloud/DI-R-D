@@ -18,6 +18,7 @@ from data_intelligence_api.http.routers.runtime_capabilities import (
 from data_intelligence_api.http.routers.health import create_health_router
 from data_intelligence_api.http.routers.uploads import create_uploads_router
 from data_intelligence_api.application.ports.run_repository import RunRepository
+from data_intelligence_api.application.ports.memory_loader import MemoryLoader
 from data_intelligence_api.infrastructure.persistence.memory.run_repository import (
     InMemoryRunRepository,
 )
@@ -32,6 +33,10 @@ from data_intelligence_api.application.query_orchestrator import GeneralQueryOrc
 from data_intelligence_api.infrastructure.llm.query_orchestrator_client import (
     OpenAIQueryOrchestratorClient,
 )
+from data_intelligence_api.infrastructure.memory import (
+    AxiomExperienceMemoryLoader,
+    DisabledMemoryLoader,
+)
 from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger
 
 
@@ -40,6 +45,7 @@ def create_app(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     run_repository: RunRepository | None = None,
     query_orchestrator: object | None = None,
+    memory_loader: MemoryLoader | None = None,
 ) -> FastAPI:
     resolved_settings = settings or ApiSettings.from_env()
     resolved_repository = run_repository or (
@@ -47,14 +53,26 @@ def create_app(
         if resolved_settings.database_url
         else InMemoryRunRepository()
     )
+    runtime_logger = ConsoleRuntimeLogger()
     resolved_query_orchestrator = query_orchestrator or GeneralQueryOrchestrator(
         OpenAIQueryOrchestratorClient(
             base_url=resolved_settings.openai_compatible_base_url,
             api_key=resolved_settings.openai_compatible_api_key,
             model=resolved_settings.openai_compatible_model,
         ),
-        logger=ConsoleRuntimeLogger(),
+        logger=runtime_logger,
     )
+    resolved_memory_loader = memory_loader
+    if resolved_memory_loader is None and resolved_settings.memory_enabled:
+        resolved_memory_loader = AxiomExperienceMemoryLoader(
+            base_url=resolved_settings.memory_service_url,
+            limit=resolved_settings.memory_search_limit,
+            timeout_seconds=resolved_settings.memory_timeout_seconds,
+            service_token=resolved_settings.memory_service_token,
+            logger=runtime_logger,
+        )
+    if resolved_memory_loader is None:
+        resolved_memory_loader = DisabledMemoryLoader(logger=runtime_logger)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -89,6 +107,7 @@ def create_app(
             pipeline_factory,
             resolved_repository,
             resolved_query_orchestrator,
+            resolved_memory_loader,
         )
     )
     return app

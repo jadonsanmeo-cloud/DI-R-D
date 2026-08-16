@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from data_intelligence_sdk.core.types import SessionContext, UserQuery
+from data_intelligence_sdk.memory import MemoryContext
+from data_intelligence_sdk.prompts import PromptEnvelopeComposer
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 
 
@@ -51,11 +53,41 @@ class GeneralQueryOrchestrator:
         self,
         query: UserQuery,
         session_context: SessionContext | None = None,
+        *,
+        memory_context: MemoryContext | None = None,
     ) -> DirectGeneralAnswer | DelegateToDataFlow:
         self._log("orchestrator.started", {"query_character_count": len(query.text)})
+        resolved_memory = memory_context or MemoryContext()
+        selected_cards = resolved_memory.for_orchestrator()
+        rendered_memory = resolved_memory.render(
+            target="orchestrator",
+            max_tokens=1000,
+        )
+        self._log(
+            "memory.context.selected",
+            {
+                "target": "orchestrator",
+                "count": len(selected_cards),
+                "memory_types": [card.memory_type for card in selected_cards],
+                "memory_ids": [card.memory_id for card in selected_cards],
+            },
+        )
+        system_prompt = PromptEnvelopeComposer().compose(
+            operational_role=_OPERATIONAL_ROLE,
+            memory_context=rendered_memory,
+            task_contract=_TASK_CONTRACT,
+        )
+        self._log(
+            "prompt.envelope.composed",
+            {
+                "target": "orchestrator",
+                "memory_count": len(selected_cards),
+                "prompt_character_count": len(system_prompt),
+            },
+        )
         try:
             response = await self.client.decide(
-                messages=_build_messages(query, session_context),
+                messages=_build_messages(query, session_context, system_prompt),
                 tool_name=DELEGATION_TOOL_NAME,
             )
         except Exception as exc:
@@ -93,8 +125,9 @@ class GeneralQueryOrchestrator:
 def _build_messages(
     query: UserQuery,
     session_context: SessionContext | None,
+    system_prompt: str,
 ) -> list[dict[str, str]]:
-    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": system_prompt}]
     if session_context is not None:
         for turn in session_context.turns:
             role = _normalize_role(turn.get("role"))
@@ -116,9 +149,11 @@ def _normalize_role(value: object) -> str | None:
     return None
 
 
-_SYSTEM_PROMPT = """You are the routing orchestrator for a data intelligence API.
+_OPERATIONAL_ROLE = """For this internal step, decide whether AXIOM can answer from
+general knowledge and supplied conversation context or must delegate to the private
+data workflow. Do not expose this internal routing step to the user."""
 
-Answer the user directly only when the answer can be produced from general
+_TASK_CONTRACT = """Answer the user directly only when the answer can be produced from general
 knowledge or the supplied conversation context. You have no access to the
 user's private documents, organization corpus, databases, files, Method Hub,
 MCP tools, or sandbox.

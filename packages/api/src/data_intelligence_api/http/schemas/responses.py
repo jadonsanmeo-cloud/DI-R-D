@@ -18,6 +18,25 @@ class RuntimeOptionsRequest(BaseModel):
     engine: Literal["auto", "general", "reason", "report"] | None = None
 
 
+class MemoryCardRequest(BaseModel):
+    memory_id: str
+    memory_type: Literal["profile", "preference", "constraint", "episodic", "semantic", "outcome", "procedure"]
+    content: str
+    confidence: float = Field(ge=0, le=1)
+    importance: float = Field(ge=0, le=1)
+    memory_layer: Literal["short_term", "long_term"] | None = None
+    provider: str | None = None
+    score: float | None = None
+    matched_by: list[str] = Field(default_factory=list)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    scope: dict[str, str | None] = Field(default_factory=dict)
+
+
+class MemoryContextRequest(BaseModel):
+    source: str = "intelligence-service"
+    cards: list[MemoryCardRequest] = Field(default_factory=list, max_length=100)
+
+
 class MethodHubCapabilityResponse(BaseModel):
     default_enabled: bool
     available: bool
@@ -35,6 +54,7 @@ class CreateResponseRequest(BaseModel):
     runtime_options: RuntimeOptionsRequest = Field(
         default_factory=RuntimeOptionsRequest
     )
+    memory_context: MemoryContextRequest | None = None
 
 
 class ResponseDecisionRequest(BaseModel):

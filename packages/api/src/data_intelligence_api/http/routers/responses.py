@@ -7,7 +7,7 @@ import logging
 import queue
 import secrets
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from threading import Thread
 from typing import AsyncIterator, Callable
@@ -23,6 +23,7 @@ from data_intelligence_api.application.runtime_capabilities import (
     MethodHubUnavailableError,
 )
 from data_intelligence_api.application.ports.run_repository import RunRepository
+from data_intelligence_api.application.ports.memory_loader import MemoryLoader
 from data_intelligence_api.domain.workflow import WorkflowRuntimeOptions
 from data_intelligence_api.domain.runs import (
     RunConflictError,
@@ -32,6 +33,7 @@ from data_intelligence_api.domain.runs import (
 from data_intelligence_api.infrastructure.persistence.run_store import (
     hash_confirmation_token,
 )
+from data_intelligence_api.infrastructure.memory import parse_upstream_memory_context
 from data_intelligence_api.http.schemas.responses import (
     CreateResponseRequest,
     ResponseDecisionRequest,
@@ -65,6 +67,7 @@ from data_intelligence_api.application.query_orchestrator import (
     DirectGeneralAnswer,
 )
 from data_intelligence_sdk.core.types import FinalResponse
+from data_intelligence_sdk.memory import MemoryContext
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +275,7 @@ def create_responses_router(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     run_repository: RunRepository | None = None,
     query_orchestrator: object | None = None,
+    memory_loader: MemoryLoader | None = None,
 ) -> APIRouter:
     if run_repository is None:
         raise ValueError(
@@ -279,6 +283,8 @@ def create_responses_router(
         )
     if query_orchestrator is None:
         raise ValueError("query_orchestrator is required for Responses workflows.")
+    if memory_loader is None:
+        raise ValueError("memory_loader is required for Responses workflows.")
     router = APIRouter()
     artifact_history = ArtifactHistoryReader(settings.artifact_root)
 
@@ -310,10 +316,49 @@ def create_responses_router(
                     "response": {"id": response_id, "status": "in_progress"},
                 },
             )
+            request_invocation = invocation
+            if payload.memory_context is not None:
+                request_invocation = replace(
+                    invocation,
+                    memory_context=parse_upstream_memory_context(payload.memory_context),
+                )
+                event_logger.log(
+                    "memory.context.received",
+                    {"source": payload.memory_context.source, "count": len(payload.memory_context.cards)},
+                )
+            elif memory_loader is not None:
+                tenant_id = settings.memory_tenant_id.strip()
+                user_id = (
+                    invocation.query.user_id or settings.memory_default_user_id
+                ).strip()
+                if tenant_id and user_id:
+                    memory_context = await memory_loader.load(
+                        query=invocation.query.text,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        workspace_id=None,
+                        agent_id=None,
+                        session_id=invocation.query.session_id,
+                        trace_id=response_id,
+                    )
+                    request_invocation = replace(
+                        invocation,
+                        memory_context=memory_context,
+                    )
+                else:
+                    event_logger.log(
+                        "memory.load.skipped",
+                        {
+                            "reason": "missing_scope_identity",
+                            "has_tenant_id": bool(tenant_id),
+                            "has_user_id": bool(user_id),
+                        },
+                    )
             try:
                 route = await query_orchestrator.route(  # type: ignore[attr-defined]
-                    invocation.query,
-                    invocation.session_context,
+                    request_invocation.query,
+                    request_invocation.session_context,
+                    memory_context=request_invocation.memory_context,
                 )
             except Exception as exc:
                 logger.error(
@@ -380,7 +425,7 @@ def create_responses_router(
                 response_id=response_id,
                 messages=messages,
                 operation=lambda: prepare_workflow(
-                    invocation, event_logger, pipeline_factory
+                    request_invocation, event_logger, pipeline_factory
                 ),
                 settings=settings,
                 error_code="pipeline_preparation_failed",
