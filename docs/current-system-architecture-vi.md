@@ -30,12 +30,14 @@ thống đã xây dựng và xác nhận `ExecutionSpec`.
 
 ```mermaid
 flowchart TD
-    WEB[Next.js Web] -->|HTTP + SSE| API[Data Intelligence FastAPI]
+    WEB[Next.js Web] -->|Public Responses API| AXIOM[AXIOM Intelligence Service]
+    AXIOM -->|Stateless operation HTTP| API[Data Intelligence Runtime]
 
     API --> PREPARE[Prepare Workflow]
     PREPARE --> INTENT[AXIOM Intent Service]
     INTENT --> SPEC[LLM Spec Builder]
-    SPEC --> CONFIRM[Spec Confirmation / Revision]
+    SPEC --> AXIOM
+    AXIOM --> CONFIRM[AXIOM Confirmation / Revision State]
 
     CONFIRM -->|Confirmed ExecutionSpec| SELECT[Engine Selector]
     SELECT --> GENERAL[General Purpose Engine]
@@ -53,7 +55,8 @@ flowchart TD
     OUTPUT --> EVIDENCE[Evidence Collector]
     EVIDENCE --> SYNTHESIS[Final Synthesis]
     SYNTHESIS --> API
-    API -->|SSE events + final response| WEB
+    API -->|Runtime SSE events| AXIOM
+    AXIOM -->|Public SSE events| WEB
 ```
 
 ## 3. Các deployable chính
@@ -61,13 +64,14 @@ flowchart TD
 | Thành phần            | Vai trò                                                               |
 | --------------------- | --------------------------------------------------------------------- |
 | Next.js Web           | Giao diện query, upload, confirmation, revision và report preview     |
-| Data Intelligence API | HTTP/SSE transport, workflow orchestration và run persistence         |
+| AXIOM Intelligence    | Public Responses API, confirmation, revisions và durable response state |
+| Data Intelligence API | Authenticated stateless prepare/revise/execute operations             |
 | Data Intelligence SDK | Spec pipeline, engine selection, runtime contracts và engines         |
 | Intent Service        | Phân tích intent liên quan và cung cấp processing knowledge           |
 | Method Hub            | Cung cấp governed tools qua MCP                                       |
 | Sandbox Service       | Quản lý sandbox lifecycle, files, commands và dependency provisioning |
 | Sandbox Worker        | Thực thi Python cô lập bằng gVisor                                    |
-| PostgreSQL            | Lưu response runs, revisions và trạng thái của các control plane      |
+| AXIOM PostgreSQL      | Lưu response runs, revisions, decisions, operations và outputs       |
 | Artifact Store        | Lưu code attempts, execution artifacts, reports và event manifests    |
 
 ## 4. Web layer
@@ -86,8 +90,9 @@ Trách nhiệm chính:
 - Hiển thị kết quả General hoặc Report Engine.
 - Bật hoặc tắt Method Hub theo runtime option.
 
-Frontend không trực tiếp gọi Intent Service, Method Hub hoặc Sandbox Service.
-Các service này được truy cập thông qua Data Intelligence API và SDK runtime.
+Frontend không trực tiếp gọi Data Intelligence Runtime, Intent Service, Method Hub
+hoặc Sandbox Service. Public response orchestration đi qua AXIOM Intelligence
+Service; runtime chỉ nhận các operation self-contained từ AXIOM.
 
 ## 5. Data Intelligence API
 
@@ -95,25 +100,23 @@ FastAPI application gồm các router chính:
 
 | Router                 | Trách nhiệm                                          |
 | ---------------------- | ---------------------------------------------------- |
-| `health`               | Kiểm tra API và run repository                       |
-| `uploads`              | Quản lý data corpus files                            |
+| `health`               | Process liveness, không kiểm tra response database   |
 | `runtime-capabilities` | Hiện chỉ kiểm tra Method Hub availability            |
-| `responses`            | Prepare, confirm, revise, execute và stream workflow |
+| `runtime-operations`   | Stateless prepare, revise và execute                 |
 
-Responses API sử dụng background thread và queue trong process để chuyển các
-operation đồng bộ của SDK thành SSE events.
+Runtime không mount `/api/v1/responses` và không có run repository. AXIOM tạo
+operation ID, response ID, payload đầy đủ, sau đó lưu kết quả chấp nhận được.
 
 ```text
-FastAPI request
-    -> background Thread
+AXIOM operation request
     -> workflow operation
-    -> Queue messages
-    -> SSE stream
-    -> Web client
+    -> correlated runtime result / SSE stream
+    -> AXIOM persistence
+    -> public SSE stream
 ```
 
-Đây chưa phải distributed worker architecture. Nếu API process dừng, operation
-đang chạy trong thread cũng không còn độc lập.
+Nếu runtime process dừng giữa operation, AXIOM vẫn giữ durable response state và
+quyết định retry/failure dựa trên operation record của AXIOM.
 
 ## 6. Workflow lifecycle
 
@@ -147,8 +150,9 @@ UserQuery + DataCorpusPackage
     -> Spec Build Context
     -> LLM Spec Builder
     -> Draft ExecutionSpec
-    -> Persist revision
-    -> response.requires_confirmation
+    -> Return prepared execution + Markdown to AXIOM
+    -> AXIOM persists revision
+    -> AXIOM emits response.requires_confirmation
 ```
 
 Giai đoạn này chưa chọn engine và chưa provision sandbox.
@@ -168,7 +172,8 @@ Draft ExecutionSpec
         -> require confirmation again
 ```
 
-Confirmation là boundary bắt buộc trước engine selection.
+Confirmation là boundary bắt buộc trước engine selection. Token, expiry, decision
+audit và revision counter đều thuộc AXIOM; runtime không lưu các giá trị này.
 
 ### 6.4 Confirmed execution
 
@@ -512,15 +517,16 @@ và heartbeat thành công.
 
 ## 16. Persistence
 
-Hệ thống có hai persistence planes:
+Data Intelligence Runtime không có response database. Durable response state nằm
+trong AXIOM:
 
-| Plane          | Dữ liệu                                                        |
-| -------------- | -------------------------------------------------------------- |
-| Run Repository | Response state, spec revisions, confirmation, output và errors |
-| Artifact Store | Code attempts, execution results, reports và event manifests   |
+| Plane                | Dữ liệu                                                        |
+| -------------------- | -------------------------------------------------------------- |
+| AXIOM control plane  | Response state, revisions, decisions, operations và outputs    |
+| Runtime Artifact Store | Code attempts, execution results, reports và event manifests |
 
-Run Repository production dùng PostgreSQL. Artifact Store hiện chủ yếu dùng
-filesystem-backed run directory.
+Artifact Store dùng filesystem-backed run directory để hỗ trợ execution và debug.
+Nó không thay thế AXIOM response lifecycle persistence.
 
 ## 17. Observability
 

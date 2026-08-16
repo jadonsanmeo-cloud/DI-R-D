@@ -1,4 +1,4 @@
-"""Pydantic request models for the responses API."""
+"""Request models shared by stateless runtime operations and workflow adapters."""
 
 from __future__ import annotations
 
@@ -18,16 +18,6 @@ class UploadedFileRequest(BaseModel):
     size: int = 0
     content_type: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class RuntimeGatewayRequest(BaseModel):
-    run_id: str
-    endpoint: str
-    token: str
-    token_type: str = "bearer"
-    expires_at: int
-    workspace_id: str | None = None
-    capabilities: list[str] = Field(default_factory=list)
 
 
 class ExecutionFileRequest(BaseModel):
@@ -69,17 +59,7 @@ class ExecutionContextRequest(BaseModel):
         return self
 
 
-class MethodHubCapabilityResponse(BaseModel):
-    default_enabled: bool
-    available: bool
-
-
-class RuntimeCapabilitiesResponse(BaseModel):
-    method_hub: MethodHubCapabilityResponse
-
-
-class CreateResponseRequest(BaseModel):
-    response_id: str | None = None
+class WorkflowRequest(BaseModel):
     input: str | None = None
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     user_id: str | None = None
@@ -87,53 +67,6 @@ class CreateResponseRequest(BaseModel):
     workspace_id: str | None = None
     workspace_ids: list[str] | None = Field(default=None, min_length=1)
     session_id: str | None = None
-    runtime_options: RuntimeOptionsRequest = Field(
-        default_factory=RuntimeOptionsRequest
-    )
-    runtime_gateway: RuntimeGatewayRequest | None = None
+    runtime_options: RuntimeOptionsRequest = Field(default_factory=RuntimeOptionsRequest)
     execution_context: ExecutionContextRequest | None = None
     execution_files: list[ExecutionFileRequest] = Field(default_factory=list)
-
-
-class ResponseDecisionRequest(BaseModel):
-    action: Literal["confirm", "revise"]
-    revision: int = Field(gt=0)
-    spec_markdown: str | None = None
-
-    @model_validator(mode="after")
-    def validate_revision_input(self):
-        if self.action == "confirm" and self.spec_markdown is not None:
-            raise ValueError("Confirm decisions cannot include spec_markdown.")
-        if self.action == "revise" and not (
-            self.spec_markdown and self.spec_markdown.strip()
-        ):
-            raise ValueError("Revise decisions require spec_markdown.")
-        return self
-
-
-class ResponseHistorySummary(BaseModel):
-    response_id: str
-    title: str
-    status: str
-    output_preview: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-    completed_at: str | None = None
-
-
-class ResponseHistoryDetail(BaseModel):
-    response_id: str
-    status: str
-    input: str
-    spec: dict[str, Any]
-    runtime_options: RuntimeOptionsRequest = Field(
-        default_factory=RuntimeOptionsRequest
-    )
-    output_text: str | None = None
-    evidence: dict[str, Any] | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    events: list[dict[str, Any]] = Field(default_factory=list)
-    error: dict[str, str] | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-    completed_at: str | None = None

@@ -10,7 +10,7 @@ from data_intelligence_sdk.runtime.mcp_client import (
 )
 
 from data_intelligence_api.domain.workflow import WorkflowRuntimeOptions
-from data_intelligence_api.http.schemas.responses import RuntimeOptionsRequest
+from data_intelligence_api.http.schemas.runtime_inputs import RuntimeOptionsRequest
 
 
 class MethodHubUnavailableError(RuntimeError):

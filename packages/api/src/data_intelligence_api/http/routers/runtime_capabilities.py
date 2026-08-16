@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from data_intelligence_api.application.runtime_capabilities import (
     method_hub_available,
 )
-from data_intelligence_api.http.schemas.responses import (
+from data_intelligence_api.http.schemas.runtime_capabilities import (
     MethodHubCapabilityResponse,
     RuntimeCapabilitiesResponse,
 )
