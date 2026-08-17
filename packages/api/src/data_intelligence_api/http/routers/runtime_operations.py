@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from collections.abc import AsyncIterator
 from dataclasses import asdict
@@ -10,12 +11,14 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from data_intelligence_api.application.runtime_operations import (
+    execute_direct_report,
     execute_spec,
     prepare_spec,
     revise_spec,
 )
 from data_intelligence_api.application.workflow import PipelineFactory
 from data_intelligence_api.http.schemas.runtime_operations import (
+    DirectExecuteRequest,
     ExecuteRequest,
     OperationEnvelope,
     PrepareSpecRequest,
@@ -24,6 +27,9 @@ from data_intelligence_api.http.schemas.runtime_operations import (
 )
 from data_intelligence_api.http.streaming import chunk_text, encode_sse
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
+
+
+logger = logging.getLogger(__name__)
 
 
 def _authorize_service(
@@ -136,6 +142,75 @@ def create_runtime_operations_router(
             try:
                 result = execute_spec(request, pipeline_factory=pipeline_factory)
             except Exception:
+                logger.exception(
+                    "Runtime execution failed operation_id=%s response_id=%s",
+                    request.operation_id,
+                    request.response_id,
+                )
+                yield encode_sse(
+                    "runtime.failed",
+                    {
+                        "type": "runtime.failed",
+                        "operation_id": request.operation_id,
+                        "response_id": request.response_id,
+                        "payload": {
+                            "code": "execution_failed",
+                            "message": "The runtime execution failed.",
+                            "retryable": False,
+                        },
+                    },
+                )
+                return
+
+            for delta in chunk_text(result.answer):
+                yield encode_sse(
+                    "runtime.output_text.delta",
+                    {
+                        "type": "runtime.output_text.delta",
+                        "operation_id": request.operation_id,
+                        "response_id": request.response_id,
+                        "payload": {"delta": delta},
+                    },
+                )
+            yield encode_sse(
+                "runtime.completed",
+                {
+                    "type": "runtime.completed",
+                    "operation_id": request.operation_id,
+                    "response_id": request.response_id,
+                    "payload": {
+                        "output_text": result.answer,
+                        "evidence": (
+                            asdict(result.evidence) if result.evidence is not None else None
+                        ),
+                        "metadata": dict(result.metadata),
+                    },
+                },
+            )
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @router.post("/v1/executions:run-stream")
+    async def stream_direct_runtime_execution(
+        request: DirectExecuteRequest,
+        authorization: str | None = Header(default=None, alias="Authorization"),
+        consumer_service: str | None = Header(default=None, alias="X-Consumer-Service"),
+    ) -> StreamingResponse:
+        _authorize_service(settings, authorization, consumer_service)
+
+        async def event_stream() -> AsyncIterator[str]:
+            try:
+                result = execute_direct_report(
+                    request,
+                    settings=settings,
+                    pipeline_factory=pipeline_factory,
+                )
+            except Exception:
+                logger.exception(
+                    "Runtime direct execution failed operation_id=%s response_id=%s",
+                    request.operation_id,
+                    request.response_id,
+                )
                 yield encode_sse(
                     "runtime.failed",
                     {

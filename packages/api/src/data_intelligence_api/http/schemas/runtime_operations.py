@@ -29,10 +29,22 @@ class RuntimeInput(BaseModel):
 
     input: str = Field(min_length=1)
     session_id: str = Field(min_length=1, max_length=128)
+    organization_id: str | None = None
+    workspace_id: str | None = None
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     runtime_options: RuntimeOptionsRequest = Field(default_factory=RuntimeOptionsRequest)
     execution_context: ExecutionContextRequest | None = None
     execution_files: list[ExecutionFileRequest] = Field(default_factory=list)
+
+
+class DirectRuntimeOptions(RuntimeOptionsRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    engine: Literal["report"]
+
+
+class DirectRuntimeInput(RuntimeInput):
+    runtime_options: DirectRuntimeOptions
 
 
 class PrepareSpecRequest(OperationEnvelope):
@@ -65,6 +77,12 @@ class ExecuteRequest(OperationEnvelope):
     runtime_input: RuntimeInput
     prepared_execution: dict[str, Any]
     spec_markdown: str = Field(min_length=1)
+    memory_scope: dict[str, Any] | None = None
+    memory_context: dict[str, Any] | None = None
+
+
+class DirectExecuteRequest(OperationEnvelope):
+    runtime_input: DirectRuntimeInput
     memory_scope: dict[str, Any] | None = None
     memory_context: dict[str, Any] | None = None
 

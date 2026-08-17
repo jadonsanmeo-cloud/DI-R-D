@@ -501,6 +501,108 @@ class DataIntelligencePipeline:
         )
         return response
 
+    def execute_report_direct(
+        self,
+        query: UserQuery,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> FinalResponse:
+        """Execute the Report engine from the raw query without a spec lifecycle."""
+
+        if self.markdown_report_engine is None:
+            raise RuntimeError("Markdown report engine is not configured.")
+        run_artifact = self._create_run_artifact(query)
+        self._log(
+            "pipeline.start",
+            {
+                "query": query.text,
+                "artifact_ref": (
+                    run_artifact.artifact_ref if run_artifact is not None else None
+                ),
+            },
+        )
+        self._record_artifact_event(
+            run_artifact,
+            phase="engine_execution",
+            event_type="report.direct_started",
+            payload={"query": query.text},
+        )
+        phase = "sandbox_provisioning"
+        try:
+            sandbox_context = (
+                self.sandbox_provider.open()
+                if self.sandbox_provider is not None
+                else nullcontext(None)
+            )
+            with sandbox_context as sandbox:
+                phase = "engine_execution"
+                _stage_uploaded_files(sandbox, session_context)
+                sandbox_executor = self.sandbox_executor
+                if sandbox_executor is None and sandbox is not None:
+                    sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
+
+                def record_runtime_event(**event: Any) -> dict[str, Any]:
+                    return self._record_runtime_event(run_artifact, **event)
+
+                runtime = EngineRuntimeContext(
+                    run_context=EngineRunContext(event_recorder=record_runtime_event),
+                    mcp_client=self.mcp_client,
+                    mcp_tools=self.mcp_tools,
+                    interface_registry=self.interface_registry,
+                    interface_builder=self.interface_builder,
+                    sandbox_executor=sandbox_executor,
+                    artifact_store=self.artifact_store,
+                    log_store=self.log_store,
+                    resource_manager=self.resource_manager,
+                    sandbox=sandbox,
+                    run_artifact=run_artifact,
+                )
+                result = self.markdown_report_engine.run_markdown(
+                    spec_markdown=query.text,
+                    organization_id=self.default_organization_id,
+                    runtime=runtime,
+                    user_context=user_context,
+                    user_query=query,
+                )
+        except Exception as exc:
+            if run_artifact is not None:
+                run_artifact.finalize(
+                    status="failed",
+                    engine_name="report",
+                    failure_phase=phase,
+                    error=_artifact_error(exc),
+                )
+            raise
+
+        response = (
+            result
+            if isinstance(result, FinalResponse)
+            else FinalResponse(answer=str(result), metadata={"engine_name": "report"})
+        )
+        artifact_ref = run_artifact.artifact_ref if run_artifact is not None else None
+        if artifact_ref is not None:
+            response.metadata["artifact_ref"] = artifact_ref
+        self._record_artifact_event(
+            run_artifact,
+            phase="response",
+            event_type="response.completed",
+            payload=asdict(response),
+        )
+        if run_artifact is not None:
+            run_artifact.finalize(
+                status="completed",
+                engine_name=str(response.metadata.get("engine_name") or "report"),
+                final_answer=response.answer,
+            )
+        self._log(
+            "pipeline.completed",
+            {
+                "answer_type": type(response.answer).__name__,
+                "engine_name": response.metadata.get("engine_name"),
+            },
+        )
+        return response
+
     def execute_confirmed_spec(
         self,
         prepared: PreparedExecution,

@@ -29,6 +29,9 @@ from data_intelligence_sdk.spec.markdown_builder import validate_spec_markdown
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     create_example_pipeline,
 )
+from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
+    GenReportMarkdownEngine,
+)
 
 from data_intelligence_api.application.runtime_capabilities import (
     resolve_method_hub,
@@ -142,6 +145,11 @@ def default_pipeline_factory(
     *,
     logger: RuntimeLogger,
     runtime_options: WorkflowRuntimeOptions | None = None,
+    execution_context: dict[str, Any] | None = None,
+    execution_files: list[dict[str, Any]] | None = None,
+    organization_id: str | None = None,
+    workspace_id: str | None = None,
+    discover_workspace_files: bool = False,
 ) -> DataIntelligencePipeline:
     config_manager = ConfigManager(os.getenv("MODEL_CONFIG_PATH") or None)
     method_hub_settings = config_manager.method_hub_settings()
@@ -167,6 +175,18 @@ def default_pipeline_factory(
         if requested_engine is not None
         else {}
     )
+    markdown_report_engine = (
+        GenReportMarkdownEngine(
+            os.getenv("GEN_REPORT_API_URL", "http://host.docker.internal:8011"),
+            public_base_url=os.getenv("GEN_REPORT_PUBLIC_URL"),
+            execution_context=execution_context,
+            execution_files=execution_files,
+            workspace_id=workspace_id,
+            discover_workspace_files=discover_workspace_files,
+        )
+        if resolved_options.engine == "report"
+        else None
+    )
     return create_example_pipeline(
         logger=logger,
         config_manager=config_manager,
@@ -179,7 +199,12 @@ def default_pipeline_factory(
                 else None
             )
         ),
-        default_organization_id=os.getenv("DEFAULT_ORGANIZATION_ID", "test-org"),
+        default_organization_id=(
+            organization_id
+            or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
+        ),
+        configure_default_sandbox=resolved_options.engine != "report",
+        markdown_report_engine=markdown_report_engine,
         mcp_client=resolved_method_hub.client,
         **engine_kwargs,
         **method_hub_kwargs,
@@ -191,19 +216,34 @@ def _create_pipeline(
     *,
     logger: RuntimeLogger,
     runtime_options: WorkflowRuntimeOptions,
+    execution_context: dict[str, Any] | None = None,
+    execution_files: list[dict[str, Any]] | None = None,
+    organization_id: str | None = None,
+    workspace_id: str | None = None,
+    discover_workspace_files: bool = False,
 ) -> DataIntelligencePipeline:
     try:
         parameters = inspect.signature(pipeline_factory).parameters.values()
     except (TypeError, ValueError):
         parameters = ()
-    supports_runtime_options = any(
-        parameter.name == "runtime_options"
-        or parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters
+    parameter_names = {parameter.name for parameter in parameters}
+    supports_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
     )
-    if supports_runtime_options:
-        return pipeline_factory(logger=logger, runtime_options=runtime_options)
-    return pipeline_factory(logger=logger)
+    kwargs: dict[str, Any] = {"logger": logger}
+    if supports_kwargs or "runtime_options" in parameter_names:
+        kwargs["runtime_options"] = runtime_options
+    if supports_kwargs or "execution_context" in parameter_names:
+        kwargs["execution_context"] = execution_context
+    if supports_kwargs or "execution_files" in parameter_names:
+        kwargs["execution_files"] = execution_files
+    if supports_kwargs or "organization_id" in parameter_names:
+        kwargs["organization_id"] = organization_id
+    if supports_kwargs or "workspace_id" in parameter_names:
+        kwargs["workspace_id"] = workspace_id
+    if supports_kwargs or "discover_workspace_files" in parameter_names:
+        kwargs["discover_workspace_files"] = discover_workspace_files
+    return pipeline_factory(**kwargs)
 
 
 def execute_workflow(
@@ -260,11 +300,21 @@ def execute_prepared_markdown_workflow(
     logger: RuntimeLogger,
     runtime_options: WorkflowRuntimeOptions,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
+    execution_context: dict[str, Any] | None = None,
+    execution_files: list[dict[str, Any]] | None = None,
+    organization_id: str | None = None,
+    workspace_id: str | None = None,
+    discover_workspace_files: bool = False,
 ) -> FinalResponse:
     pipeline = _create_pipeline(
         pipeline_factory,
         logger=logger,
         runtime_options=runtime_options,
+        execution_context=execution_context,
+        execution_files=execution_files,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        discover_workspace_files=discover_workspace_files,
     )
     if runtime_options.engine in {"general", "reason"}:
         spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
@@ -280,6 +330,38 @@ def execute_prepared_markdown_workflow(
         )
         return pipeline.execute_confirmed_spec(prepared_execution, spec)
     return pipeline.execute_confirmed_markdown(prepared, spec_markdown)
+
+
+def execute_direct_report_workflow(
+    invocation: WorkflowInvocation,
+    logger: RuntimeLogger,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    *,
+    execution_context: dict[str, Any] | None = None,
+    execution_files: list[dict[str, Any]] | None = None,
+    organization_id: str | None = None,
+    workspace_id: str | None = None,
+    discover_workspace_files: bool = False,
+) -> FinalResponse:
+    if invocation.runtime_options.engine != "report":
+        raise ValueError(
+            "Direct execution currently supports the report engine only."
+        )
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=invocation.runtime_options,
+        execution_context=execution_context,
+        execution_files=execution_files,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        discover_workspace_files=discover_workspace_files,
+    )
+    return pipeline.execute_report_direct(
+        invocation.query,
+        invocation.session_context,
+        invocation.user_context,
+    )
 
 
 def _execution_spec_from_markdown(

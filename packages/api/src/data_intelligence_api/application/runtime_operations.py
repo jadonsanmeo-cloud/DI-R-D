@@ -9,6 +9,7 @@ from data_intelligence_api.application.workflow import (
     PipelineFactory,
     build_workflow_invocation,
     default_pipeline_factory,
+    execute_direct_report_workflow,
     execute_prepared_markdown_workflow,
     prepare_workflow,
     prepared_markdown_from_payload,
@@ -17,6 +18,7 @@ from data_intelligence_api.application.workflow import (
 )
 from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
 from data_intelligence_api.http.schemas.runtime_operations import (
+    DirectExecuteRequest,
     ExecuteRequest,
     PrepareSpecRequest,
     PrepareSpecResponse,
@@ -32,6 +34,8 @@ def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
     return WorkflowRequest(
         input=runtime_input.input,
         session_id=runtime_input.session_id,
+        organization_id=runtime_input.organization_id,
+        workspace_id=runtime_input.workspace_id,
         uploaded_files=runtime_input.uploaded_files,
         runtime_options=runtime_input.runtime_options,
         execution_context=runtime_input.execution_context,
@@ -128,4 +132,54 @@ def execute_spec(
         _logger_or_default(logger),
         runtime_options,
         pipeline_factory,
+        execution_context=(
+            request.runtime_input.execution_context.model_dump(mode="json")
+            if request.runtime_input.execution_context is not None
+            else None
+        ),
+        execution_files=[
+            item.model_dump(mode="json")
+            for item in request.runtime_input.execution_files
+        ],
+        organization_id=request.runtime_input.organization_id,
+        workspace_id=request.runtime_input.workspace_id,
+        discover_workspace_files=(
+            not request.runtime_input.execution_files
+            and request.runtime_input.runtime_options.method_hub_enabled is not False
+        ),
+    )
+
+
+def execute_direct_report(
+    request: DirectExecuteRequest,
+    *,
+    settings: object,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    logger: RuntimeLogger | None = None,
+) -> FinalResponse:
+    invocation = build_workflow_invocation(
+        _to_workflow_request(request.runtime_input),
+        settings.data_corpus_root,  # type: ignore[attr-defined]
+        method_hub_default_enabled=settings.method_hub_default_enabled,  # type: ignore[attr-defined]
+    )
+    execution_files = [
+        item.model_dump(mode="json")
+        for item in request.runtime_input.execution_files
+    ]
+    return execute_direct_report_workflow(
+        invocation,
+        _logger_or_default(logger),
+        pipeline_factory,
+        execution_context=(
+            request.runtime_input.execution_context.model_dump(mode="json")
+            if request.runtime_input.execution_context is not None
+            else None
+        ),
+        execution_files=execution_files,
+        organization_id=request.runtime_input.organization_id,
+        workspace_id=request.runtime_input.workspace_id,
+        discover_workspace_files=(
+            not execution_files
+            and request.runtime_input.runtime_options.method_hub_enabled is not False
+        ),
     )

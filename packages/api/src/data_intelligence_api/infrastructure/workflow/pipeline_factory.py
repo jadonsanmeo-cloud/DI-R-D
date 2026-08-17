@@ -444,6 +444,7 @@ def create_example_pipeline(
     interface_builder: object | None = None,
     sandbox_executor: object | None = None,
     sandbox_provider: SandboxSessionProvider | None = None,
+    configure_default_sandbox: bool = True,
     artifact_store: object | None = None,
     logger: RuntimeLogger | None = None,
     intent_service_base_url: str | None = None,
@@ -480,7 +481,11 @@ def create_example_pipeline(
         spec_builder = ExampleSpecBuilder()
     spec_builder = _ReportDefaultsSpecBuilder(spec_builder)
     uses_default_engine = engine is None
-    if sandbox_provider is None and uses_default_engine:
+    if (
+        configure_default_sandbox
+        and sandbox_provider is None
+        and uses_default_engine
+    ):
         sandbox_settings = resolved_config_manager.sandbox_settings()
         if sandbox_settings.enabled:
             sandbox_provider = _configure_request_sandbox_provider(
