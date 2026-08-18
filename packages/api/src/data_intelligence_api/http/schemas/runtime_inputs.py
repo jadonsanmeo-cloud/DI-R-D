@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 
 class RuntimeOptionsRequest(BaseModel):
@@ -59,8 +59,19 @@ class ExecutionContextRequest(BaseModel):
         return self
 
 
+class ReportHistoryMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=200_000)
+    artifact_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
 class WorkflowRequest(BaseModel):
     input: str | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    language: str = Field(default="auto", min_length=1, max_length=32)
+    history: list[ReportHistoryMessage] = Field(default_factory=list, max_length=200)
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     user_id: str | None = None
     organization_id: str | None = None

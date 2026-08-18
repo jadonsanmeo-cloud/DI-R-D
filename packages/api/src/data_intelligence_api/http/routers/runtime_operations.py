@@ -15,8 +15,12 @@ from data_intelligence_api.application.runtime_operations import (
     execute_spec,
     prepare_spec,
     revise_spec,
+    stream_report_events,
 )
-from data_intelligence_api.application.workflow import PipelineFactory
+from data_intelligence_api.application.workflow import (
+    PipelineFactory,
+    default_pipeline_factory,
+)
 from data_intelligence_api.http.schemas.runtime_operations import (
     DirectExecuteRequest,
     ExecuteRequest,
@@ -139,8 +143,43 @@ def create_runtime_operations_router(
         _authorize_service(settings, authorization, consumer_service)
 
         async def event_stream() -> AsyncIterator[str]:
+            if (
+                request.runtime_input.runtime_options.engine == "report"
+                and pipeline_factory is default_pipeline_factory
+            ):
+                try:
+                    async for event in stream_report_events(
+                        request,
+                        instruction=request.spec_markdown,
+                        settings=settings,
+                    ):
+                        yield encode_sse(event["type"], event)
+                except Exception:
+                    logger.exception(
+                        "Runtime report stream failed operation_id=%s response_id=%s",
+                        request.operation_id,
+                        request.response_id,
+                    )
+                    yield encode_sse(
+                        "runtime.failed",
+                        {
+                            "type": "runtime.failed",
+                            "operation_id": request.operation_id,
+                            "response_id": request.response_id,
+                            "payload": {
+                                "code": "execution_failed",
+                                "message": "The runtime execution failed.",
+                                "retryable": False,
+                            },
+                        },
+                    )
+                return
             try:
-                result = execute_spec(request, pipeline_factory=pipeline_factory)
+                result = execute_spec(
+                    request,
+                    settings=settings,
+                    pipeline_factory=pipeline_factory,
+                )
             except Exception:
                 logger.exception(
                     "Runtime execution failed operation_id=%s response_id=%s",
@@ -199,6 +238,34 @@ def create_runtime_operations_router(
         _authorize_service(settings, authorization, consumer_service)
 
         async def event_stream() -> AsyncIterator[str]:
+            if pipeline_factory is default_pipeline_factory:
+                try:
+                    async for event in stream_report_events(
+                        request,
+                        instruction=request.runtime_input.input,
+                        settings=settings,
+                    ):
+                        yield encode_sse(event["type"], event)
+                except Exception:
+                    logger.exception(
+                        "Runtime direct report stream failed operation_id=%s response_id=%s",
+                        request.operation_id,
+                        request.response_id,
+                    )
+                    yield encode_sse(
+                        "runtime.failed",
+                        {
+                            "type": "runtime.failed",
+                            "operation_id": request.operation_id,
+                            "response_id": request.response_id,
+                            "payload": {
+                                "code": "execution_failed",
+                                "message": "The runtime execution failed.",
+                                "retryable": False,
+                            },
+                        },
+                    )
+                return
             try:
                 result = execute_direct_report(
                     request,

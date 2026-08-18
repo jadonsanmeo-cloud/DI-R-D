@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from data_intelligence_api.http.schemas.runtime_inputs import (
     ExecutionContextRequest,
     ExecutionFileRequest,
+    ReportHistoryMessage,
     RuntimeOptionsRequest,
     UploadedFileRequest,
 )
@@ -29,6 +30,9 @@ class RuntimeInput(BaseModel):
 
     input: str = Field(min_length=1)
     session_id: str = Field(min_length=1, max_length=128)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    language: str = Field(default="auto", min_length=1, max_length=32)
+    history: list[ReportHistoryMessage] = Field(default_factory=list, max_length=200)
     organization_id: str | None = None
     workspace_id: str | None = None
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)

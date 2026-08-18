@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from typing import Any, Callable
+
 from data_intelligence_api.application.runtime_capabilities import (
     resolve_runtime_options,
 )
@@ -28,12 +31,18 @@ from data_intelligence_api.http.schemas.runtime_operations import (
 )
 from data_intelligence_sdk.core.types import FinalResponse
 from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger, RuntimeLogger
+from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
+    GenReportMarkdownEngine,
+)
 
 
 def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
     return WorkflowRequest(
         input=runtime_input.input,
         session_id=runtime_input.session_id,
+        model=runtime_input.model,
+        language=runtime_input.language,
+        history=runtime_input.history,
         organization_id=runtime_input.organization_id,
         workspace_id=runtime_input.workspace_id,
         uploaded_files=runtime_input.uploaded_files,
@@ -45,6 +54,83 @@ def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
 
 def _logger_or_default(logger: RuntimeLogger | None) -> RuntimeLogger:
     return logger or ConsoleRuntimeLogger()
+
+
+async def stream_report_events(
+    request: ExecuteRequest | DirectExecuteRequest,
+    *,
+    instruction: str,
+    settings: object,
+    engine_factory: Callable[..., GenReportMarkdownEngine] = GenReportMarkdownEngine,
+) -> AsyncIterator[dict[str, Any]]:
+    runtime_input = request.runtime_input
+    if runtime_input.execution_context is None:
+        raise ValueError("report execution requires an execution context")
+    if not runtime_input.organization_id or not runtime_input.workspace_id:
+        raise ValueError("report execution requires organization and workspace scope")
+    engine = engine_factory(
+        getattr(settings, "gen_report_api_url"),
+        public_base_url=getattr(settings, "gen_report_public_url", None),
+        operation_id=request.operation_id,
+        response_id=request.response_id,
+        trace_id=request.trace_id,
+        model=runtime_input.model,
+        language=runtime_input.language,
+        history=[item.model_dump(mode="json") for item in runtime_input.history],
+        execution_context=runtime_input.execution_context.model_dump(mode="json"),
+        execution_files=[
+            item.model_dump(mode="json") for item in runtime_input.execution_files
+        ],
+        workspace_id=runtime_input.workspace_id,
+        discover_workspace_files=(
+            not runtime_input.execution_files
+            and runtime_input.runtime_options.method_hub_enabled is not False
+        ),
+    )
+    latest_usage: dict[str, Any] | None = None
+    async for event in engine.stream_events(
+        instruction=instruction,
+        organization_id=runtime_input.organization_id,
+    ):
+        event_type = event.get("type")
+        payload = event.get("payload")
+        payload = dict(payload) if isinstance(payload, dict) else {}
+        if event_type == "report.status":
+            runtime_type = "runtime.progress"
+        elif event_type == "report.output_text.delta":
+            runtime_type = "runtime.output_text.delta"
+            payload = {"delta": str(payload.get("delta") or "")}
+        elif event_type == "report.usage":
+            runtime_type = "runtime.usage"
+            latest_usage = dict(payload)
+        elif event_type == "report.failed":
+            runtime_type = "runtime.failed"
+        elif event_type == "report.completed":
+            runtime_type = "runtime.completed"
+            completion_usage = payload.get("usage")
+            metadata = {
+                "engine_name": "report",
+                "route": "gen_report",
+                "artifacts": list(payload.get("artifacts") or []),
+                "usage": (
+                    completion_usage
+                    if isinstance(completion_usage, dict)
+                    else latest_usage
+                ),
+            }
+            payload = {
+                "output_text": str(payload.get("output_text") or ""),
+                "evidence": None,
+                "metadata": metadata,
+            }
+        else:
+            continue
+        yield {
+            "type": runtime_type,
+            "operation_id": request.operation_id,
+            "response_id": request.response_id,
+            "payload": payload,
+        }
 
 
 def prepare_spec(
@@ -115,6 +201,7 @@ def revise_spec(
 def execute_spec(
     request: ExecuteRequest,
     *,
+    settings: object | None = None,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
 ) -> FinalResponse:
@@ -146,6 +233,18 @@ def execute_spec(
         discover_workspace_files=(
             not request.runtime_input.execution_files
             and request.runtime_input.runtime_options.method_hub_enabled is not False
+        ),
+        operation_id=request.operation_id,
+        response_id=request.response_id,
+        trace_id=request.trace_id,
+        model=request.runtime_input.model,
+        language=request.runtime_input.language,
+        history=[item.model_dump(mode="json") for item in request.runtime_input.history],
+        gen_report_base_url=(
+            getattr(settings, "gen_report_api_url", None) if settings is not None else None
+        ),
+        gen_report_public_url=(
+            getattr(settings, "gen_report_public_url", None) if settings is not None else None
         ),
     )
 
@@ -182,4 +281,12 @@ def execute_direct_report(
             not execution_files
             and request.runtime_input.runtime_options.method_hub_enabled is not False
         ),
+        operation_id=request.operation_id,
+        response_id=request.response_id,
+        trace_id=request.trace_id,
+        model=request.runtime_input.model,
+        language=request.runtime_input.language,
+        history=[item.model_dump(mode="json") for item in request.runtime_input.history],
+        gen_report_base_url=getattr(settings, "gen_report_api_url", None),
+        gen_report_public_url=getattr(settings, "gen_report_public_url", None),
     )

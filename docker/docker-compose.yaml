@@ -15,6 +15,7 @@ services:
     environment:
       DATA_CORPUS_ROOT: /app/data
       RUNTIME_SERVICE_TOKEN: ${RUNTIME_SERVICE_TOKEN:?Set RUNTIME_SERVICE_TOKEN}
+      GEN_REPORT_API_URL: ${GEN_REPORT_API_URL:-http://host.docker.internal:8011}
       MODEL_CONFIG_PATH: /app/configs/proxy-openrouter.toml
       PYTHONPATH: /workspace/Data-Intelligence-SDK/packages/api/src:/workspace/Data-Intelligence-SDK/packages/sdk/src
       QUERYAI_REASON_ENDPOINT: ${QUERYAI_REASON_ENDPOINT:-http://host.docker.internal:7205/query}

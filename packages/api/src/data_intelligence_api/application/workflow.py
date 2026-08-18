@@ -150,6 +150,14 @@ def default_pipeline_factory(
     organization_id: str | None = None,
     workspace_id: str | None = None,
     discover_workspace_files: bool = False,
+    operation_id: str | None = None,
+    response_id: str | None = None,
+    trace_id: str | None = None,
+    model: str | None = None,
+    language: str = "auto",
+    history: list[dict[str, Any]] | None = None,
+    gen_report_base_url: str | None = None,
+    gen_report_public_url: str | None = None,
 ) -> DataIntelligencePipeline:
     config_manager = ConfigManager(os.getenv("MODEL_CONFIG_PATH") or None)
     method_hub_settings = config_manager.method_hub_settings()
@@ -177,8 +185,15 @@ def default_pipeline_factory(
     )
     markdown_report_engine = (
         GenReportMarkdownEngine(
-            os.getenv("GEN_REPORT_API_URL", "http://host.docker.internal:8011"),
-            public_base_url=os.getenv("GEN_REPORT_PUBLIC_URL"),
+            gen_report_base_url
+            or os.getenv("GEN_REPORT_API_URL", "http://host.docker.internal:8011"),
+            operation_id=operation_id or "",
+            response_id=response_id or "",
+            trace_id=trace_id,
+            model=model,
+            language=language,
+            history=history,
+            public_base_url=gen_report_public_url or os.getenv("GEN_REPORT_PUBLIC_URL"),
             execution_context=execution_context,
             execution_files=execution_files,
             workspace_id=workspace_id,
@@ -221,6 +236,14 @@ def _create_pipeline(
     organization_id: str | None = None,
     workspace_id: str | None = None,
     discover_workspace_files: bool = False,
+    operation_id: str | None = None,
+    response_id: str | None = None,
+    trace_id: str | None = None,
+    model: str | None = None,
+    language: str = "auto",
+    history: list[dict[str, Any]] | None = None,
+    gen_report_base_url: str | None = None,
+    gen_report_public_url: str | None = None,
 ) -> DataIntelligencePipeline:
     try:
         parameters = inspect.signature(pipeline_factory).parameters.values()
@@ -243,6 +266,19 @@ def _create_pipeline(
         kwargs["workspace_id"] = workspace_id
     if supports_kwargs or "discover_workspace_files" in parameter_names:
         kwargs["discover_workspace_files"] = discover_workspace_files
+    optional_values = {
+        "operation_id": operation_id,
+        "response_id": response_id,
+        "trace_id": trace_id,
+        "model": model,
+        "language": language,
+        "history": history,
+        "gen_report_base_url": gen_report_base_url,
+        "gen_report_public_url": gen_report_public_url,
+    }
+    for name, value in optional_values.items():
+        if supports_kwargs or name in parameter_names:
+            kwargs[name] = value
     return pipeline_factory(**kwargs)
 
 
@@ -305,6 +341,14 @@ def execute_prepared_markdown_workflow(
     organization_id: str | None = None,
     workspace_id: str | None = None,
     discover_workspace_files: bool = False,
+    operation_id: str | None = None,
+    response_id: str | None = None,
+    trace_id: str | None = None,
+    model: str | None = None,
+    language: str = "auto",
+    history: list[dict[str, Any]] | None = None,
+    gen_report_base_url: str | None = None,
+    gen_report_public_url: str | None = None,
 ) -> FinalResponse:
     pipeline = _create_pipeline(
         pipeline_factory,
@@ -315,6 +359,14 @@ def execute_prepared_markdown_workflow(
         organization_id=organization_id,
         workspace_id=workspace_id,
         discover_workspace_files=discover_workspace_files,
+        operation_id=operation_id,
+        response_id=response_id,
+        trace_id=trace_id,
+        model=model,
+        language=language,
+        history=history,
+        gen_report_base_url=gen_report_base_url,
+        gen_report_public_url=gen_report_public_url,
     )
     if runtime_options.engine in {"general", "reason"}:
         spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
@@ -342,6 +394,14 @@ def execute_direct_report_workflow(
     organization_id: str | None = None,
     workspace_id: str | None = None,
     discover_workspace_files: bool = False,
+    operation_id: str | None = None,
+    response_id: str | None = None,
+    trace_id: str | None = None,
+    model: str | None = None,
+    language: str = "auto",
+    history: list[dict[str, Any]] | None = None,
+    gen_report_base_url: str | None = None,
+    gen_report_public_url: str | None = None,
 ) -> FinalResponse:
     if invocation.runtime_options.engine != "report":
         raise ValueError(
@@ -356,6 +416,14 @@ def execute_direct_report_workflow(
         organization_id=organization_id,
         workspace_id=workspace_id,
         discover_workspace_files=discover_workspace_files,
+        operation_id=operation_id,
+        response_id=response_id,
+        trace_id=trace_id,
+        model=model,
+        language=language,
+        history=history,
+        gen_report_base_url=gen_report_base_url,
+        gen_report_public_url=gen_report_public_url,
     )
     return pipeline.execute_report_direct(
         invocation.query,

@@ -3,6 +3,23 @@
 Repository gồm SDK điều phối multi-agent, FastAPI backend và Next.js frontend để
 phân tích dữ liệu, tạo report có cấu trúc, KPI, chart và xuất HTML.
 
+## Stateless GenReport Boundary
+
+For AXIOM report execution, Data Intelligence is a stateless streaming adapter.
+It receives AXIOM-owned history and execution capabilities, sends exactly one
+internal request to `POST /api/v1/reports:stream`, and maps GenReport SSE
+events to `runtime.*` events. It does not create GenReport conversations, upload
+files to GenReport, or persist report usage/artifacts. AXIOM owns those records.
+
+Configure the internal GenReport endpoint:
+
+```env
+GEN_REPORT_API_URL=http://host.docker.internal:8011
+```
+
+GenReport has no application-level service token and must remain behind a trusted
+internal network boundary.
+
 - Tài liệu luồng Report Engine hiện tại:
   [`docs/report-engine-v2-current-flow-vi.md`](docs/report-engine-v2-current-flow-vi.md)
 - Kế hoạch thiết kế V2:
@@ -23,7 +40,7 @@ configs/               # model configuration
 docs/                  # architecture and flow documents
 docker/
   Dockerfile           # API image
-  docker-compose.yaml  # API + PostgreSQL stack
+  docker-compose.yaml  # stateless API adapter
 ```
 
 SDK và API là hai Python workspace package riêng. API chịu trách nhiệm ghép model,

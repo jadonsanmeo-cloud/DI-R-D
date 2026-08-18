@@ -13,6 +13,7 @@ from data_intelligence_api.application.runtime_operations import (
     execute_spec,
     prepare_spec,
     revise_spec,
+    stream_report_events,
 )
 from data_intelligence_api.application.workflow import default_pipeline_factory
 from data_intelligence_api.application.workflow import (
@@ -99,6 +100,21 @@ def runtime_input_payload() -> dict:
     }
 
 
+def report_history_payload() -> list[dict]:
+    return [
+        {
+            "role": "user",
+            "content": "Compare this quarter with the previous quarter.",
+            "artifact_refs": ["artifact://input-1"],
+        },
+        {
+            "role": "assistant",
+            "content": "The prior report found a 12% increase.",
+            "artifact_refs": ["artifact://report-1"],
+        },
+    ]
+
+
 def execution_context_payload() -> dict:
     return {
         "version": "v1",
@@ -117,6 +133,45 @@ def execution_context_payload() -> dict:
 
 
 class RuntimeOperationModelTests(unittest.TestCase):
+    def test_runtime_input_accepts_normalized_report_history(self):
+        payload = runtime_input_payload()
+        payload.update(
+            {
+                "model": "deepseek-v4-pro",
+                "language": "en",
+                "history": report_history_payload(),
+            }
+        )
+
+        request = DirectExecuteRequest.model_validate(
+            {
+                **operation_payload(),
+                "operation_id": "op_direct_history",
+                "runtime_input": payload,
+            }
+        )
+
+        self.assertEqual(request.runtime_input.model, "deepseek-v4-pro")
+        self.assertEqual(request.runtime_input.language, "en")
+        self.assertEqual(request.runtime_input.history[1].role, "assistant")
+        self.assertEqual(
+            request.runtime_input.history[1].artifact_refs,
+            ["artifact://report-1"],
+        )
+
+    def test_runtime_input_rejects_internal_history_roles(self):
+        payload = runtime_input_payload()
+        payload["history"] = [{"role": "tool", "content": "secret tool output"}]
+
+        with self.assertRaises(ValidationError):
+            DirectExecuteRequest.model_validate(
+                {
+                    **operation_payload(),
+                    "operation_id": "op_direct_invalid_history",
+                    "runtime_input": payload,
+                }
+            )
+
     def test_pipeline_direct_report_uses_raw_query_as_instruction(self):
         captured: dict = {}
 
@@ -167,6 +222,12 @@ class RuntimeOperationModelTests(unittest.TestCase):
                 organization_id="org-1",
                 workspace_id="workspace-1",
                 discover_workspace_files=True,
+                operation_id="op_1",
+                response_id="resp_1",
+                trace_id="trace_1",
+                model="deepseek-v4-pro",
+                language="en",
+                history=report_history_payload(),
             )
 
         self.assertIs(result, pipeline)
@@ -176,6 +237,13 @@ class RuntimeOperationModelTests(unittest.TestCase):
         self.assertFalse(captured.get("configure_default_sandbox", True))
         self.assertEqual(engine.workspace_id, "workspace-1")
         self.assertTrue(engine.discover_workspace_files)
+        self.assertEqual(engine.operation_id, "op_1")
+        self.assertEqual(engine.response_id, "resp_1")
+        self.assertEqual(engine.trace_id, "trace_1")
+        self.assertEqual(engine.model, "deepseek-v4-pro")
+        self.assertEqual(engine.language, "en")
+        self.assertEqual(engine.history, report_history_payload())
+        self.assertFalse(hasattr(engine, "service_token"))
 
     def test_legacy_response_schema_module_is_absent(self):
         self.assertIsNone(
@@ -204,6 +272,7 @@ class RuntimeOperationModelTests(unittest.TestCase):
 
         self.assertFalse(hasattr(settings, "database_url"))
         self.assertFalse(hasattr(settings, "spec_confirmation_ttl_seconds"))
+        self.assertFalse(hasattr(settings, "gen_report_api_token"))
         self.assertFalse(hasattr(settings, "max_spec_revision_rounds"))
         self.assertEqual(settings.runtime_consumer_service, "intelligence-service")
 
@@ -280,6 +349,97 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertNotIn("depends_on", api)
         self.assertNotIn("api_state", document.get("volumes", {}))
         self.assertNotIn("postgres_data", document.get("volumes", {}))
+        self.assertIn("GEN_REPORT_API_URL", api.get("environment", {}))
+        self.assertNotIn("GEN_REPORT_API_TOKEN", api.get("environment", {}))
+
+
+class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_report_events_maps_genreport_events_live(self):
+        captured: dict = {}
+
+        class FakeStreamingEngine:
+            def __init__(self, base_url, **kwargs):
+                captured["base_url"] = base_url
+                captured.update(kwargs)
+
+            async def stream_events(self, *, instruction, organization_id):
+                captured["instruction"] = instruction
+                captured["organization_id"] = organization_id
+                for event_type, payload in (
+                    ("report.output_text.delta", {"delta": "Report"}),
+                    (
+                        "report.usage",
+                        {
+                            "model": "deepseek-v4-pro",
+                            "input_tokens": 10,
+                            "output_tokens": 4,
+                            "reasoning_tokens": 0,
+                            "total_tokens": 14,
+                            "estimated": False,
+                        },
+                    ),
+                    (
+                        "report.completed",
+                        {
+                            "output_text": "Report",
+                            "artifacts": [
+                                {
+                                    "artifact_ref": "artifact://report-1",
+                                    "filename": "report.pdf",
+                                }
+                            ],
+                        },
+                    ),
+                ):
+                    yield {"type": event_type, "payload": payload}
+
+        runtime_input = runtime_input_payload()
+        runtime_input.update(
+            {
+                "organization_id": "org-1",
+                "workspace_id": "workspace-1",
+                "model": "deepseek-v4-pro",
+                "language": "en",
+                "history": report_history_payload(),
+                "execution_context": execution_context_payload(),
+            }
+        )
+        request = DirectExecuteRequest.model_validate(
+            {
+                **operation_payload(),
+                "operation_id": "op_stream_report",
+                "runtime_input": runtime_input,
+            }
+        )
+        settings = SimpleNamespace(
+            gen_report_api_url="http://gen-report",
+            gen_report_public_url=None,
+        )
+
+        events = [
+            event
+            async for event in stream_report_events(
+                request,
+                instruction="Create a report",
+                settings=settings,
+                engine_factory=FakeStreamingEngine,
+            )
+        ]
+
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["runtime.output_text.delta", "runtime.usage", "runtime.completed"],
+        )
+        self.assertEqual(events[0]["payload"], {"delta": "Report"})
+        self.assertEqual(
+            events[-1]["payload"]["metadata"]["artifacts"][0]["artifact_ref"],
+            "artifact://report-1",
+        )
+        self.assertEqual(captured["operation_id"], "op_stream_report")
+        self.assertEqual(captured["response_id"], "resp_1")
+        self.assertEqual(captured["history"], report_history_payload())
+        self.assertEqual(captured["instruction"], "Create a report")
+        self.assertNotIn("service_token", captured)
 
 
 class RuntimeOperationAdapterTests(unittest.TestCase):
@@ -287,6 +447,8 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
         self.settings = SimpleNamespace(
             data_corpus_root=Path("."),
             method_hub_default_enabled=False,
+            gen_report_api_url="http://gen-report",
+            gen_report_public_url=None,
         )
 
     def test_prepare_is_self_contained_and_preserves_operation_envelope(self):
@@ -399,6 +561,14 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
             organization_id=None,
             workspace_id=None,
             discover_workspace_files=False,
+            operation_id=None,
+            response_id=None,
+            trace_id=None,
+            model=None,
+            language="auto",
+            history=None,
+            gen_report_base_url=None,
+            gen_report_public_url=None,
         ):
             del logger, runtime_options
             captured["execution_context"] = execution_context
@@ -406,6 +576,14 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
             captured["organization_id"] = organization_id
             captured["workspace_id"] = workspace_id
             captured["discover_workspace_files"] = discover_workspace_files
+            captured["operation_id"] = operation_id
+            captured["response_id"] = response_id
+            captured["trace_id"] = trace_id
+            captured["model"] = model
+            captured["language"] = language
+            captured["history"] = history
+            captured["gen_report_base_url"] = gen_report_base_url
+            captured["gen_report_public_url"] = gen_report_public_url
             return FakePipeline()
 
         runtime_input = runtime_input_payload()
@@ -413,6 +591,9 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
         runtime_input["workspace_id"] = "workspace-1"
         runtime_input["execution_context"] = execution_context_payload()
         runtime_input["execution_files"] = []
+        runtime_input["model"] = "deepseek-v4-pro"
+        runtime_input["language"] = "en"
+        runtime_input["history"] = report_history_payload()
         execute_spec(
             ExecuteRequest.model_validate(
                 {
@@ -423,6 +604,7 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
                     "spec_markdown": prepared.spec_markdown,
                 }
             ),
+            settings=self.settings,
             pipeline_factory=context_pipeline_factory,
         )
 
@@ -435,6 +617,13 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
         self.assertEqual(captured["organization_id"], "org-1")
         self.assertEqual(captured["workspace_id"], "workspace-1")
         self.assertTrue(captured["discover_workspace_files"])
+        self.assertEqual(captured["operation_id"], "op_execute_context")
+        self.assertEqual(captured["response_id"], "resp_1")
+        self.assertEqual(captured["trace_id"], "trace_1")
+        self.assertEqual(captured["model"], "deepseek-v4-pro")
+        self.assertEqual(captured["language"], "en")
+        self.assertEqual(captured["history"], report_history_payload())
+        self.assertEqual(captured["gen_report_base_url"], "http://gen-report")
 
     def test_execution_requires_confirmed_spec_payload(self):
         with self.assertRaises(ValidationError):
@@ -641,6 +830,78 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
         self.assertIn("event: runtime.completed", response.text)
         self.assertNotIn("response.requires_confirmation", response.text)
+
+    async def test_default_report_endpoint_forwards_live_genreport_events(self):
+        settings = ApiSettings(
+            data_corpus_root=Path("."),
+            cors_origins=("http://localhost",),
+            runtime_service_token="runtime-token",
+            gen_report_api_url="http://gen-report",
+        )
+        app = create_app(settings=settings)
+
+        async def fake_report_stream(request, *, instruction, settings):
+            del settings
+            yield {
+                "type": "runtime.output_text.delta",
+                "operation_id": request.operation_id,
+                "response_id": request.response_id,
+                "payload": {"delta": instruction},
+            }
+            yield {
+                "type": "runtime.usage",
+                "operation_id": request.operation_id,
+                "response_id": request.response_id,
+                "payload": {
+                    "model": "deepseek-v4-pro",
+                    "input_tokens": 10,
+                    "output_tokens": 4,
+                    "reasoning_tokens": 0,
+                    "total_tokens": 14,
+                    "estimated": False,
+                },
+            }
+            yield {
+                "type": "runtime.completed",
+                "operation_id": request.operation_id,
+                "response_id": request.response_id,
+                "payload": {
+                    "output_text": instruction,
+                    "evidence": None,
+                    "metadata": {"engine_name": "report"},
+                },
+            }
+
+        runtime_input = runtime_input_payload()
+        runtime_input.update(
+            {
+                "organization_id": "org-1",
+                "workspace_id": "workspace-1",
+                "execution_context": execution_context_payload(),
+            }
+        )
+        with patch(
+            "data_intelligence_api.http.routers.runtime_operations.stream_report_events",
+            side_effect=fake_report_stream,
+        ):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/v1/executions:run-stream",
+                    json={
+                        **operation_payload(),
+                        "operation_id": "op_live_report",
+                        "runtime_input": runtime_input,
+                    },
+                    headers=self.headers,
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text.count("event: runtime.output_text.delta"), 1)
+        self.assertEqual(response.text.count("event: runtime.usage"), 1)
+        self.assertEqual(response.text.count("event: runtime.completed"), 1)
 
     async def test_direct_report_execution_requires_service_authentication(self):
         response = await self.client.post(

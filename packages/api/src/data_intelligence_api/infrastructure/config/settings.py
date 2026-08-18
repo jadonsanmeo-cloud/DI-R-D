@@ -22,6 +22,8 @@ class ApiSettings:
     method_hub_endpoint: str = "http://localhost:8000/mcp"
     runtime_service_token: str | None = None
     runtime_consumer_service: str = "intelligence-service"
+    gen_report_api_url: str = "http://host.docker.internal:8011"
+    gen_report_public_url: str | None = None
 
     @classmethod
     def from_env(cls) -> "ApiSettings":
@@ -59,4 +61,9 @@ class ApiSettings:
                 "RUNTIME_CONSUMER_SERVICE",
                 "intelligence-service",
             ),
+            gen_report_api_url=os.getenv(
+                "GEN_REPORT_API_URL",
+                "http://host.docker.internal:8011",
+            ),
+            gen_report_public_url=os.getenv("GEN_REPORT_PUBLIC_URL") or None,
         )
