@@ -366,6 +366,26 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
                 captured["instruction"] = instruction
                 captured["organization_id"] = organization_id
                 for event_type, payload in (
+                    (
+                        "report.tool.started",
+                        {
+                            "tool_call_id": "call_read_1",
+                            "tool_name": "read_file",
+                            "inputs": {"path": "input.csv"},
+                            "status": "started",
+                        },
+                    ),
+                    (
+                        "report.tool.completed",
+                        {
+                            "tool_call_id": "call_read_1",
+                            "tool_name": "read_file",
+                            "status": "completed",
+                            "success": True,
+                            "inputs": {"path": "input.csv"},
+                            "outputs": {"success": True, "output": "ok"},
+                        },
+                    ),
                     ("report.output_text.delta", {"delta": "Report"}),
                     (
                         "report.usage",
@@ -428,9 +448,29 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [event["type"] for event in events],
-            ["runtime.output_text.delta", "runtime.usage", "runtime.completed"],
+            [
+                "runtime.progress",
+                "runtime.progress",
+                "runtime.output_text.delta",
+                "runtime.usage",
+                "runtime.completed",
+            ],
         )
-        self.assertEqual(events[0]["payload"], {"delta": "Report"})
+        self.assertEqual(
+            events[0]["payload"],
+            {
+                "event_type": "report.tool.started",
+                "phase": "tool",
+                "status": "started",
+                "label": "read_file",
+                "tool_call_id": "call_read_1",
+                "tool_name": "read_file",
+                "inputs": {"path": "input.csv"},
+            },
+        )
+        self.assertEqual(events[2]["payload"], {"delta": "Report"})
+        self.assertEqual(events[1]["payload"]["inputs"], {"path": "input.csv"})
+        self.assertEqual(events[1]["payload"]["outputs"]["output"], "ok")
         self.assertEqual(
             events[-1]["payload"]["metadata"]["artifacts"][0]["artifact_ref"],
             "artifact://report-1",

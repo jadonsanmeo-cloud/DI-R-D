@@ -97,6 +97,33 @@ async def stream_report_events(
         payload = dict(payload) if isinstance(payload, dict) else {}
         if event_type == "report.status":
             runtime_type = "runtime.progress"
+            payload = {
+                **payload,
+                "event_type": event_type,
+                "status": str(payload.get("status") or "running"),
+            }
+        elif event_type in {
+            "report.tool.started",
+            "report.tool.completed",
+            "report.tool.failed",
+        }:
+            runtime_type = "runtime.progress"
+            status_by_type = {
+                "report.tool.started": "started",
+                "report.tool.completed": "completed",
+                "report.tool.failed": "failed",
+            }
+            tool_name = str(payload.get("tool_name") or "tool")
+            payload = {
+                **payload,
+                "event_type": event_type,
+                "phase": "tool",
+                "status": str(payload.get("status") or status_by_type[event_type]),
+                "label": str(payload.get("label") or tool_name),
+            }
+            event_id = event.get("event_id")
+            if isinstance(event_id, str) and event_id:
+                payload.setdefault("event_id", event_id)
         elif event_type == "report.output_text.delta":
             runtime_type = "runtime.output_text.delta"
             payload = {"delta": str(payload.get("delta") or "")}
