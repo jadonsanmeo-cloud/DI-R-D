@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 
 from data_intelligence_sdk.core.types import IntentAnalysis, UserQuery
+from data_intelligence_sdk.memory import MemoryContext
+from data_intelligence_sdk.prompts import PromptEnvelopeComposer
 from data_intelligence_sdk.runtime.llm_client import LLMClient
 
 _REQUIRED_MARKERS = (
@@ -22,8 +24,13 @@ class LLMMarkdownSpecBuilder:
         self.llm_client = llm_client
         self.max_validation_retries = max_validation_retries
 
-    def build(self, query: UserQuery, analysis: IntentAnalysis) -> str:
-        messages = _build_messages(query, analysis)
+    def build(
+        self,
+        query: UserQuery,
+        analysis: IntentAnalysis,
+        memory_context: MemoryContext | None = None,
+    ) -> str:
+        messages = _build_messages(query, analysis, memory_context)
         current_messages = list(messages)
         for attempt in range(self.max_validation_retries + 1):
             markdown = self.llm_client.complete_text(
@@ -65,6 +72,7 @@ def validate_spec_markdown(markdown: str, *, max_characters: int = 100_000) -> s
 def _build_messages(
     query: UserQuery,
     analysis: IntentAnalysis,
+    memory_context: MemoryContext | None = None,
 ) -> list[dict[str, str]]:
     context = {
         "query": query.text,
@@ -82,8 +90,17 @@ def _build_messages(
             )
         ],
     }
+    resolved_memory = memory_context or MemoryContext()
+    system_prompt = PromptEnvelopeComposer().compose(
+        operational_role=_OPERATIONAL_ROLE,
+        memory_context=resolved_memory.render(
+            target="spec_builder",
+            max_tokens=2000,
+        ),
+        task_contract=_TASK_CONTRACT,
+    )
     return [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {
             "role": "user",
             "content": json.dumps(context, ensure_ascii=True, sort_keys=True),
@@ -91,7 +108,11 @@ def _build_messages(
     ]
 
 
-_SYSTEM_PROMPT = """Create a Markdown execution spec for a Report Engine.
+_OPERATIONAL_ROLE = """For this internal step, create the execution instructions
+that AXIOM will pass to its configured report workflow. Do not expose internal
+component identities or describe yourself as a separate agent."""
+
+_TASK_CONTRACT = """Create a Markdown execution spec for a Report Engine.
 
 Return Markdown only, beginning with `# Interactive Execution Spec` and using
 these sections in order: User Request, Intent, Preparation Guidance, Execution

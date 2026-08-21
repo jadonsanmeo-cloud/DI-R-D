@@ -58,8 +58,17 @@ A concise report.
 class FakePipeline:
     def __init__(self):
         self.direct_calls = []
+        self.memory_context = None
 
-    def prepare_markdown(self, query, session_context, user_context):
+    def prepare_markdown(
+        self,
+        query,
+        session_context,
+        user_context,
+        *,
+        memory_context=None,
+    ):
+        self.memory_context = memory_context
         return PreparedMarkdownExecution(
             query=query,
             intent_analysis=IntentAnalysis(intent="report"),
@@ -293,6 +302,43 @@ class RuntimeOperationModelTests(unittest.TestCase):
         self.assertEqual(request.operation_id, "op_prepare_1")
         self.assertEqual(request.runtime_input.session_id, "session_1")
         self.assertEqual(request.runtime_input.runtime_options.engine, "report")
+
+    def test_prepare_spec_passes_upstream_memory_context_to_pipeline(self):
+        pipeline = FakePipeline()
+        request = PrepareSpecRequest.model_validate(
+            {
+                **operation_payload(),
+                "runtime_input": runtime_input_payload(),
+                "memory_context": {
+                    "source": "intelligence-service",
+                    "cards": [
+                        {
+                            "memory_id": "memory-1",
+                            "memory_type": "preference",
+                            "content": "Prefer concise reports.",
+                            "confidence": 0.9,
+                            "importance": 0.8,
+                            "scope": {
+                                "tenant_id": "tenant-1",
+                                "user_id": "user-1",
+                            },
+                        }
+                    ],
+                },
+            }
+        )
+
+        prepare_spec(
+            request,
+            settings=SimpleNamespace(
+                data_corpus_root=Path("."),
+                method_hub_default_enabled=False,
+            ),
+            pipeline_factory=lambda **kwargs: pipeline,
+        )
+
+        self.assertEqual(pipeline.memory_context.mode, "upstream")
+        self.assertEqual(pipeline.memory_context.cards[0].memory_id, "memory-1")
 
     def test_operation_attempt_must_be_positive(self):
         with self.assertRaises(ValidationError):

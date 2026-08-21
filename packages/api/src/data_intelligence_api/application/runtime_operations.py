@@ -31,6 +31,7 @@ from data_intelligence_api.http.schemas.runtime_operations import (
 )
 from data_intelligence_sdk.core.types import FinalResponse
 from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger, RuntimeLogger
+from data_intelligence_api.infrastructure.memory import parse_upstream_memory_context
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
     GenReportMarkdownEngine,
 )
@@ -180,6 +181,7 @@ def prepare_spec(
         _to_workflow_request(request.runtime_input),
         settings.data_corpus_root,  # type: ignore[attr-defined]
         method_hub_default_enabled=settings.method_hub_default_enabled,  # type: ignore[attr-defined]
+        memory_context=parse_upstream_memory_context(request.memory_context),
     )
     prepared = prepare_workflow(
         invocation,

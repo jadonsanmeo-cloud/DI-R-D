@@ -24,6 +24,7 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
+from data_intelligence_sdk.memory import MemoryContext
 from data_intelligence_sdk.runtime.sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
@@ -332,6 +333,8 @@ class DataIntelligencePipeline:
         query: UserQuery,
         session_context: SessionContext | None = None,
         user_context: UserContext | None = None,
+        *,
+        memory_context: MemoryContext | None = None,
     ) -> PreparedMarkdownExecution:
         """Prepare a direct Markdown spec without a caller corpus package."""
 
@@ -367,7 +370,29 @@ class DataIntelligencePipeline:
                 event_type="intent.analyzed",
                 payload=intent_payload,
             )
-            markdown = self.markdown_spec_builder.build(query, intent_analysis)
+            resolved_memory = memory_context or MemoryContext()
+            selected_cards = resolved_memory.for_spec_builder()
+            self._log(
+                "memory.context.selected",
+                {
+                    "target": "spec_builder",
+                    "count": len(selected_cards),
+                    "memory_types": [card.memory_type for card in selected_cards],
+                    "memory_ids": [card.memory_id for card in selected_cards],
+                },
+            )
+            self._log(
+                "prompt.envelope.composed",
+                {
+                    "target": "spec_builder",
+                    "memory_count": len(selected_cards),
+                },
+            )
+            markdown = self.markdown_spec_builder.build(
+                query,
+                intent_analysis,
+                memory_context=resolved_memory,
+            )
             spec_payload = {
                 "intent": intent_analysis.intent,
                 "format": "markdown",
