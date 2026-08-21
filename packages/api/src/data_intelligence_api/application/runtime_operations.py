@@ -49,6 +49,7 @@ def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
         runtime_options=runtime_input.runtime_options,
         execution_context=runtime_input.execution_context,
         execution_files=runtime_input.execution_files,
+        primary_source_id=runtime_input.primary_source_id,
     )
 
 
@@ -82,9 +83,9 @@ async def stream_report_events(
             item.model_dump(mode="json") for item in runtime_input.execution_files
         ],
         workspace_id=runtime_input.workspace_id,
+        primary_source_id=runtime_input.primary_source_id,
         discover_workspace_files=(
-            not runtime_input.execution_files
-            and runtime_input.runtime_options.method_hub_enabled is not False
+            runtime_input.runtime_options.method_hub_enabled is not False
         ),
     )
     latest_usage: dict[str, Any] | None = None
@@ -124,6 +125,14 @@ async def stream_report_events(
             event_id = event.get("event_id")
             if isinstance(event_id, str) and event_id:
                 payload.setdefault("event_id", event_id)
+        elif event_type == "report.inputs.selected":
+            runtime_type = "runtime.progress"
+            payload = {
+                **payload,
+                "event_type": event_type,
+                "phase": "discovery",
+                "status": "completed",
+            }
         elif event_type == "report.output_text.delta":
             runtime_type = "runtime.output_text.delta"
             payload = {"delta": str(payload.get("delta") or "")}
@@ -255,11 +264,11 @@ def execute_spec(
             item.model_dump(mode="json")
             for item in request.runtime_input.execution_files
         ],
+        primary_source_id=request.runtime_input.primary_source_id,
         organization_id=request.runtime_input.organization_id,
         workspace_id=request.runtime_input.workspace_id,
         discover_workspace_files=(
-            not request.runtime_input.execution_files
-            and request.runtime_input.runtime_options.method_hub_enabled is not False
+            request.runtime_input.runtime_options.method_hub_enabled is not False
         ),
         operation_id=request.operation_id,
         response_id=request.response_id,
@@ -302,11 +311,11 @@ def execute_direct_report(
             else None
         ),
         execution_files=execution_files,
+        primary_source_id=request.runtime_input.primary_source_id,
         organization_id=request.runtime_input.organization_id,
         workspace_id=request.runtime_input.workspace_id,
         discover_workspace_files=(
-            not execution_files
-            and request.runtime_input.runtime_options.method_hub_enabled is not False
+            request.runtime_input.runtime_options.method_hub_enabled is not False
         ),
         operation_id=request.operation_id,
         response_id=request.response_id,

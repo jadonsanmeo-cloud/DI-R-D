@@ -149,6 +149,7 @@ def default_pipeline_factory(
     execution_files: list[dict[str, Any]] | None = None,
     organization_id: str | None = None,
     workspace_id: str | None = None,
+    primary_source_id: str | None = None,
     discover_workspace_files: bool = False,
     operation_id: str | None = None,
     response_id: str | None = None,
@@ -197,6 +198,7 @@ def default_pipeline_factory(
             execution_context=execution_context,
             execution_files=execution_files,
             workspace_id=workspace_id,
+            primary_source_id=primary_source_id,
             discover_workspace_files=discover_workspace_files,
         )
         if resolved_options.engine == "report"
@@ -235,6 +237,7 @@ def _create_pipeline(
     execution_files: list[dict[str, Any]] | None = None,
     organization_id: str | None = None,
     workspace_id: str | None = None,
+    primary_source_id: str | None = None,
     discover_workspace_files: bool = False,
     operation_id: str | None = None,
     response_id: str | None = None,
@@ -264,6 +267,8 @@ def _create_pipeline(
         kwargs["organization_id"] = organization_id
     if supports_kwargs or "workspace_id" in parameter_names:
         kwargs["workspace_id"] = workspace_id
+    if supports_kwargs or "primary_source_id" in parameter_names:
+        kwargs["primary_source_id"] = primary_source_id
     if supports_kwargs or "discover_workspace_files" in parameter_names:
         kwargs["discover_workspace_files"] = discover_workspace_files
     optional_values = {
@@ -340,6 +345,7 @@ def execute_prepared_markdown_workflow(
     execution_files: list[dict[str, Any]] | None = None,
     organization_id: str | None = None,
     workspace_id: str | None = None,
+    primary_source_id: str | None = None,
     discover_workspace_files: bool = False,
     operation_id: str | None = None,
     response_id: str | None = None,
@@ -358,6 +364,7 @@ def execute_prepared_markdown_workflow(
         execution_files=execution_files,
         organization_id=organization_id,
         workspace_id=workspace_id,
+        primary_source_id=primary_source_id,
         discover_workspace_files=discover_workspace_files,
         operation_id=operation_id,
         response_id=response_id,
@@ -393,6 +400,7 @@ def execute_direct_report_workflow(
     execution_files: list[dict[str, Any]] | None = None,
     organization_id: str | None = None,
     workspace_id: str | None = None,
+    primary_source_id: str | None = None,
     discover_workspace_files: bool = False,
     operation_id: str | None = None,
     response_id: str | None = None,
@@ -415,6 +423,7 @@ def execute_direct_report_workflow(
         execution_files=execution_files,
         organization_id=organization_id,
         workspace_id=workspace_id,
+        primary_source_id=primary_source_id,
         discover_workspace_files=discover_workspace_files,
         operation_id=operation_id,
         response_id=response_id,

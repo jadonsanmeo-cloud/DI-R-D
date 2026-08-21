@@ -90,6 +90,7 @@ class GenReportMarkdownEngine:
         execution_context: dict[str, Any] | None = None,
         execution_files: list[dict[str, Any]] | None = None,
         workspace_id: str | None = None,
+        primary_source_id: str | None = None,
         discover_workspace_files: bool = False,
         timeout_seconds: float = 900.0,
         transport: httpx.BaseTransport | None = None,
@@ -105,6 +106,7 @@ class GenReportMarkdownEngine:
         self.execution_context = execution_context
         self.execution_files = list(execution_files or [])
         self.workspace_id = workspace_id
+        self.primary_source_id = primary_source_id
         self.discover_workspace_files = discover_workspace_files
         self.timeout_seconds = timeout_seconds
         self.transport = transport
@@ -241,6 +243,7 @@ class GenReportMarkdownEngine:
             "workspace_id": self.workspace_id,
             "execution_context": self.execution_context,
             "execution_files": self.execution_files,
+            "primary_source_id": self.primary_source_id,
             "runtime_gateway": self._runtime_gateway(),
             "discover_workspace_files": self.discover_workspace_files,
         }

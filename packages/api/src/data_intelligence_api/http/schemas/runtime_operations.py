@@ -39,6 +39,7 @@ class RuntimeInput(BaseModel):
     runtime_options: RuntimeOptionsRequest = Field(default_factory=RuntimeOptionsRequest)
     execution_context: ExecutionContextRequest | None = None
     execution_files: list[ExecutionFileRequest] = Field(default_factory=list)
+    primary_source_id: str | None = Field(default=None, max_length=2048)
 
 
 class DirectRuntimeOptions(RuntimeOptionsRequest):

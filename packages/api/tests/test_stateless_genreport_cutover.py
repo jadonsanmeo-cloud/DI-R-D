@@ -32,7 +32,29 @@ from app.contracts.report_execution import ReportCompletion, ReportUsage  # noqa
 from app.services.report_events import ReportEventFactory  # noqa: E402
 
 
-def direct_request(history: list[dict]) -> DirectExecuteRequest:
+def direct_request(
+    history: list[dict],
+    *,
+    primary_source: bool = False,
+    method_hub_enabled: bool = False,
+) -> DirectExecuteRequest:
+    execution_files: list[dict] = []
+    primary_source_id: str | None = None
+    if primary_source:
+        primary_source_id = "source-primary"
+        execution_files.append(
+            {
+                "artifact_id": "asset-primary",
+                "filename": "latest.csv",
+                "sandbox_path": "/workspace/runs/resp_1/inputs/latest.csv",
+                "content_type": "text/csv",
+                "size": 42,
+                "source_id": primary_source_id,
+                "document_id": "document-primary",
+                "source_object_key": "organizations/org-1/sources/latest.csv",
+                "source_last_modified": "2026-08-20T09:00:00Z",
+            }
+        )
     return DirectExecuteRequest.model_validate(
         {
             "schema_version": "1",
@@ -50,7 +72,7 @@ def direct_request(history: list[dict]) -> DirectExecuteRequest:
                 "workspace_id": "workspace-1",
                 "runtime_options": {
                     "engine": "report",
-                    "method_hub_enabled": False,
+                    "method_hub_enabled": method_hub_enabled,
                 },
                 "execution_context": {
                     "version": "v1",
@@ -66,7 +88,8 @@ def direct_request(history: list[dict]) -> DirectExecuteRequest:
                     "output_path": "/workspace/runs/resp_1/outputs",
                     "capabilities": ["sandbox.files", "sandbox.commands"],
                 },
-                "execution_files": [],
+                "execution_files": execution_files,
+                "primary_source_id": primary_source_id,
             },
         }
     )
@@ -120,6 +143,57 @@ class RecordingAsgiApp:
 
 
 class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_forwards_selected_inputs_as_runtime_progress(self):
+        captured_engine_kwargs: dict = {}
+
+        class FakeStreamingEngine:
+            def __init__(self, _base_url, **kwargs) -> None:
+                captured_engine_kwargs.update(kwargs)
+
+            async def stream_events(self, *, instruction, organization_id):
+                del instruction, organization_id
+                yield {
+                    "type": "report.inputs.selected",
+                    "payload": {
+                        "inputs": [
+                            {
+                                "source_id": "source-primary",
+                                "role": "primary",
+                            }
+                        ]
+                    },
+                }
+                yield {
+                    "type": "report.completed",
+                    "payload": {"output_text": "Report ready.", "artifacts": []},
+                }
+
+        events = [
+            event
+            async for event in stream_report_events(
+                direct_request([], primary_source=True, method_hub_enabled=True),
+                instruction="Create a PDF report",
+                settings=SimpleNamespace(
+                    gen_report_api_url="http://genreport.test",
+                    gen_report_public_url=None,
+                ),
+                engine_factory=FakeStreamingEngine,
+            )
+        ]
+
+        selected = next(
+            event
+            for event in events
+            if event["payload"].get("event_type") == "report.inputs.selected"
+        )
+        self.assertEqual(selected["type"], "runtime.progress")
+        self.assertEqual(
+            selected["payload"]["inputs"],
+            [{"source_id": "source-primary", "role": "primary"}],
+        )
+        self.assertEqual(captured_engine_kwargs["primary_source_id"], "source-primary")
+        self.assertTrue(captured_engine_kwargs["discover_workspace_files"])
+
     async def test_restart_uses_supplied_axiom_history_and_one_internal_path(self):
         captured_requests: list = []
         recording_app = RecordingAsgiApp(genreport_main.app)
