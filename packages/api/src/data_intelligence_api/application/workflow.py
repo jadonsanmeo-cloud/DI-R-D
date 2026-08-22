@@ -147,6 +147,7 @@ def default_pipeline_factory(
     history: list[dict[str, Any]] | None = None,
     gen_report_base_url: str | None = None,
     gen_report_public_url: str | None = None,
+    include_method_hub: bool = True,
 ) -> DataIntelligencePipeline:
     config_manager = ConfigManager(os.getenv("MODEL_CONFIG_PATH") or None)
     method_hub_settings = config_manager.method_hub_settings()
@@ -154,9 +155,13 @@ def default_pipeline_factory(
     resolved_options = runtime_options or WorkflowRuntimeOptions(
         method_hub_enabled=False
     )
-    resolved_method_hub = resolve_method_hub(
-        resolved_options,
-        endpoint=method_hub_settings.endpoint,
+    resolved_method_hub = (
+        resolve_method_hub(
+            resolved_options,
+            endpoint=method_hub_settings.endpoint,
+        )
+        if include_method_hub
+        else None
     )
     report_base_url = gen_report_base_url or os.getenv("GEN_REPORT_API_URL")
     if report_base_url is None:
@@ -192,13 +197,21 @@ def default_pipeline_factory(
         default_organization_id=(
             organization_id or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
         ),
-        configure_default_sandbox=True,
+        configure_default_sandbox=include_method_hub,
         markdown_report_engine=markdown_report_engine,
-        mcp_client=resolved_method_hub.client,
-        mcp_tools=(
-            resolved_method_hub.tools if resolved_options.method_hub_enabled else ()
+        mcp_client=(
+            resolved_method_hub.client if resolved_method_hub is not None else None
         ),
-        method_hub_enabled=resolved_options.method_hub_enabled,
+        mcp_tools=(
+            resolved_method_hub.tools
+            if resolved_method_hub is not None and resolved_options.method_hub_enabled
+            else ()
+        ),
+        method_hub_enabled=(
+            resolved_options.method_hub_enabled
+            if resolved_method_hub is not None
+            else False
+        ),
     )
 
 
@@ -221,6 +234,7 @@ def _create_pipeline(
     history: list[dict[str, Any]] | None = None,
     gen_report_base_url: str | None = None,
     gen_report_public_url: str | None = None,
+    include_method_hub: bool = True,
 ) -> DataIntelligencePipeline:
     try:
         parameters = tuple(inspect.signature(pipeline_factory).parameters.values())
@@ -245,6 +259,8 @@ def _create_pipeline(
         kwargs["primary_source_id"] = primary_source_id
     if supports_kwargs or "discover_workspace_files" in parameter_names:
         kwargs["discover_workspace_files"] = discover_workspace_files
+    if supports_kwargs or "include_method_hub" in parameter_names:
+        kwargs["include_method_hub"] = include_method_hub
     optional_values = {
         "operation_id": operation_id,
         "response_id": response_id,
@@ -388,6 +404,7 @@ def select_prepared_markdown_engine(
         pipeline_factory,
         logger=logger,
         runtime_options=runtime_options,
+        include_method_hub=False,
         execution_context=execution_context,
         execution_files=execution_files,
         organization_id=organization_id,
@@ -459,6 +476,7 @@ def select_instant_workflow(
         pipeline_factory,
         logger=logger,
         runtime_options=invocation.runtime_options,
+        include_method_hub=False,
         **runtime_context,
     )
     spec = ExecutionSpec(

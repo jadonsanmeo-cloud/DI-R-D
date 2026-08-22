@@ -5,6 +5,7 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -15,10 +16,21 @@ from data_intelligence_api.application.runtime_operations import (
     revise_spec,
     stream_report_events,
 )
-from data_intelligence_api.application.workflow import default_pipeline_factory
+from data_intelligence_api.application.workflow import (
+    default_pipeline_factory,
+    execute_instant_workflow,
+    select_instant_workflow,
+    select_prepared_markdown_engine,
+)
 from data_intelligence_api.app.factory import create_app
-from data_intelligence_api.domain.workflow import WorkflowRuntimeOptions
+from data_intelligence_api.domain.workflow import (
+    WorkflowInvocation,
+    WorkflowRuntimeOptions,
+)
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
+from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
+    _AxiomSandboxProvider,
+)
 from data_intelligence_api.http.schemas.runtime_operations import (
     InstantExecutionRequest,
     PrepareSpecRequest,
@@ -29,7 +41,11 @@ from data_intelligence_sdk.core.types import (
     FinalResponse,
     IntentAnalysis,
     PreparedMarkdownExecution,
+    SessionContext,
+    UserContext,
+    UserQuery,
 )
+from data_intelligence_sdk.memory import MemoryContext
 
 SPEC_MARKDOWN = """# Interactive Execution Spec
 ## User Request
@@ -231,6 +247,190 @@ class RuntimeOperationModelTests(unittest.TestCase):
         self.assertEqual(engine.organization_id, "org-1")
         self.assertEqual(engine.history, report_history_payload())
         self.assertFalse(hasattr(engine, "service_token"))
+
+    def test_default_pipeline_factory_skips_method_hub_for_engine_selection(self):
+        captured: dict = {}
+        pipeline = object()
+
+        def capture_pipeline(**kwargs):
+            captured.update(kwargs)
+            return pipeline
+
+        with (
+            patch(
+                "data_intelligence_api.application.workflow.create_example_pipeline",
+                side_effect=capture_pipeline,
+            ),
+            patch(
+                "data_intelligence_api.application.workflow.resolve_method_hub"
+            ) as resolve_method_hub,
+        ):
+            result = default_pipeline_factory(
+                logger=SimpleNamespace(),
+                runtime_options=WorkflowRuntimeOptions(
+                    method_hub_enabled=True,
+                    engine=None,
+                ),
+                include_method_hub=False,
+            )
+
+        self.assertIs(result, pipeline)
+        resolve_method_hub.assert_not_called()
+        self.assertIsNone(captured["mcp_client"])
+        self.assertEqual(captured["mcp_tools"], ())
+        self.assertFalse(captured["method_hub_enabled"])
+        self.assertFalse(captured["configure_default_sandbox"])
+
+    def test_instant_engine_selection_skips_method_hub_setup(self):
+        captured: dict = {}
+        selected = object()
+
+        class SelectionPipeline:
+            def select_engine(self, prepared, spec, memory_context):
+                del prepared, spec, memory_context
+                return selected
+
+        def selection_pipeline_factory(
+            *,
+            logger,
+            runtime_options=None,
+            include_method_hub=True,
+        ):
+            del logger, runtime_options
+            captured["include_method_hub"] = include_method_hub
+            return SelectionPipeline()
+
+        invocation = WorkflowInvocation(
+            query=UserQuery(text="hello"),
+            uploaded_files=[],
+            session_context=SessionContext(),
+            user_context=UserContext(),
+            runtime_options=WorkflowRuntimeOptions(
+                method_hub_enabled=True,
+                engine=None,
+            ),
+            memory_context=MemoryContext(),
+        )
+
+        result = select_instant_workflow(
+            invocation,
+            logger=SimpleNamespace(),
+            pipeline_factory=selection_pipeline_factory,
+        )
+
+        self.assertIs(result, selected)
+        self.assertFalse(captured["include_method_hub"])
+
+    def test_thinking_engine_selection_skips_method_hub_setup(self):
+        captured: dict = {}
+        selected = object()
+
+        class SelectionPipeline:
+            def select_engine(self, prepared, spec, memory_context):
+                del prepared, spec, memory_context
+                return selected
+
+        def selection_pipeline_factory(
+            *,
+            logger,
+            runtime_options=None,
+            include_method_hub=True,
+        ):
+            del logger, runtime_options
+            captured["include_method_hub"] = include_method_hub
+            return SelectionPipeline()
+
+        prepared = PreparedMarkdownExecution(
+            query=UserQuery(text="hello"),
+            intent_analysis=IntentAnalysis(intent="general"),
+            spec_markdown=SPEC_MARKDOWN,
+            session_context=SessionContext(),
+            user_context=UserContext(),
+        )
+
+        result = select_prepared_markdown_engine(
+            prepared,
+            SPEC_MARKDOWN,
+            logger=SimpleNamespace(),
+            runtime_options=WorkflowRuntimeOptions(
+                method_hub_enabled=True,
+                engine=None,
+            ),
+            pipeline_factory=selection_pipeline_factory,
+        )
+
+        self.assertIs(result, selected)
+        self.assertFalse(captured["include_method_hub"])
+
+    def test_instant_execution_keeps_method_hub_setup(self):
+        captured: dict = {}
+
+        class ExecutionPipeline:
+            def execute_confirmed_spec(self, prepared, spec, *, memory_context):
+                del prepared, spec, memory_context
+                return FinalResponse(answer="ok")
+
+        def execution_pipeline_factory(
+            *,
+            logger,
+            runtime_options=None,
+            include_method_hub=True,
+        ):
+            del logger, runtime_options
+            captured["include_method_hub"] = include_method_hub
+            return ExecutionPipeline()
+
+        invocation = WorkflowInvocation(
+            query=UserQuery(text="retrieve data"),
+            uploaded_files=[],
+            session_context=SessionContext(),
+            user_context=UserContext(),
+            runtime_options=WorkflowRuntimeOptions(
+                method_hub_enabled=True,
+                engine=None,
+            ),
+            memory_context=MemoryContext(),
+        )
+
+        result = execute_instant_workflow(
+            invocation,
+            logger=SimpleNamespace(),
+            pipeline_factory=execution_pipeline_factory,
+        )
+
+        self.assertEqual(result.answer, "ok")
+        self.assertTrue(captured["include_method_hub"])
+
+    def test_sandbox_provider_ignores_method_hub_capability(self):
+        create_arguments: list[dict] = []
+
+        class Sandbox:
+            capabilities = None
+
+            def wait_until_ready(self, *, timeout):
+                del timeout
+
+            def delete(self):
+                return None
+
+        class SandboxClient:
+            def create_sandbox(self, workspace_id, **kwargs):
+                del workspace_id
+                create_arguments.append(kwargs)
+                return Sandbox()
+
+        provider = _AxiomSandboxProvider(
+            SandboxClient(),
+            workspace_id=uuid4(),
+            cleanup=True,
+            ready_timeout_seconds=90,
+            pool_enabled=False,
+        )
+
+        with provider.open():
+            pass
+
+        self.assertEqual(create_arguments, [{}])
 
     def test_legacy_response_schema_module_is_absent(self):
         self.assertIsNone(

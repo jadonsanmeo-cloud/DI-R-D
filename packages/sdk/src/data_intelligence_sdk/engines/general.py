@@ -308,12 +308,10 @@ class GeneralPurposeEngine:
     ) -> str:
         method_hub_enabled = runtime.has_mcp_tools
         method_hub_instructions = (
-            "Method Hub is enabled. For one tool operation, call the matching "
-            "Method Hub tool directly. For multiple tool calls or any "
-            "transformation that combines or modifies tool results, call "
-            "execute_python and import `call_tool` from `axiom_method_hub`; "
-            "assign the final JSON-serializable value to `result`. Never "
-            "attempt HTTP access from generated code. For question answering "
+            "Method Hub is enabled. Call the matching Method Hub tool directly. "
+            "Use execute_python only for local file inspection, calculations, "
+            "or transformations that do not require Method Hub access. Never "
+            "attempt HTTP or Method Hub access from generated code. For question answering "
             "over a specific document, prefer `document_retrieve_context` and "
             "answer from its returned chunks. For question answering across the "
             "indexed corpus, prefer `corpus_retrieve_context` and answer from "

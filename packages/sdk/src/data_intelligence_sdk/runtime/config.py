@@ -46,6 +46,8 @@ class SandboxSettings:
     endpoint: str = "http://localhost:8004"
     enabled: bool = False
     workspace_id: str | None = None
+    ready_timeout_seconds: float = 90
+    pool_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +149,24 @@ class ConfigManager:
             "on",
         }
         workspace_id = _resolve_env_value(payload.get("workspace_id"))
+        raw_ready_timeout = _resolve_env_value(payload.get("ready_timeout_seconds"))
+        if raw_ready_timeout is None:
+            raw_ready_timeout = os.environ.get("SANDBOX_READY_TIMEOUT_SECONDS", "90")
+        try:
+            ready_timeout_seconds = float(raw_ready_timeout)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("SANDBOX_READY_TIMEOUT_SECONDS must be a number") from exc
+        if ready_timeout_seconds <= 0:
+            raise ValueError("SANDBOX_READY_TIMEOUT_SECONDS must be greater than zero")
+        raw_pool_enabled = payload.get("pool_enabled")
+        if raw_pool_enabled is None:
+            raw_pool_enabled = os.environ.get("SANDBOX_POOL_ENABLED", "true")
+        pool_enabled = str(_resolve_env_value(raw_pool_enabled)).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         return SandboxSettings(
             endpoint=str(
                 endpoint or os.environ.get("SANDBOX_URL") or "http://localhost:8004"
@@ -157,6 +177,8 @@ class ConfigManager:
                 if workspace_id or os.environ.get("SANDBOX_WORKSPACE_ID")
                 else None
             ),
+            ready_timeout_seconds=ready_timeout_seconds,
+            pool_enabled=pool_enabled,
         )
 
     def intent_service_settings(self) -> IntentServiceSettings:
