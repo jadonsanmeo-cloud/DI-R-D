@@ -277,12 +277,18 @@ def execute_spec(
         trace_id=request.trace_id,
         model=request.runtime_input.model,
         language=request.runtime_input.language,
-        history=[item.model_dump(mode="json") for item in request.runtime_input.history],
+        history=[
+            item.model_dump(mode="json") for item in request.runtime_input.history
+        ],
         gen_report_base_url=(
-            getattr(settings, "gen_report_api_url", None) if settings is not None else None
+            getattr(settings, "gen_report_api_url", None)
+            if settings is not None
+            else None
         ),
         gen_report_public_url=(
-            getattr(settings, "gen_report_public_url", None) if settings is not None else None
+            getattr(settings, "gen_report_public_url", None)
+            if settings is not None
+            else None
         ),
     )
 
@@ -300,8 +306,7 @@ def execute_direct_report(
         method_hub_default_enabled=settings.method_hub_default_enabled,  # type: ignore[attr-defined]
     )
     execution_files = [
-        item.model_dump(mode="json")
-        for item in request.runtime_input.execution_files
+        item.model_dump(mode="json") for item in request.runtime_input.execution_files
     ]
     return execute_direct_report_workflow(
         invocation,
@@ -324,7 +329,9 @@ def execute_direct_report(
         trace_id=request.trace_id,
         model=request.runtime_input.model,
         language=request.runtime_input.language,
-        history=[item.model_dump(mode="json") for item in request.runtime_input.history],
+        history=[
+            item.model_dump(mode="json") for item in request.runtime_input.history
+        ],
         gen_report_base_url=getattr(settings, "gen_report_api_url", None),
         gen_report_public_url=getattr(settings, "gen_report_public_url", None),
     )

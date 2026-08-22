@@ -130,7 +130,10 @@ def main(
     except Exception as exc:
         logger.log(
             f"{phase}.failed",
-            {"error_type": type(exc).__name__, "environment_key_count": len(environment)},
+            {
+                "error_type": type(exc).__name__,
+                "environment_key_count": len(environment),
+            },
         )
         return 1
 
@@ -151,10 +154,15 @@ def _resolve_output_path(path_value: str, workspace: Path) -> Path:
 
 def _redact(value: Any, key: str = "") -> Any:
     normalized_key = key.lower()
-    if any(token in normalized_key for token in ("api_key", "password", "secret", "token")):
+    if any(
+        token in normalized_key for token in ("api_key", "password", "secret", "token")
+    ):
         return "[REDACTED]"
     if isinstance(value, dict):
-        return {str(item_key): _redact(item, str(item_key)) for item_key, item in value.items()}
+        return {
+            str(item_key): _redact(item, str(item_key))
+            for item_key, item in value.items()
+        }
     if isinstance(value, list):
         return [_redact(item) for item in value]
     return value

@@ -21,7 +21,9 @@ class PostgresRecentDocumentSource:
     ) -> None:
         if not database_url.strip():
             raise ValueError("Corpus database URL is required.")
-        statuses = tuple(status.strip() for status in successful_statuses if status.strip())
+        statuses = tuple(
+            status.strip() for status in successful_statuses if status.strip()
+        )
         if not statuses:
             raise ValueError("At least one successful corpus status is required.")
         self.database_url = _normalize_psycopg_url(database_url)

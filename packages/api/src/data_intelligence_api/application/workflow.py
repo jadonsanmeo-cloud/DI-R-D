@@ -6,13 +6,14 @@ import inspect
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
     ExecutionSpec,
     FinalResponse,
+    Intent,
     IntentAnalysis,
     PreparedExecution,
     PreparedMarkdownExecution,
@@ -174,23 +175,12 @@ def default_pipeline_factory(
         resolved_options,
         endpoint=method_hub_settings.endpoint,
     )
-    method_hub_kwargs = (
-        {
-            "mcp_tools": resolved_method_hub.tools,
-            "method_hub_enabled": True,
-        }
-        if resolved_options.method_hub_enabled
-        else {}
-    )
-    engine_kwargs = (
-        {"engine_selector": RequestedEngineSelector(requested_engine)}
-        if requested_engine is not None
-        else {}
-    )
+    report_base_url = gen_report_base_url or os.getenv("GEN_REPORT_API_URL")
+    if report_base_url is None:
+        report_base_url = "http://host.docker.internal:8011"
     markdown_report_engine = (
         GenReportMarkdownEngine(
-            gen_report_base_url
-            or os.getenv("GEN_REPORT_API_URL", "http://host.docker.internal:8011"),
+            report_base_url,
             operation_id=operation_id or "",
             response_id=response_id or "",
             trace_id=trace_id,
@@ -220,14 +210,20 @@ def default_pipeline_factory(
             )
         ),
         default_organization_id=(
-            organization_id
-            or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
+            organization_id or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
         ),
         configure_default_sandbox=resolved_options.engine != "report",
         markdown_report_engine=markdown_report_engine,
         mcp_client=resolved_method_hub.client,
-        **engine_kwargs,
-        **method_hub_kwargs,
+        engine_selector=(
+            RequestedEngineSelector(requested_engine)
+            if requested_engine is not None
+            else None
+        ),
+        mcp_tools=(
+            resolved_method_hub.tools if resolved_options.method_hub_enabled else ()
+        ),
+        method_hub_enabled=resolved_options.method_hub_enabled,
     )
 
 
@@ -252,7 +248,7 @@ def _create_pipeline(
     gen_report_public_url: str | None = None,
 ) -> DataIntelligencePipeline:
     try:
-        parameters = inspect.signature(pipeline_factory).parameters.values()
+        parameters = tuple(inspect.signature(pipeline_factory).parameters.values())
     except (TypeError, ValueError):
         parameters = ()
     parameter_names = {parameter.name for parameter in parameters}
@@ -416,9 +412,7 @@ def execute_direct_report_workflow(
     gen_report_public_url: str | None = None,
 ) -> FinalResponse:
     if invocation.runtime_options.engine != "report":
-        raise ValueError(
-            "Direct execution currently supports the report engine only."
-        )
+        raise ValueError("Direct execution currently supports the report engine only.")
     pipeline = _create_pipeline(
         pipeline_factory,
         logger=logger,
@@ -454,7 +448,7 @@ def _execution_spec_from_markdown(
     if intent not in {"general", "reason", "report"}:
         intent = prepared.intent_analysis.intent
     return ExecutionSpec(
-        intent=intent,
+        intent=cast(Intent, intent),
         objective=validate_spec_markdown(spec_markdown),
         confirmed=True,
         engine_hint=ENGINE_ROUTE_MAP.get(runtime_options.engine or ""),

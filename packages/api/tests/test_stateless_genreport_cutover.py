@@ -264,18 +264,19 @@ class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
                 "runtime.completed",
             ],
         )
-        self.assertEqual(recording_app.paths, [
-            "/api/v1/reports:stream",
-            "/api/v1/reports:stream",
-        ])
+        self.assertEqual(
+            recording_app.paths,
+            [
+                "/api/v1/reports:stream",
+                "/api/v1/reports:stream",
+            ],
+        )
         self.assertEqual(
             [item.model_dump(mode="json") for item in captured_requests[-1].history],
             history,
         )
         self.assertEqual(
-            second_events[-1]["payload"]["metadata"]["artifacts"][0][
-                "artifact_ref"
-            ],
+            second_events[-1]["payload"]["metadata"]["artifacts"][0]["artifact_ref"],
             "artifact://report-1",
         )
         genreport_main.app.dependency_overrides.clear()

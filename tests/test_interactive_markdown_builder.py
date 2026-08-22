@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import unittest
 
-from data_intelligence_sdk.core.types import IntentAnalysis, PreprocessingStep, UserQuery
+from data_intelligence_sdk.core.types import (
+    IntentAnalysis,
+    PreprocessingStep,
+    UserQuery,
+)
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.memory import MemoryCard, MemoryContext, MemoryScope
 from data_intelligence_sdk.runtime.logger import InMemoryRuntimeLogger
@@ -53,7 +57,9 @@ A Markdown report.
 
 
 class InteractiveMarkdownBuilderTests(unittest.TestCase):
-    def test_pipeline_passes_same_request_memory_context_to_markdown_builder(self) -> None:
+    def test_pipeline_passes_same_request_memory_context_to_markdown_builder(
+        self,
+    ) -> None:
         scope = MemoryScope(tenant_id="test-org", user_id="user-1")
         memory_context = MemoryContext(
             cards=(

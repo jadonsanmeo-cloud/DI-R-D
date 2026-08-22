@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from data_intelligence_sdk.intent import IntentAnalysis
     from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 
 Intent = Literal["reason", "report", "general", "unknown"]

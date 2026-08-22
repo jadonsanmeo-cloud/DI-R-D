@@ -579,7 +579,9 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
             settings=self.settings,
             pipeline_factory=fake_pipeline_factory,
         )
-        revised_markdown = SPEC_MARKDOWN.replace("A concise report.", "A detailed report.")
+        revised_markdown = SPEC_MARKDOWN.replace(
+            "A concise report.", "A detailed report."
+        )
 
         revised = revise_spec(
             ReviseSpecRequest.model_validate(
@@ -898,7 +900,9 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(execute_response.status_code, 200)
-        self.assertTrue(execute_response.headers["content-type"].startswith("text/event-stream"))
+        self.assertTrue(
+            execute_response.headers["content-type"].startswith("text/event-stream")
+        )
         self.assertIn("event: runtime.completed", execute_response.text)
 
     async def test_direct_report_execution_streams_without_confirmation(self):
@@ -913,7 +917,9 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+        self.assertTrue(
+            response.headers["content-type"].startswith("text/event-stream")
+        )
         self.assertIn("event: runtime.completed", response.text)
         self.assertNotIn("response.requires_confirmation", response.text)
 
@@ -1045,9 +1051,7 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
             "/api/v1/responses/resp_1/decision",
             json={"action": "confirm", "revision": 1},
         )
-        legacy_history = await self.client.get(
-            "/api/v1/responses/history/session_1"
-        )
+        legacy_history = await self.client.get("/api/v1/responses/history/session_1")
 
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json(), {"status": "ok"})

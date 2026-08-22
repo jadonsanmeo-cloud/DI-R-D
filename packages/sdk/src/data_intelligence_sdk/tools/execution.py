@@ -6,6 +6,7 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, tool
 
+from data_intelligence_sdk.core.types import TraceStatus
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 
 
@@ -16,7 +17,9 @@ def record_sandbox_method_calls(
     """Import authoritative Method Hub calls reported by the sandbox broker."""
 
     for call in observation.get("method_calls", []):
-        status = "completed" if call.get("status") == "completed" else "failed"
+        status: TraceStatus = (
+            "completed" if call.get("status") == "completed" else "failed"
+        )
         runtime.run_context.record_method_call(
             str(call["tool_name"]),
             status=status,

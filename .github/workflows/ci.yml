@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uvx ruff@0.12.12 format --check .
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uvx ruff@0.12.12 check .
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: >-
+          uvx --from mypy==1.15.0 mypy --ignore-missing-imports
+          --follow-imports=skip packages/sdk/src packages/api/src
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}/packages/sdk/src:${{ github.workspace }}/packages/api/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: >-
+          uv run --no-project --with ./packages/sdk --with pytest==8.3.5
+          --with fastapi==0.139.0 --with 'psycopg[binary]>=3.3.4'
+          --with python-multipart==0.0.32 --with uvicorn==0.51.0
+          --with pyyaml==6.0.2 python -m pytest -q
+          packages/sdk/tests packages/api/tests tests
+          --ignore=packages/api/tests/test_stateless_genreport_cutover.py

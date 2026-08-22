@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import cast
 
-from data_intelligence_sdk.memory import MemoryCard, MemoryContext, MemoryScope, MemoryType
+from data_intelligence_sdk.memory import (
+    MemoryCard,
+    MemoryContext,
+    MemoryScope,
+    MemoryType,
+)
 
 
 _MEMORY_TYPES = frozenset(
@@ -30,9 +35,7 @@ def parse_upstream_memory_context(
         return MemoryContext(loaded=True, mode="upstream")
 
     cards = tuple(
-        card
-        for item in cards_value
-        if (card := _parse_card(item)) is not None
+        card for item in cards_value if (card := _parse_card(item)) is not None
     )
     return MemoryContext(cards=cards, loaded=True, mode="upstream")
 

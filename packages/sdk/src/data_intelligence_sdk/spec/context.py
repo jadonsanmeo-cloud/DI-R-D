@@ -272,9 +272,7 @@ def _extract_metrics(query_text: str, mentioned_columns: list[str]) -> list[str]
     # fixed English or business vocabulary into every request; the Spec Builder
     # can preserve an unbound metric request in its structured requirements when
     # the schema has not established a concrete field yet.
-    return [
-        column for column in mentioned_columns if column.lower() in query_text
-    ]
+    return [column for column in mentioned_columns if column.lower() in query_text]
 
 
 def _infer_output_type(query_text: str, intent: Intent) -> str | None:

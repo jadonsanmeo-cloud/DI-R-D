@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Protocol, cast
 
 import httpx
 
@@ -24,7 +24,10 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
+from data_intelligence_sdk.runtime.interfaces import InterfaceBuilder, InterfaceRegistry
 from data_intelligence_sdk.memory import MemoryContext
+from data_intelligence_sdk.registry.engine_registry import EngineRegistry
+from data_intelligence_sdk.runtime.resource_manager import ResourceManager
 from data_intelligence_sdk.runtime.sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
@@ -33,8 +36,51 @@ from data_intelligence_sdk.runtime.report_sandbox_executor import (
     RequestSandboxExecutor,
 )
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
-from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
+from data_intelligence_sdk.sandbox.artifacts import ArtifactStore, RunArtifactSession
+from data_intelligence_sdk.sandbox.executor import SandboxExecutor
+from data_intelligence_sdk.sandbox.logs import LogStore
 from data_intelligence_sdk.spec.default_confirmation import SpecConfirmationDecision
+from data_intelligence_sdk.spec.builder import SpecBuilder
+from data_intelligence_sdk.spec.confirmation import SpecConfirmation
+
+
+class _PipelineIntentAnalyzer(Protocol):
+    """Accept both legacy intent values and enriched intent analysis."""
+
+    def analyze(
+        self,
+        query: UserQuery,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> Intent | IntentAnalysis:
+        """Classify a query for the pipeline."""
+
+
+class _MarkdownSpecBuilder(Protocol):
+    """Build a direct Markdown execution spec for a normalized intent."""
+
+    def build(
+        self,
+        query: UserQuery,
+        analysis: IntentAnalysis,
+        memory_context: MemoryContext | None = None,
+    ) -> str:
+        """Return the Markdown execution spec."""
+
+
+class _MarkdownReportEngine(Protocol):
+    """Run a Markdown spec at the external report-engine boundary."""
+
+    def run_markdown(
+        self,
+        *,
+        spec_markdown: str,
+        organization_id: str,
+        runtime: EngineRuntimeContext,
+        user_context: UserContext | None,
+        user_query: UserQuery,
+    ) -> object:
+        """Return a report response or another value convertible to one."""
 
 
 class DataIntelligencePipeline:
@@ -47,26 +93,26 @@ class DataIntelligencePipeline:
     def __init__(
         self,
         *,
-        intent_analyzer: object,
-        spec_builder: object,
-        spec_confirmation: object,
-        engine_registry: object,
+        intent_analyzer: _PipelineIntentAnalyzer,
+        spec_builder: SpecBuilder,
+        spec_confirmation: SpecConfirmation,
+        engine_registry: EngineRegistry,
         evidence_collector: object | None = None,
         synthesizer: object | None = None,
         mcp_client: MCPMethodClient | None = None,
         mcp_tools: tuple[MCPToolDefinition, ...] = (),
-        interface_registry: object | None = None,
-        interface_builder: object | None = None,
-        sandbox_executor: object | None = None,
-        artifact_store: object | None = None,
-        log_store: object | None = None,
-        resource_manager: object | None = None,
+        interface_registry: InterfaceRegistry | None = None,
+        interface_builder: InterfaceBuilder | None = None,
+        sandbox_executor: SandboxExecutor | None = None,
+        artifact_store: ArtifactStore | None = None,
+        log_store: LogStore | None = None,
+        resource_manager: ResourceManager | None = None,
         sandbox_provider: SandboxSessionProvider | None = None,
         include_evidence: bool = True,
         logger: RuntimeLogger | None = None,
         max_spec_revision_rounds: int = 3,
-        markdown_spec_builder: object | None = None,
-        markdown_report_engine: object | None = None,
+        markdown_spec_builder: _MarkdownSpecBuilder | None = None,
+        markdown_report_engine: _MarkdownReportEngine | None = None,
         default_organization_id: str = "test-org",
     ) -> None:
         self.intent_analyzer = intent_analyzer
@@ -196,7 +242,7 @@ class DataIntelligencePipeline:
             )
             intent_analysis = _normalize_intent_analysis(analyzed_intent)
             builder_intent_analysis = (
-                analyzed_intent
+                cast(IntentAnalysis, analyzed_intent)
                 if hasattr(analyzed_intent, "intent")
                 else intent_analysis
             )
@@ -307,9 +353,7 @@ class DataIntelligencePipeline:
             )
         if prepared.intent_analysis is not None:
             revised.preprocessing_steps = list(
-                _normalize_intent_analysis(
-                    prepared.intent_analysis
-                ).preprocessing_steps
+                _normalize_intent_analysis(prepared.intent_analysis).preprocessing_steps
             )
         self._log(
             "pipeline.spec_revised",
@@ -347,9 +391,7 @@ class DataIntelligencePipeline:
                 {
                     "query": query.text,
                     "artifact_ref": (
-                        run_artifact.artifact_ref
-                        if run_artifact is not None
-                        else None
+                        run_artifact.artifact_ref if run_artifact is not None else None
                     ),
                 },
             )
@@ -393,7 +435,7 @@ class DataIntelligencePipeline:
                 intent_analysis,
                 memory_context=resolved_memory,
             )
-            spec_payload = {
+            spec_payload: dict[str, object] = {
                 "intent": intent_analysis.intent,
                 "format": "markdown",
                 "character_count": len(markdown),
@@ -421,9 +463,7 @@ class DataIntelligencePipeline:
             session_context=session_context,
             user_context=user_context,
             run_artifact=run_artifact,
-            run_artifact_id=(
-                run_artifact.run_id if run_artifact is not None else None
-            ),
+            run_artifact_id=(run_artifact.run_id if run_artifact is not None else None),
         )
 
     def execute_confirmed_markdown(
@@ -819,10 +859,13 @@ class DataIntelligencePipeline:
         query: UserQuery,
         session_context: SessionContext | None,
         user_context: UserContext | None,
-    ) -> object:
+    ) -> Intent | IntentAnalysis:
         analyze_details = getattr(self.intent_analyzer, "analyze_details", None)
         if callable(analyze_details):
-            return analyze_details(query, session_context, user_context)
+            return cast(
+                Intent | IntentAnalysis,
+                analyze_details(query, session_context, user_context),
+            )
         return self.intent_analyzer.analyze(query, session_context, user_context)
 
     def _confirm_spec(
@@ -859,6 +902,7 @@ def _artifact_error(exc: BaseException) -> str:
 
     return f"{type(exc).__name__}: runtime phase failed"
 
+
 def _normalize_intent_analysis(value: object) -> IntentAnalysis:
     if isinstance(value, IntentAnalysis):
         return value
@@ -874,17 +918,22 @@ def _normalize_intent_analysis(value: object) -> IntentAnalysis:
     if raw_steps is None:
         raw_steps = getattr(value, "processing_steps", None)
     return IntentAnalysis(
-        intent=intent,
+        intent=cast(Intent, intent),
         catalog_intent_id=(str(catalog_intent_id) if catalog_intent_id else None),
         preprocessing_steps=_normalize_preprocessing_steps(raw_steps),
         metadata=_intent_metadata(value),
     )
 
+
 def _normalize_preprocessing_steps(value: object) -> list[PreprocessingStep]:
+    items: Iterable[tuple[object, object]]
     if isinstance(value, dict):
         items = value.items()
     elif isinstance(value, list):
-        items = ((getattr(item, "name", str(index)), item) for index, item in enumerate(value))
+        items = (
+            (getattr(item, "name", str(index)), item)
+            for index, item in enumerate(value)
+        )
     else:
         return []
     steps: list[PreprocessingStep] = []
@@ -898,7 +947,9 @@ def _normalize_preprocessing_steps(value: object) -> list[PreprocessingStep]:
             PreprocessingStep(
                 name=str(name),
                 order=int(raw_step.get("order", 0)),
-                step_type=str(raw_step.get("step_type") or raw_step.get("type") or "prepare"),
+                step_type=str(
+                    raw_step.get("step_type") or raw_step.get("type") or "prepare"
+                ),
                 description=_optional_string(raw_step.get("description")),
                 capability=_optional_string(raw_step.get("capability")),
                 required=bool(raw_step.get("required", False)),
@@ -909,7 +960,10 @@ def _normalize_preprocessing_steps(value: object) -> list[PreprocessingStep]:
         )
     return sorted(steps, key=lambda step: (step.order, step.name))
 
-def _intent_event_payload(original: object, analysis: IntentAnalysis) -> dict[str, object]:
+
+def _intent_event_payload(
+    original: object, analysis: IntentAnalysis
+) -> dict[str, object]:
     event_payload = getattr(original, "event_payload", None)
     if callable(event_payload):
         payload = dict(event_payload())
@@ -922,6 +976,7 @@ def _intent_event_payload(original: object, analysis: IntentAnalysis) -> dict[st
         "preprocessing_step_count": len(analysis.preprocessing_steps),
     }
 
+
 def _intent_metadata(value: object) -> dict[str, Any]:
     metadata = getattr(value, "metadata", None)
     if isinstance(metadata, dict):
@@ -933,11 +988,13 @@ def _intent_metadata(value: object) -> dict[str, Any]:
     }
     return {key: item for key, item in payload.items() if item is not None}
 
+
 def _optional_string(value: object) -> str | None:
     if value is None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
 
 def _stage_uploaded_files(
     sandbox: object | None,
@@ -967,6 +1024,7 @@ def _stage_uploaded_files(
         source_paths = getattr(sandbox, "source_paths", None)
         if isinstance(source_paths, dict):
             source_paths[filename] = filename
+
 
 def _final_response_from_engine_output(
     output: EngineOutput,

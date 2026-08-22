@@ -97,7 +97,9 @@ def main(
         if limit <= 0 or interval_seconds <= 0:
             raise ValueError("Worker limit and interval must be positive.")
     except (TypeError, ValueError) as exc:
-        logger.log("scheduled_spec.configuration.failed", {"error_type": type(exc).__name__})
+        logger.log(
+            "scheduled_spec.configuration.failed", {"error_type": type(exc).__name__}
+        )
         return 2
 
     worker = RecentDocumentSpecWorker(

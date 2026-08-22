@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from data_intelligence_sdk.sandbox.artifacts import RunArtifactSession
 
@@ -53,7 +54,7 @@ class SandboxEnvironment:
         }
 
     @classmethod
-    def from_payload(cls, payload: Any) -> "SandboxEnvironment":
+    def from_payload(cls, payload: Any) -> SandboxEnvironment:
         """Normalize a service capability payload into the versioned contract."""
 
         if payload is None:
@@ -107,18 +108,48 @@ class SandboxSessionProvider(Protocol):
 
     def open(
         self,
-    ) -> AbstractContextManager["EngineSandboxSession"]:
+    ) -> AbstractContextManager[EngineSandboxSession]:
         """Open a staged request sandbox and clean it up on exit."""
+
+
+class Sandbox(Protocol):
+    """Synchronous operations required from the request sandbox client."""
+
+    id: object
+
+    def read(self, path: str) -> bytes:
+        """Read one staged file."""
+
+    def write(self, path: str, content: bytes | str) -> None:
+        """Write one staged file."""
+
+    def refresh(self) -> object:
+        """Fetch the current sandbox record."""
+
+    def wait_until_ready(self) -> object:
+        """Wait for the sandbox to be usable."""
+
+    def delete(self) -> object:
+        """Delete the remote sandbox."""
+
+    def run(
+        self,
+        code: str,
+        *,
+        timeout_seconds: int,
+        wait: bool,
+    ) -> object:
+        """Run Python code in the sandbox."""
 
 
 @dataclass(slots=True)
 class EngineSandboxSession:
     """One staged AXIOM sandbox shared by all engines in a request."""
 
-    sandbox: object
+    sandbox: Sandbox
     source_paths: dict[str, str] = field(default_factory=dict)
     environment: SandboxEnvironment = field(default_factory=SandboxEnvironment)
-    sandbox_factory: Callable[[], object] | None = None
+    sandbox_factory: Callable[[], Sandbox] | None = None
     staged_files: dict[str, bytes] = field(default_factory=dict)
     _reprovision_lock: threading.RLock = field(
         default_factory=threading.RLock,
@@ -144,7 +175,7 @@ class EngineSandboxSession:
                 status_text = str(getattr(status, "value", status) or "").lower()
                 if status_text == "running":
                     return True
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - retry by replacing an unavailable sandbox
                 pass
             previous = self.sandbox
             replacement = self.sandbox_factory()
@@ -154,7 +185,7 @@ class EngineSandboxSession:
             self.sandbox = replacement
             try:
                 previous.delete()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - cleanup cannot prevent reprovisioning
                 pass
             return True
 

@@ -206,10 +206,7 @@ class RunArtifactSession:
 
     def execution_ref(self, attempt: CodeAttemptArtifact) -> str:
         self._owned_attempt(attempt)
-        return (
-            f"artifact://{self.run_id}/executions/"
-            f"attempt-{attempt.attempt:03d}.json"
-        )
+        return f"artifact://{self.run_id}/executions/attempt-{attempt.attempt:03d}.json"
 
     def record_data_output(
         self,

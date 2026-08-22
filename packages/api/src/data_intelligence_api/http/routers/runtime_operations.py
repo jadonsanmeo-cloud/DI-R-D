@@ -48,9 +48,13 @@ def _authorize_service(
         )
     expected = f"Bearer {settings.runtime_service_token}"
     if authorization is None or not secrets.compare_digest(authorization, expected):
-        raise HTTPException(status_code=401, detail="Runtime service authentication failed.")
+        raise HTTPException(
+            status_code=401, detail="Runtime service authentication failed."
+        )
     if consumer_service != settings.runtime_consumer_service:
-        raise HTTPException(status_code=403, detail="Runtime consumer service is not allowed.")
+        raise HTTPException(
+            status_code=403, detail="Runtime consumer service is not allowed."
+        )
 
 
 def _error_response(
@@ -220,7 +224,9 @@ def create_runtime_operations_router(
                     "payload": {
                         "output_text": result.answer,
                         "evidence": (
-                            asdict(result.evidence) if result.evidence is not None else None
+                            asdict(result.evidence)
+                            if result.evidence is not None
+                            else None
                         ),
                         "metadata": dict(result.metadata),
                     },
@@ -312,7 +318,9 @@ def create_runtime_operations_router(
                     "payload": {
                         "output_text": result.answer,
                         "evidence": (
-                            asdict(result.evidence) if result.evidence is not None else None
+                            asdict(result.evidence)
+                            if result.evidence is not None
+                            else None
                         ),
                         "metadata": dict(result.metadata),
                     },

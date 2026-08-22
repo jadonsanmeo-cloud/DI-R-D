@@ -58,13 +58,9 @@ class DemoLogger(RuntimeLogger):
                 f"{Path(str(values['output_path'])).name}"
             )
         elif event == "scheduled_spec.document.skipped":
-            self.write(
-                f"  SKIPPED {values['document_id']}: {values['reason']}"
-            )
+            self.write(f"  SKIPPED {values['document_id']}: {values['reason']}")
         elif event == "scheduled_spec.document.failed":
-            self.write(
-                f"  FAILED {values['document_id']}: {values['error_type']}"
-            )
+            self.write(f"  FAILED {values['document_id']}: {values['error_type']}")
 
     def write(self, message: str = "") -> None:
         print(message, file=self.stream)

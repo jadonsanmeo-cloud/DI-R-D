@@ -6,7 +6,7 @@ import json
 import os
 from builtins import BaseExceptionGroup
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from deepagents import (
     GeneralPurposeSubagentProfile,
@@ -33,7 +33,16 @@ from data_intelligence_sdk.tools import (
     create_mcp_tools,
 )
 
-AgentFactory = Callable[..., object]
+
+class AgentInvoker(Protocol):
+    def invoke(self, payload: dict[str, Any]) -> Any: ...
+
+
+class LLMInvoker(Protocol):
+    def invoke(self, messages: list[Any]) -> Any: ...
+
+
+AgentFactory = Callable[..., AgentInvoker]
 
 _HIDDEN_DEEP_AGENT_TOOLS = frozenset(
     {
@@ -88,11 +97,7 @@ def _primary_tool_error(exc: BaseException) -> BaseException:
 
 def _exception_leaves(exc: BaseException) -> list[BaseException]:
     if isinstance(exc, BaseExceptionGroup):
-        return [
-            leaf
-            for nested in exc.exceptions
-            for leaf in _exception_leaves(nested)
-        ]
+        return [leaf for nested in exc.exceptions for leaf in _exception_leaves(nested)]
     return [exc]
 
 
@@ -107,7 +112,7 @@ class GeneralPurposeEngine:
 
     def __init__(
         self,
-        llm: object | None = None,
+        llm: LLMInvoker | None = None,
         *,
         model: str | None = None,
         api_key: str | None = None,
@@ -132,7 +137,7 @@ class GeneralPurposeEngine:
         api_key: str | None,
         config_path: str | Path | None,
         config_manager: ConfigManager | None,
-    ) -> object:
+    ) -> LLMInvoker:
         manager = config_manager or get_config_manager(
             str(config_path) if config_path is not None else None
         )

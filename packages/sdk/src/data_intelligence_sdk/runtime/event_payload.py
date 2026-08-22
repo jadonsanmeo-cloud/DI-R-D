@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import re
+from collections.abc import Mapping
 from typing import Any
 
 _PREVIEW_BUDGET = 12_000
@@ -45,18 +45,18 @@ def bounded_event_preview(
         remaining[0] -= len(str(value))
         return value
     if isinstance(value, str):
-        preview = value[:_MAX_STRING]
-        remaining[0] -= len(preview)
-        return preview + ("..." if len(value) > len(preview) else "")
+        text_preview = value[:_MAX_STRING]
+        remaining[0] -= len(text_preview)
+        return text_preview + ("..." if len(value) > len(text_preview) else "")
     if depth >= _MAX_DEPTH:
         return "[nested value omitted]"
     if isinstance(value, Mapping):
-        preview: dict[str, Any] = {}
+        mapping_preview: dict[str, Any] = {}
         items = list(value.items())
         for raw_key, item in items[:_MAX_ITEMS]:
             key = str(raw_key)
             remaining[0] -= len(key)
-            preview[key] = (
+            mapping_preview[key] = (
                 "[redacted]"
                 if _is_sensitive_key(key)
                 else bounded_event_preview(
@@ -67,19 +67,23 @@ def bounded_event_preview(
             )
             if remaining[0] <= 0:
                 break
-        if len(items) > len(preview):
-            preview["_truncated"] = f"{len(items) - len(preview)} more fields"
-        return preview
+        if len(items) > len(mapping_preview):
+            mapping_preview["_truncated"] = (
+                f"{len(items) - len(mapping_preview)} more fields"
+            )
+        return mapping_preview
     if isinstance(value, (list, tuple, set)):
         items = list(value)
-        preview = [
+        sequence_preview = [
             bounded_event_preview(item, depth=depth + 1, budget=remaining)
             for item in items[:_MAX_ITEMS]
             if remaining[0] > 0
         ]
-        if len(items) > len(preview):
-            preview.append(f"[{len(items) - len(preview)} more items]")
-        return preview
+        if len(items) > len(sequence_preview):
+            sequence_preview.append(
+                f"[{len(items) - len(sequence_preview)} more items]"
+            )
+        return sequence_preview
     return bounded_event_preview(str(value), depth=depth, budget=remaining)
 
 
@@ -106,7 +110,10 @@ def _generated_code_payload(payload: Mapping[str, Any]) -> dict[str, Any] | None
     content = raw_source[:_MAX_CODE_STRING]
     return {
         "name": f"{safe_name or 'generated-code'}{suffix}.py",
-        "language": str(outputs.get("language") or "python"),
+        "language": str(
+            (outputs.get("language") if isinstance(outputs, Mapping) else None)
+            or "python"
+        ),
         "content": content,
         "truncated": len(content) < len(raw_source),
         "artifact_ref": None,

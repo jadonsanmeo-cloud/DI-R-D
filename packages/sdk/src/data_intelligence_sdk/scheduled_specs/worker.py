@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.scheduled_specs.contracts import (
-    RecentDocument,
     RecentDocumentSource,
     ScheduledSpecStore,
 )
@@ -87,7 +86,10 @@ class RecentDocumentSpecWorker:
                 created += 1
                 self._log(
                     "scheduled_spec.document.created",
-                    {"document_id": document.document_id, "output_path": str(destination)},
+                    {
+                        "document_id": document.document_id,
+                        "output_path": str(destination),
+                    },
                 )
 
         result = ScheduledSpecCycleResult(

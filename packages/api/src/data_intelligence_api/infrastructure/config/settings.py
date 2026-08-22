@@ -81,9 +81,7 @@ class ApiSettings:
             ),
             gen_report_public_url=os.getenv("GEN_REPORT_PUBLIC_URL") or None,
             memory_enabled=memory_enabled,
-            memory_service_url=os.getenv(
-                "MEMORY_SERVICE_URL", "http://localhost:8005"
-            ),
+            memory_service_url=os.getenv("MEMORY_SERVICE_URL", "http://localhost:8005"),
             memory_tenant_id=os.getenv("MEMORY_TENANT_ID", "test-org"),
             memory_default_user_id=os.getenv(
                 "MEMORY_DEFAULT_USER_ID", "local-dev-user"
@@ -104,6 +102,4 @@ def _parse_boolean_env(name: str, *, default: bool) -> bool:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    raise ValueError(
-        f"{name} must be one of true/false, 1/0, yes/no, or on/off."
-    )
+    raise ValueError(f"{name} must be one of true/false, 1/0, yes/no, or on/off.")

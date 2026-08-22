@@ -31,7 +31,9 @@ class AxiomExperienceMemoryLoaderTests(unittest.IsolatedAsyncioTestCase):
             [("memory.load.skipped", {"reason": "disabled"})],
         )
 
-    async def test_load_sends_scoped_hybrid_search_and_parses_memory_cards(self) -> None:
+    async def test_load_sends_scoped_hybrid_search_and_parses_memory_cards(
+        self,
+    ) -> None:
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:

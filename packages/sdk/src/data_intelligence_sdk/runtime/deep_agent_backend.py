@@ -51,7 +51,7 @@ class DeepAgentSandboxBackend(BackendProtocol):
         try:
             relative_path = self.generated_path(file_path)
             self.session.write(relative_path, content)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - translate sandbox failures for agents
             return WriteResult(error=f"Error writing file '{file_path}': {exc}")
         return WriteResult(path=file_path)
 
@@ -62,19 +62,18 @@ class DeepAgentSandboxBackend(BackendProtocol):
         limit: int = 2000,
     ) -> ReadResult:
         try:
-            content = self.session.sandbox.read(
-                self.workspace_path(file_path)
-            ).decode("utf-8")
+            content = self.session.sandbox.read(self.workspace_path(file_path)).decode(
+                "utf-8"
+            )
             lines = content.splitlines(keepends=True)
             if offset >= len(lines) and lines:
                 return ReadResult(
                     error=(
-                        f"Line offset {offset} exceeds file length "
-                        f"({len(lines)} lines)"
+                        f"Line offset {offset} exceeds file length ({len(lines)} lines)"
                     )
                 )
             window = "".join(lines[offset : offset + limit])
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - translate sandbox failures for agents
             return ReadResult(error=f"Error reading file '{file_path}': {exc}")
         return ReadResult(file_data=FileData(content=window, encoding="utf-8"))
 

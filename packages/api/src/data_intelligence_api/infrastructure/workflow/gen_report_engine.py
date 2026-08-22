@@ -44,7 +44,9 @@ def _sse_payload(raw_event: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-async def _iter_sse_payloads(chunks: AsyncIterator[str]) -> AsyncIterator[dict[str, Any]]:
+async def _iter_sse_payloads(
+    chunks: AsyncIterator[str],
+) -> AsyncIterator[dict[str, Any]]:
     buffer = ""
     async for chunk in chunks:
         buffer += chunk.replace("\r\n", "\n")
@@ -163,9 +165,7 @@ class GenReportMarkdownEngine:
         if completion is None:
             raise GenReportProtocolError("GenReport stream ended without completion")
         raw_artifacts = completion.get("artifacts")
-        artifacts = [
-            item for item in raw_artifacts or [] if isinstance(item, dict)
-        ]
+        artifacts = [item for item in raw_artifacts or [] if isinstance(item, dict)]
         normalized_artifacts = _absolute_url(artifacts, self.public_base_url)
         assert isinstance(normalized_artifacts, list)
         answer = str(completion.get("output_text") or "").strip()

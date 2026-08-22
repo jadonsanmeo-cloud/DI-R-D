@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, is_dataclass
-from typing import Any
+from typing import Any, Protocol, cast
 
 from data_intelligence_sdk.core.types import (
     CapabilityRequirement,
@@ -24,9 +24,33 @@ from data_intelligence_sdk.spec.cluster_specs import (
     ClusterSpecSelector,
     DefaultClusterSpecBuilder,
 )
-from data_intelligence_sdk.spec.context import SpecContextBuilder
-from data_intelligence_sdk.spec.data_selection import DataSelector
+from data_intelligence_sdk.spec.context import SpecBuildContext, SpecContextBuilder
+from data_intelligence_sdk.spec.data_selection import DataSelector, SelectedDataContext
 from data_intelligence_sdk.spec.prompts.spec_builder import SpecBuilderPrompt
+
+
+class SpecBuilderPromptProtocol(Protocol):
+    def build_messages(
+        self,
+        *,
+        spec_build_context: SpecBuildContext,
+        selected_data_context: SelectedDataContext | None,
+        uploaded_files: list[UploadedFile],
+        session_context: SessionContext | None,
+        user_context: UserContext | None,
+    ) -> list[dict[str, str]]: ...
+
+    def revise_messages(
+        self,
+        *,
+        previous_spec: ExecutionSpec,
+        user_feedback: str,
+        spec_build_context: SpecBuildContext,
+        selected_data_context: SelectedDataContext | None,
+        uploaded_files: list[UploadedFile],
+        session_context: SessionContext | None,
+        user_context: UserContext | None,
+    ) -> list[dict[str, str]]: ...
 
 
 class LLMSpecBuilder:
@@ -36,7 +60,7 @@ class LLMSpecBuilder:
         self,
         llm_client: LLMClient,
         *,
-        prompt: object | None = None,
+        prompt: SpecBuilderPromptProtocol | None = None,
         context_builder: SpecContextBuilder | None = None,
         data_selector: DataSelector | None = None,
         datahub_clusterer: DataHubClusterer | None = None,
@@ -239,7 +263,7 @@ class LLMSpecBuilder:
         self,
         messages: list[dict[str, str]],
         intent: Intent,
-        selected_data_context: object | None,
+        selected_data_context: SelectedDataContext | None,
         *,
         available_sources: list[str],
     ) -> ExecutionSpec:
@@ -424,11 +448,11 @@ class LLMSpecBuilder:
 
     def _select_data(
         self,
-        spec_build_context: object,
+        spec_build_context: SpecBuildContext,
         *,
         previous_spec: ExecutionSpec | None = None,
         user_feedback: str | None = None,
-    ) -> object | None:
+    ) -> SelectedDataContext | None:
         if self.data_selector is None:
             return None
         return self.data_selector.select(
@@ -441,7 +465,7 @@ class LLMSpecBuilder:
         self,
         payload: dict[str, Any],
         intent: Intent,
-        selected_data_context: object | None = None,
+        selected_data_context: SelectedDataContext | None = None,
     ) -> ExecutionSpec:
         capability_payloads = payload.get("capability_requirements", [])
         if not isinstance(capability_payloads, list):
@@ -504,7 +528,7 @@ class LLMSpecBuilder:
     def _normalize_data_requirements(
         self,
         data_requirements: list[Any],
-        selected_data_context: object | None,
+        selected_data_context: SelectedDataContext | None,
     ) -> list[str]:
         selected = _selected_data_to_dict(selected_data_context)
         selected_sources = selected.get("selected_sources")
@@ -515,7 +539,7 @@ class LLMSpecBuilder:
     def _normalize_constraints_to_selected_data(
         self,
         constraints: dict[str, Any],
-        selected_data_context: object | None,
+        selected_data_context: SelectedDataContext | None,
     ) -> dict[str, Any]:
         selected = _selected_data_to_dict(selected_data_context)
         if not selected:
@@ -572,16 +596,18 @@ def _complete_json(
     except TypeError as exc:
         if "stage" not in str(exc):
             raise
-        return llm_client.complete_json(messages)
+        return cast(Any, llm_client).complete_json(messages)
 
-def _selected_data_to_dict(value: object | None) -> dict[str, Any]:
+
+def _selected_data_to_dict(value: SelectedDataContext | None) -> dict[str, Any]:
     if value is None:
         return {}
     if is_dataclass(value):
-        return asdict(value)
+        return asdict(cast(Any, value))
     if isinstance(value, dict):
         return value
     return {}
+
 
 def _uploaded_files_from_query(query: UserQuery) -> list[UploadedFile]:
     raw_files = query.metadata.get("uploaded_files", [])
@@ -598,6 +624,7 @@ def _uploaded_files_from_query(query: UserQuery) -> list[UploadedFile]:
             seen.add(normalized)
             uploaded_files.append(UploadedFile(filename=normalized))
     return uploaded_files
+
 
 def _uploaded_file_names(uploaded_files: list[UploadedFile]) -> list[str]:
     return [file.filename for file in uploaded_files]

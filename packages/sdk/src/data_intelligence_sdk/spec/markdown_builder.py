@@ -20,7 +20,9 @@ _REQUIRED_MARKERS = (
 
 
 class LLMMarkdownSpecBuilder:
-    def __init__(self, llm_client: LLMClient, *, max_validation_retries: int = 2) -> None:
+    def __init__(
+        self, llm_client: LLMClient, *, max_validation_retries: int = 2
+    ) -> None:
         self.llm_client = llm_client
         self.max_validation_retries = max_validation_retries
 

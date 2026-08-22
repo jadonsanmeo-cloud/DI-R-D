@@ -133,6 +133,7 @@ def _map_catalog_intent(value: object) -> Intent:
         return "unknown"
     return "general"
 
+
 def _top_search_hit(response_payload: dict[str, Any]) -> dict[str, Any] | None:
     results = response_payload.get("results")
     if not isinstance(results, list) or not results:
@@ -141,6 +142,7 @@ def _top_search_hit(response_payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(top_hit, dict):
         raise ValueError("Intent Service search result must be a JSON object.")
     return top_hit
+
 
 def _hit_intent(top_hit: dict[str, Any] | None) -> dict[str, Any]:
     if top_hit is None:

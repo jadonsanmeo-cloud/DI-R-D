@@ -7,6 +7,7 @@ from dataclasses import asdict
 import json
 import os
 from pathlib import Path
+from typing import Protocol, cast
 from uuid import UUID
 
 import httpx
@@ -24,7 +25,8 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
-from data_intelligence_sdk.engines.general import GeneralPurposeEngine
+from data_intelligence_sdk.engines.base import Engine
+from data_intelligence_sdk.engines.general import GeneralPurposeEngine, LLMInvoker
 from data_intelligence_sdk.intent import IntentAnalysis
 from data_intelligence_sdk.registry.engine_registry import InMemoryEngineRegistry
 from data_intelligence_sdk.registry.engine_selector import (
@@ -37,25 +39,74 @@ from data_intelligence_sdk.runtime.sandbox import (
     SandboxEnvironment,
     SandboxSessionProvider,
 )
-from data_intelligence_sdk.runtime.interfaces import InMemoryInterfaceRegistry
+from data_intelligence_sdk.runtime.interfaces import (
+    InMemoryInterfaceRegistry,
+    InterfaceBuilder,
+    InterfaceRegistry,
+)
 from data_intelligence_sdk.runtime.llm_client import (
     LLMClient,
     OpenAICompatibleLLMClient,
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
-from data_intelligence_sdk.sandbox.artifacts import FilesystemArtifactStore
+from data_intelligence_sdk.sandbox.artifacts import (
+    ArtifactStore,
+    FilesystemArtifactStore,
+)
+from data_intelligence_sdk.sandbox.executor import SandboxExecutor
 from data_intelligence_sdk.spec import LLMSpecBuilder
 from data_intelligence_sdk.spec.markdown_builder import LLMMarkdownSpecBuilder
 from data_intelligence_api.infrastructure.intent import AxiomIntentServiceAnalyzer
 
 DEFAULT_QUERYAI_REASON_URL = "http://localhost:7205/query"
 
+
+class _SpecBuilderDelegate(Protocol):
+    """Minimum spec-builder contract wrapped with report defaults."""
+
+    def build(
+        self,
+        query: UserQuery,
+        intent: Intent,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        """Build an execution spec."""
+
+    def revise(
+        self,
+        *,
+        previous_spec: ExecutionSpec,
+        user_feedback: str,
+        query: UserQuery,
+        intent: Intent,
+        session_context: SessionContext | None = None,
+        user_context: UserContext | None = None,
+    ) -> ExecutionSpec:
+        """Revise an execution spec."""
+
+
+class _MarkdownReportEngine(Protocol):
+    """Execute a Markdown report spec at the report-engine boundary."""
+
+    def run_markdown(
+        self,
+        *,
+        spec_markdown: str,
+        organization_id: str,
+        runtime: object,
+        user_context: object,
+        user_query: object,
+    ) -> object:
+        """Run the supplied report spec."""
+
+
 class _ReportDefaultsSpecBuilder:
     """Apply API report-delivery defaults without overriding explicit choices."""
 
     def __init__(self, delegate: object) -> None:
-        self.delegate = delegate
+        self.delegate = cast(_SpecBuilderDelegate, delegate)
 
     def build(
         self,
@@ -209,7 +260,7 @@ class _AxiomSandboxProvider:
 
 def _configure_axiom_sandbox_provider(
     *,
-    config_manager: object,
+    config_manager: ConfigManager,
     method_hub_enabled: bool,
 ) -> SandboxSessionProvider:
     """Build the request-scoped AXIOM sandbox provider."""
@@ -245,7 +296,7 @@ def _configure_axiom_sandbox_provider(
 
 def _configure_request_sandbox_provider(
     *,
-    config_manager: object,
+    config_manager: ConfigManager,
     method_hub_enabled: bool,
 ) -> SandboxSessionProvider:
     """Build the AXIOM-managed request sandbox used by QA workflows."""
@@ -363,8 +414,6 @@ class ExampleSpecConfirmation:
         return spec
 
 
-
-
 class QueryAIRemoteReasonEngine:
     """Reasoning engine backed by the QueryAI workflow HTTP API."""
 
@@ -424,10 +473,11 @@ class QueryAIRemoteReasonEngine:
             },
         )
 
+
 def create_example_pipeline(
     *,
-    engine: object | None = None,
-    llm: object | None = None,
+    engine: Engine | None = None,
+    llm: LLMInvoker | None = None,
     model: str | None = None,
     api_key: str | None = None,
     config_path: str | Path | None = None,
@@ -440,17 +490,17 @@ def create_example_pipeline(
     mcp_client: MCPMethodClient | None = None,
     mcp_tools: tuple[MCPToolDefinition, ...] = (),
     method_hub_enabled: bool | None = None,
-    interface_registry: object | None = None,
-    interface_builder: object | None = None,
-    sandbox_executor: object | None = None,
+    interface_registry: InterfaceRegistry | None = None,
+    interface_builder: InterfaceBuilder | None = None,
+    sandbox_executor: SandboxExecutor | None = None,
     sandbox_provider: SandboxSessionProvider | None = None,
     configure_default_sandbox: bool = True,
-    artifact_store: object | None = None,
+    artifact_store: ArtifactStore | None = None,
     logger: RuntimeLogger | None = None,
     intent_service_base_url: str | None = None,
     queryai_reason_endpoint: str | None = None,
     default_organization_id: str | None = None,
-    markdown_report_engine: object | None = None,
+    markdown_report_engine: _MarkdownReportEngine | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
     resolved_method_hub_enabled = (
@@ -481,11 +531,7 @@ def create_example_pipeline(
         spec_builder = ExampleSpecBuilder()
     spec_builder = _ReportDefaultsSpecBuilder(spec_builder)
     uses_default_engine = engine is None
-    if (
-        configure_default_sandbox
-        and sandbox_provider is None
-        and uses_default_engine
-    ):
+    if configure_default_sandbox and sandbox_provider is None and uses_default_engine:
         sandbox_settings = resolved_config_manager.sandbox_settings()
         if sandbox_settings.enabled:
             sandbox_provider = _configure_request_sandbox_provider(
@@ -526,6 +572,7 @@ def create_example_pipeline(
         registry.register(general_engine)
         registry.register(reason_engine)
     else:
+        assert engine is not None
         registry = InMemoryEngineRegistry(fallback_engine=engine)
         registry.register(engine)
     interface_registry = interface_registry or InMemoryInterfaceRegistry()
@@ -537,6 +584,11 @@ def create_example_pipeline(
         else ExampleIntentAnalyzer()
     )
     resolved_markdown_report_engine = markdown_report_engine
+    resolved_default_organization_id = default_organization_id or os.getenv(
+        "DEFAULT_ORGANIZATION_ID"
+    )
+    if resolved_default_organization_id is None:
+        resolved_default_organization_id = "test-org"
     return DataIntelligencePipeline(
         intent_analyzer=intent_analyzer,
         spec_builder=spec_builder,
@@ -557,9 +609,7 @@ def create_example_pipeline(
             else None
         ),
         markdown_report_engine=resolved_markdown_report_engine,
-        default_organization_id=(
-            default_organization_id or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
-        ),
+        default_organization_id=resolved_default_organization_id,
     )
 
 
