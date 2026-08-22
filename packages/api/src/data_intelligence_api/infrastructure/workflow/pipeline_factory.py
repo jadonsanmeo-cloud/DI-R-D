@@ -414,7 +414,7 @@ class ExampleSpecConfirmation:
         return spec
 
 
-class QueryAIRemoteReasonEngine:
+class QueryAIEngine:
     """Reasoning engine backed by the QueryAI workflow HTTP API."""
 
     name = "reason"
@@ -539,7 +539,7 @@ def create_example_pipeline(
                 method_hub_enabled=resolved_method_hub_enabled,
             )
     if uses_default_engine:
-        reason_engine = QueryAIRemoteReasonEngine(
+        reason_engine = QueryAIEngine(
             endpoint=(
                 queryai_reason_endpoint
                 or os.environ.get("QUERYAI_REASON_ENDPOINT")
@@ -565,15 +565,14 @@ def create_example_pipeline(
                     model=model or settings.model,
                 )
             engine_selector = LLMEngineSelector(shared_llm_client)
-        registry = InMemoryEngineRegistry(
-            selector=engine_selector,
-            fallback_engine_name=general_engine.name,
-        )
+        registry = InMemoryEngineRegistry(selector=engine_selector)
         registry.register(general_engine)
         registry.register(reason_engine)
+        if markdown_report_engine is not None:
+            registry.register(cast(Engine, markdown_report_engine))
     else:
         assert engine is not None
-        registry = InMemoryEngineRegistry(fallback_engine=engine)
+        registry = InMemoryEngineRegistry()
         registry.register(engine)
     interface_registry = interface_registry or InMemoryInterfaceRegistry()
     intent_analyzer = (

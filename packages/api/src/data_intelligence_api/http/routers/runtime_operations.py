@@ -11,10 +11,12 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from data_intelligence_api.application.runtime_operations import (
-    execute_direct_report,
-    execute_spec,
+    execute_instant,
+    execute_thinking,
     prepare_spec,
     revise_spec,
+    select_instant_engine,
+    select_thinking_engine,
     stream_report_events,
 )
 from data_intelligence_api.application.workflow import (
@@ -22,15 +24,16 @@ from data_intelligence_api.application.workflow import (
     default_pipeline_factory,
 )
 from data_intelligence_api.http.schemas.runtime_operations import (
-    DirectExecuteRequest,
-    ExecuteRequest,
+    InstantExecutionRequest,
     OperationEnvelope,
     PrepareSpecRequest,
     ReviseSpecRequest,
     RuntimeErrorResponse,
+    ThinkingExecutionRequest,
 )
 from data_intelligence_api.http.streaming import chunk_text, encode_sse
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
+from data_intelligence_sdk.core.errors import EngineSelectionError
 
 logger = logging.getLogger(__name__)
 
@@ -137,53 +140,50 @@ def create_runtime_operations_router(
                 retryable=False,
             )
 
-    @router.post("/v1/executions:stream")
+    @router.post("/v1/execution:thinking")
     async def stream_runtime_execution(
-        request: ExecuteRequest,
+        request: ThinkingExecutionRequest,
         authorization: str | None = Header(default=None, alias="Authorization"),
         consumer_service: str | None = Header(default=None, alias="X-Consumer-Service"),
     ) -> StreamingResponse:
         _authorize_service(settings, authorization, consumer_service)
 
         async def event_stream() -> AsyncIterator[str]:
-            if (
-                request.runtime_input.runtime_options.engine == "report"
-                and pipeline_factory is default_pipeline_factory
-            ):
-                try:
-                    async for event in stream_report_events(
+            selection = None
+            try:
+                if pipeline_factory is default_pipeline_factory:
+                    selection = select_thinking_engine(
                         request,
-                        instruction=request.spec_markdown,
                         settings=settings,
-                    ):
-                        yield encode_sse(event["type"], event)
-                except Exception:
-                    logger.exception(
-                        "Runtime report stream failed operation_id=%s response_id=%s",
-                        request.operation_id,
-                        request.response_id,
+                        pipeline_factory=pipeline_factory,
                     )
                     yield encode_sse(
-                        "runtime.failed",
+                        "runtime.engine.selected",
                         {
-                            "type": "runtime.failed",
+                            "type": "runtime.engine.selected",
                             "operation_id": request.operation_id,
                             "response_id": request.response_id,
                             "payload": {
-                                "code": "execution_failed",
-                                "message": "The runtime execution failed.",
-                                "retryable": False,
+                                "engine_name": selection.engine.name,
+                                "selection_source": selection.selection_source,
                             },
                         },
                     )
-                return
-            try:
-                result = execute_spec(
+                    if selection.engine.name == "report":
+                        async for event in stream_report_events(
+                            request,
+                            instruction=request.spec_markdown,
+                            settings=settings,
+                        ):
+                            yield encode_sse(event["type"], event)
+                        return
+                result = execute_thinking(
                     request,
                     settings=settings,
                     pipeline_factory=pipeline_factory,
+                    selection=selection,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Runtime execution failed operation_id=%s response_id=%s",
                     request.operation_id,
@@ -196,8 +196,16 @@ def create_runtime_operations_router(
                         "operation_id": request.operation_id,
                         "response_id": request.response_id,
                         "payload": {
-                            "code": "execution_failed",
-                            "message": "The runtime execution failed.",
+                            "code": (
+                                "engine_selection_failed"
+                                if isinstance(exc, EngineSelectionError)
+                                else "execution_failed"
+                            ),
+                            "message": (
+                                "The runtime could not select an engine."
+                                if isinstance(exc, EngineSelectionError)
+                                else "The runtime execution failed."
+                            ),
                             "retryable": False,
                         },
                     },
@@ -234,26 +242,79 @@ def create_runtime_operations_router(
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-    @router.post("/v1/executions:run-stream")
+    @router.post("/v1/execution:instant")
     async def stream_direct_runtime_execution(
-        request: DirectExecuteRequest,
+        request: InstantExecutionRequest,
         authorization: str | None = Header(default=None, alias="Authorization"),
         consumer_service: str | None = Header(default=None, alias="X-Consumer-Service"),
     ) -> StreamingResponse:
         _authorize_service(settings, authorization, consumer_service)
 
         async def event_stream() -> AsyncIterator[str]:
+            selection = None
             if pipeline_factory is default_pipeline_factory:
                 try:
-                    async for event in stream_report_events(
+                    selection = select_instant_engine(
                         request,
-                        instruction=request.runtime_input.input,
                         settings=settings,
-                    ):
-                        yield encode_sse(event["type"], event)
-                except Exception:
+                        pipeline_factory=pipeline_factory,
+                    )
+                    yield encode_sse(
+                        "runtime.engine.selected",
+                        {
+                            "type": "runtime.engine.selected",
+                            "operation_id": request.operation_id,
+                            "response_id": request.response_id,
+                            "payload": {
+                                "engine_name": selection.engine.name,
+                                "selection_source": selection.selection_source,
+                            },
+                        },
+                    )
+                    if selection.engine.name != "report":
+                        result = execute_instant(
+                            request,
+                            settings=settings,
+                            pipeline_factory=pipeline_factory,
+                            selection=selection,
+                        )
+                        for delta in chunk_text(result.answer):
+                            yield encode_sse(
+                                "runtime.output_text.delta",
+                                {
+                                    "type": "runtime.output_text.delta",
+                                    "operation_id": request.operation_id,
+                                    "response_id": request.response_id,
+                                    "payload": {"delta": delta},
+                                },
+                            )
+                        yield encode_sse(
+                            "runtime.completed",
+                            {
+                                "type": "runtime.completed",
+                                "operation_id": request.operation_id,
+                                "response_id": request.response_id,
+                                "payload": {
+                                    "output_text": result.answer,
+                                    "evidence": (
+                                        asdict(result.evidence)
+                                        if result.evidence is not None
+                                        else None
+                                    ),
+                                    "metadata": dict(result.metadata),
+                                },
+                            },
+                        )
+                    else:
+                        async for event in stream_report_events(
+                            request,
+                            instruction=request.runtime_input.input,
+                            settings=settings,
+                        ):
+                            yield encode_sse(event["type"], event)
+                except Exception as exc:
                     logger.exception(
-                        "Runtime direct report stream failed operation_id=%s response_id=%s",
+                        "Runtime Instant execution failed operation_id=%s response_id=%s",
                         request.operation_id,
                         request.response_id,
                     )
@@ -264,20 +325,28 @@ def create_runtime_operations_router(
                             "operation_id": request.operation_id,
                             "response_id": request.response_id,
                             "payload": {
-                                "code": "execution_failed",
-                                "message": "The runtime execution failed.",
+                                "code": (
+                                    "engine_selection_failed"
+                                    if isinstance(exc, EngineSelectionError)
+                                    else "execution_failed"
+                                ),
+                                "message": (
+                                    "The runtime could not select an engine."
+                                    if isinstance(exc, EngineSelectionError)
+                                    else "The runtime execution failed."
+                                ),
                                 "retryable": False,
                             },
                         },
                     )
                 return
             try:
-                result = execute_direct_report(
+                result = execute_instant(
                     request,
                     settings=settings,
                     pipeline_factory=pipeline_factory,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Runtime direct execution failed operation_id=%s response_id=%s",
                     request.operation_id,
@@ -290,8 +359,16 @@ def create_runtime_operations_router(
                         "operation_id": request.operation_id,
                         "response_id": request.response_id,
                         "payload": {
-                            "code": "execution_failed",
-                            "message": "The runtime execution failed.",
+                            "code": (
+                                "engine_selection_failed"
+                                if isinstance(exc, EngineSelectionError)
+                                else "execution_failed"
+                            ),
+                            "message": (
+                                "The runtime could not select an engine."
+                                if isinstance(exc, EngineSelectionError)
+                                else "The runtime execution failed."
+                            ),
                             "retryable": False,
                         },
                     },

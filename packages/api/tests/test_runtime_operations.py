@@ -9,36 +9,27 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from data_intelligence_api.application.runtime_operations import (
-    execute_direct_report,
-    execute_spec,
+    execute_instant,
+    execute_thinking,
     prepare_spec,
     revise_spec,
     stream_report_events,
 )
 from data_intelligence_api.application.workflow import default_pipeline_factory
-from data_intelligence_api.application.workflow import (
-    build_workflow_invocation,
-    execute_direct_report_workflow,
-)
 from data_intelligence_api.app.factory import create_app
 from data_intelligence_api.domain.workflow import WorkflowRuntimeOptions
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
-from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
 from data_intelligence_api.http.schemas.runtime_operations import (
-    DirectExecuteRequest,
-    ExecuteRequest,
+    InstantExecutionRequest,
     PrepareSpecRequest,
     ReviseSpecRequest,
+    ThinkingExecutionRequest,
 )
 from data_intelligence_sdk.core.types import (
     FinalResponse,
     IntentAnalysis,
     PreparedMarkdownExecution,
-    SessionContext,
-    UserContext,
-    UserQuery,
 )
-from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 
 SPEC_MARKDOWN = """# Interactive Execution Spec
 ## User Request
@@ -56,7 +47,6 @@ A concise report.
 
 class FakePipeline:
     def __init__(self):
-        self.direct_calls = []
         self.memory_context = None
 
     def prepare_markdown(
@@ -80,9 +70,10 @@ class FakePipeline:
         self.executed_spec = spec_markdown
         return FinalResponse(answer=f"Executed for {prepared.query.text}")
 
-    def execute_report_direct(self, query, session_context, user_context):
-        self.direct_calls.append((query, session_context, user_context))
-        return FinalResponse(answer=f"Direct report for {query.text}")
+    def execute_confirmed_spec(self, prepared, spec, *, memory_context=None):
+        self.executed_spec = spec.objective
+        self.memory_context = memory_context
+        return FinalResponse(answer=f"Executed for {prepared.query.text}")
 
 
 def fake_pipeline_factory(*, logger, runtime_options=None):
@@ -141,6 +132,21 @@ def execution_context_payload() -> dict:
 
 
 class RuntimeOperationModelTests(unittest.TestCase):
+    def test_instant_execution_accepts_every_public_engine_choice(self):
+        for engine in ("auto", "general", "reason", "report"):
+            request = InstantExecutionRequest.model_validate(
+                {
+                    **operation_payload(),
+                    "operation_id": f"op_instant_{engine}",
+                    "runtime_input": {
+                        **runtime_input_payload(),
+                        "runtime_options": {"engine": engine},
+                    },
+                }
+            )
+
+            self.assertEqual(request.runtime_input.runtime_options.engine, engine)
+
     def test_runtime_input_accepts_normalized_report_history(self):
         payload = runtime_input_payload()
         payload.update(
@@ -151,7 +157,7 @@ class RuntimeOperationModelTests(unittest.TestCase):
             }
         )
 
-        request = DirectExecuteRequest.model_validate(
+        request = InstantExecutionRequest.model_validate(
             {
                 **operation_payload(),
                 "operation_id": "op_direct_history",
@@ -172,41 +178,13 @@ class RuntimeOperationModelTests(unittest.TestCase):
         payload["history"] = [{"role": "tool", "content": "secret tool output"}]
 
         with self.assertRaises(ValidationError):
-            DirectExecuteRequest.model_validate(
+            InstantExecutionRequest.model_validate(
                 {
                     **operation_payload(),
                     "operation_id": "op_direct_invalid_history",
                     "runtime_input": payload,
                 }
             )
-
-    def test_pipeline_direct_report_uses_raw_query_as_instruction(self):
-        captured: dict = {}
-
-        class RecordingReportEngine:
-            def run_markdown(self, **kwargs):
-                captured.update(kwargs)
-                return FinalResponse(answer="direct report")
-
-        pipeline = DataIntelligencePipeline(
-            intent_analyzer=object(),
-            spec_builder=object(),
-            spec_confirmation=object(),
-            engine_registry=object(),
-            markdown_report_engine=RecordingReportEngine(),
-            default_organization_id="org-1",
-        )
-        query = UserQuery(text="Create a report about NAPH", session_id="session-1")
-        result = pipeline.execute_report_direct(
-            query,
-            SessionContext(session_id="session-1"),
-            UserContext(user_id="user-1"),
-        )
-
-        self.assertEqual(result.answer, "direct report")
-        self.assertEqual(captured["spec_markdown"], query.text)
-        self.assertIs(captured["user_query"], query)
-        self.assertEqual(captured["organization_id"], "org-1")
 
     def test_default_pipeline_factory_configures_report_engine(self):
         captured: dict = {}
@@ -242,7 +220,7 @@ class RuntimeOperationModelTests(unittest.TestCase):
         engine = captured.get("markdown_report_engine")
         self.assertIsNotNone(engine)
         self.assertEqual(captured["default_organization_id"], "org-1")
-        self.assertFalse(captured.get("configure_default_sandbox", True))
+        self.assertTrue(captured.get("configure_default_sandbox", False))
         self.assertEqual(engine.workspace_id, "workspace-1")
         self.assertTrue(engine.discover_workspace_files)
         self.assertEqual(engine.operation_id, "op_1")
@@ -250,6 +228,7 @@ class RuntimeOperationModelTests(unittest.TestCase):
         self.assertEqual(engine.trace_id, "trace_1")
         self.assertEqual(engine.model, "deepseek-v4-pro")
         self.assertEqual(engine.language, "en")
+        self.assertEqual(engine.organization_id, "org-1")
         self.assertEqual(engine.history, report_history_payload())
         self.assertFalse(hasattr(engine, "service_token"))
 
@@ -349,8 +328,8 @@ class RuntimeOperationModelTests(unittest.TestCase):
                 }
             )
 
-    def test_direct_execute_accepts_report_without_prepared_spec(self):
-        request = DirectExecuteRequest.model_validate(
+    def test_instant_execution_does_not_need_a_prepared_spec(self):
+        request = InstantExecutionRequest.model_validate(
             {
                 **operation_payload(),
                 "operation_id": "op_direct_1",
@@ -367,19 +346,6 @@ class RuntimeOperationModelTests(unittest.TestCase):
         self.assertEqual(request.runtime_input.runtime_options.engine, "report")
         self.assertFalse(hasattr(request, "prepared_execution"))
         self.assertFalse(hasattr(request, "spec_markdown"))
-
-    def test_direct_execute_rejects_non_report_engine(self):
-        runtime_input = runtime_input_payload()
-        runtime_input["runtime_options"] = {"engine": "general"}
-
-        with self.assertRaises(ValidationError):
-            DirectExecuteRequest.model_validate(
-                {
-                    **operation_payload(),
-                    "operation_id": "op_direct_general",
-                    "runtime_input": runtime_input,
-                }
-            )
 
 
 class RuntimeDeploymentTests(unittest.TestCase):
@@ -469,7 +435,7 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "execution_context": execution_context_payload(),
             }
         )
-        request = DirectExecuteRequest.model_validate(
+        request = InstantExecutionRequest.model_validate(
             {
                 **operation_payload(),
                 "operation_id": "op_stream_report",
@@ -535,6 +501,38 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
             gen_report_api_url="http://gen-report",
             gen_report_public_url=None,
         )
+
+    def test_instant_execution_uses_raw_query_without_preparing_a_spec(self):
+        captured: dict = {}
+
+        class InstantPipeline:
+            def execute_confirmed_spec(self, prepared, spec, *, memory_context):
+                captured["prepared"] = prepared
+                captured["spec"] = spec
+                captured["memory_context"] = memory_context
+                return FinalResponse(answer="Instant result")
+
+        request = InstantExecutionRequest.model_validate(
+            {
+                **operation_payload(),
+                "operation_id": "op_instant_general",
+                "runtime_input": {
+                    **runtime_input_payload(),
+                    "runtime_options": {"engine": "general"},
+                },
+            }
+        )
+
+        result = execute_instant(
+            request,
+            settings=self.settings,
+            pipeline_factory=lambda **kwargs: InstantPipeline(),
+        )
+
+        self.assertEqual(result.answer, "Instant result")
+        self.assertEqual(captured["prepared"].query.text, "Create a report")
+        self.assertTrue(captured["spec"].confirmed)
+        self.assertEqual(captured["spec"].engine_hint, "general")
 
     def test_prepare_is_self_contained_and_preserves_operation_envelope(self):
         first = prepare_spec(
@@ -611,8 +609,8 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
             pipeline_factory=fake_pipeline_factory,
         )
 
-        result = execute_spec(
-            ExecuteRequest.model_validate(
+        result = execute_thinking(
+            ThinkingExecutionRequest.model_validate(
                 {
                     **operation_payload(),
                     "operation_id": "op_execute_1",
@@ -681,8 +679,8 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
         runtime_input["model"] = "deepseek-v4-pro"
         runtime_input["language"] = "en"
         runtime_input["history"] = report_history_payload()
-        execute_spec(
-            ExecuteRequest.model_validate(
+        execute_thinking(
+            ThinkingExecutionRequest.model_validate(
                 {
                     **operation_payload(),
                     "operation_id": "op_execute_context",
@@ -714,7 +712,7 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
 
     def test_execution_requires_confirmed_spec_payload(self):
         with self.assertRaises(ValidationError):
-            ExecuteRequest.model_validate(
+            ThinkingExecutionRequest.model_validate(
                 {
                     **operation_payload(),
                     "runtime_input": runtime_input_payload(),
@@ -722,110 +720,6 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
                     "spec_markdown": "",
                 }
             )
-
-    def test_direct_report_workflow_passes_raw_query_and_discovery_context(self):
-        captured: dict = {}
-        pipeline = FakePipeline()
-
-        def capture_pipeline(**kwargs):
-            captured.update(kwargs)
-            return pipeline
-
-        invocation = build_workflow_invocation(
-            WorkflowRequest.model_validate(
-                {
-                    "input": "Create a report",
-                    "session_id": "session_1",
-                    "organization_id": "org-1",
-                    "workspace_id": "workspace-1",
-                    "runtime_options": {"engine": "report"},
-                }
-            ),
-            Path("."),
-        )
-        result = execute_direct_report_workflow(
-            invocation,
-            logger=SimpleNamespace(log=lambda *args, **kwargs: None),
-            pipeline_factory=capture_pipeline,
-            execution_context=execution_context_payload(),
-            execution_files=[],
-            organization_id="org-1",
-            workspace_id="workspace-1",
-            discover_workspace_files=True,
-        )
-
-        self.assertEqual(result.answer, "Direct report for Create a report")
-        self.assertEqual(captured["runtime_options"].engine, "report")
-        self.assertEqual(captured["workspace_id"], "workspace-1")
-        self.assertEqual(captured["execution_files"], [])
-        self.assertTrue(captured["discover_workspace_files"])
-        self.assertEqual(pipeline.direct_calls[0][0].text, "Create a report")
-
-    def test_direct_report_workflow_disables_discovery_for_explicit_files(self):
-        captured: dict = {}
-
-        def capture_pipeline(**kwargs):
-            captured.update(kwargs)
-            return FakePipeline()
-
-        invocation = build_workflow_invocation(
-            WorkflowRequest.model_validate(
-                {
-                    "input": "Create a report",
-                    "session_id": "session_1",
-                    "runtime_options": {"engine": "report"},
-                }
-            ),
-            Path("."),
-        )
-        execute_direct_report_workflow(
-            invocation,
-            logger=SimpleNamespace(log=lambda *args, **kwargs: None),
-            pipeline_factory=capture_pipeline,
-            execution_files=[
-                {
-                    "artifact_id": "asset-1",
-                    "filename": "input.csv",
-                    "sandbox_path": "/workspace/runs/resp_1/inputs/input.csv",
-                    "size": 10,
-                }
-            ],
-            discover_workspace_files=False,
-        )
-
-        self.assertFalse(captured["discover_workspace_files"])
-
-    def test_direct_operation_uses_raw_runtime_input(self):
-        captured: dict = {}
-        pipeline = FakePipeline()
-
-        def capture_pipeline(**kwargs):
-            captured.update(kwargs)
-            return pipeline
-
-        request = DirectExecuteRequest.model_validate(
-            {
-                **operation_payload(),
-                "operation_id": "op_direct_adapter",
-                "runtime_input": {
-                    **runtime_input_payload(),
-                    "organization_id": "org-1",
-                    "workspace_id": "workspace-1",
-                    "execution_context": execution_context_payload(),
-                    "execution_files": [],
-                },
-            }
-        )
-        result = execute_direct_report(
-            request,
-            settings=self.settings,
-            pipeline_factory=capture_pipeline,
-        )
-
-        self.assertEqual(result.answer, "Direct report for Create a report")
-        self.assertEqual(pipeline.direct_calls[0][0].text, "Create a report")
-        self.assertEqual(captured["workspace_id"], "workspace-1")
-        self.assertTrue(captured["discover_workspace_files"])
 
 
 class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -887,7 +781,7 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("A detailed report.", revise_response.json()["spec_markdown"])
 
         execute_response = await self.client.post(
-            "/v1/executions:stream",
+            "/v1/execution:thinking",
             json={
                 **operation_payload(),
                 "operation_id": "op_execute_1",
@@ -904,9 +798,27 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("event: runtime.completed", execute_response.text)
 
+    async def test_instant_endpoint_executes_without_a_spec_payload(self):
+        response = await self.client.post(
+            "/v1/execution:instant",
+            json={
+                **operation_payload(),
+                "operation_id": "op_instant_1",
+                "runtime_input": {
+                    **runtime_input_payload(),
+                    "runtime_options": {"engine": "general"},
+                },
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: runtime.completed", response.text)
+        self.assertNotIn("response.requires_confirmation", response.text)
+
     async def test_direct_report_execution_streams_without_confirmation(self):
         response = await self.client.post(
-            "/v1/executions:run-stream",
+            "/v1/execution:instant",
             json={
                 **operation_payload(),
                 "operation_id": "op_direct_1",
@@ -922,7 +834,7 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("event: runtime.completed", response.text)
         self.assertNotIn("response.requires_confirmation", response.text)
 
-    async def test_default_report_endpoint_forwards_live_genreport_events(self):
+    async def test_auto_report_endpoint_forwards_live_genreport_events(self):
         settings = ApiSettings(
             data_corpus_root=Path("."),
             cors_origins=("http://localhost",),
@@ -969,18 +881,28 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "organization_id": "org-1",
                 "workspace_id": "workspace-1",
                 "execution_context": execution_context_payload(),
+                "runtime_options": {"engine": "auto"},
             }
         )
-        with patch(
-            "data_intelligence_api.http.routers.runtime_operations.stream_report_events",
-            side_effect=fake_report_stream,
+        with (
+            patch(
+                "data_intelligence_api.http.routers.runtime_operations.stream_report_events",
+                side_effect=fake_report_stream,
+            ),
+            patch(
+                "data_intelligence_api.http.routers.runtime_operations.select_instant_engine",
+                return_value=SimpleNamespace(
+                    engine=SimpleNamespace(name="report"),
+                    selection_source="auto",
+                ),
+            ) as select_engine,
         ):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://test",
             ) as client:
                 response = await client.post(
-                    "/v1/executions:run-stream",
+                    "/v1/execution:instant",
                     json={
                         **operation_payload(),
                         "operation_id": "op_live_report",
@@ -990,13 +912,111 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(response.status_code, 200)
+        select_engine.assert_called_once()
+        self.assertEqual(response.text.count("event: runtime.engine.selected"), 1)
+        self.assertEqual(response.text.count("event: runtime.output_text.delta"), 1)
+        self.assertEqual(response.text.count("event: runtime.usage"), 1)
+        self.assertEqual(response.text.count("event: runtime.completed"), 1)
+
+    async def test_thinking_report_endpoint_forwards_live_genreport_events_after_selection(
+        self,
+    ):
+        settings = ApiSettings(
+            data_corpus_root=Path("."),
+            cors_origins=("http://localhost",),
+            runtime_service_token="runtime-token",
+            gen_report_api_url="http://gen-report",
+        )
+        app = create_app(settings=settings)
+        prepared = prepare_spec(
+            PrepareSpecRequest.model_validate(
+                {
+                    **operation_payload(),
+                    "runtime_input": runtime_input_payload(),
+                }
+            ),
+            settings=settings,
+            pipeline_factory=fake_pipeline_factory,
+        )
+
+        async def fake_report_stream(request, *, instruction, settings):
+            del settings
+            yield {
+                "type": "runtime.output_text.delta",
+                "operation_id": request.operation_id,
+                "response_id": request.response_id,
+                "payload": {"delta": instruction},
+            }
+            yield {
+                "type": "runtime.usage",
+                "operation_id": request.operation_id,
+                "response_id": request.response_id,
+                "payload": {"total_tokens": 14},
+            }
+            yield {
+                "type": "runtime.completed",
+                "operation_id": request.operation_id,
+                "response_id": request.response_id,
+                "payload": {
+                    "output_text": instruction,
+                    "evidence": None,
+                    "metadata": {"engine_name": "report"},
+                },
+            }
+
+        runtime_input = runtime_input_payload()
+        runtime_input.update(
+            {
+                "organization_id": "org-1",
+                "workspace_id": "workspace-1",
+                "execution_context": execution_context_payload(),
+                "runtime_options": {"engine": "auto"},
+            }
+        )
+        with (
+            patch(
+                "data_intelligence_api.http.routers.runtime_operations.stream_report_events",
+                side_effect=fake_report_stream,
+            ),
+            patch(
+                "data_intelligence_api.http.routers.runtime_operations.select_thinking_engine",
+                return_value=SimpleNamespace(
+                    engine=SimpleNamespace(name="report"),
+                    selection_source="auto",
+                ),
+            ) as select_engine,
+            patch(
+                "data_intelligence_api.http.routers.runtime_operations.execute_thinking",
+                return_value=FinalResponse(answer="buffered result"),
+            ) as execute,
+        ):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/v1/execution:thinking",
+                    json={
+                        **operation_payload(),
+                        "operation_id": "op_thinking_live_report",
+                        "runtime_input": runtime_input,
+                        "prepared_execution": prepared.prepared_execution,
+                        "spec_markdown": prepared.spec_markdown,
+                    },
+                    headers=self.headers,
+                )
+
+        self.assertEqual(response.status_code, 200)
+        select_engine.assert_called_once()
+        execute.assert_not_called()
+        self.assertEqual(response.text.count("event: runtime.engine.selected"), 1)
         self.assertEqual(response.text.count("event: runtime.output_text.delta"), 1)
         self.assertEqual(response.text.count("event: runtime.usage"), 1)
         self.assertEqual(response.text.count("event: runtime.completed"), 1)
 
     async def test_direct_report_execution_requires_service_authentication(self):
         response = await self.client.post(
-            "/v1/executions:run-stream",
+            "/v1/execution:instant",
             json={
                 **operation_payload(),
                 "operation_id": "op_direct_unauthorized",
@@ -1008,8 +1028,8 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_direct_report_execution_emits_correlated_failure(self):
         class FailingPipeline(FakePipeline):
-            def execute_report_direct(self, query, session_context, user_context):
-                del query, session_context, user_context
+            def execute_confirmed_spec(self, prepared, spec, *, memory_context=None):
+                del prepared, spec, memory_context
                 raise RuntimeError("provider failed")
 
         app = create_app(
@@ -1025,7 +1045,7 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
             base_url="http://test",
         ) as client:
             response = await client.post(
-                "/v1/executions:run-stream",
+                "/v1/execution:instant",
                 json={
                     **operation_payload(),
                     "operation_id": "op_direct_failed",

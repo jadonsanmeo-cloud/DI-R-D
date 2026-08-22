@@ -4,8 +4,14 @@ from types import SimpleNamespace
 
 import httpx
 
+from data_intelligence_sdk.core.types import (
+    EngineInput,
+    ExecutionSpec,
+    FinalResponse,
+    UserQuery,
+)
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
-    GenReportMarkdownEngine,
+    GenReportEngine,
 )
 
 
@@ -33,7 +39,33 @@ def report_event(event_id: str, event_type: str, payload: dict) -> str:
     )
 
 
-class GenReportMarkdownEngineTests(unittest.TestCase):
+class GenReportEngineTests(unittest.TestCase):
+    def test_run_adapts_the_shared_engine_contract_to_markdown_execution(self):
+        captured: dict = {}
+
+        class AdapterEngine(GenReportEngine):
+            def run_markdown(self, **kwargs):
+                captured.update(kwargs)
+                return FinalResponse(answer="Report ready.", metadata={"usage": {}})
+
+        engine = AdapterEngine("http://gen-report", organization_id="org-1")
+        output = engine.run(
+            EngineInput(
+                query=UserQuery(text="Create a report"),
+                spec=ExecutionSpec(
+                    intent="report",
+                    objective="# Report spec",
+                    confirmed=True,
+                ),
+                runtime=SimpleNamespace(),  # type: ignore[arg-type]
+            )
+        )
+
+        self.assertEqual(output.engine_name, "report")
+        self.assertEqual(output.answer, "Report ready.")
+        self.assertEqual(captured["spec_markdown"], "# Report spec")
+        self.assertEqual(captured["organization_id"], "org-1")
+
     def test_run_markdown_posts_one_unauthenticated_stateless_request(self):
         requests: list[dict] = []
         paths: list[str] = []
@@ -112,7 +144,7 @@ class GenReportMarkdownEngineTests(unittest.TestCase):
                 "artifact_refs": ["artifact://report-0"],
             },
         ]
-        engine = GenReportMarkdownEngine(
+        engine = GenReportEngine(
             "http://gen-report",
             operation_id="op_1",
             response_id="resp_1",
@@ -182,7 +214,7 @@ class GenReportMarkdownEngineTests(unittest.TestCase):
                 headers={"content-type": "text/event-stream"},
             )
 
-        engine = GenReportMarkdownEngine(
+        engine = GenReportEngine(
             "http://gen-report",
             operation_id="op_1",
             response_id="resp_1",
@@ -236,7 +268,7 @@ class GenReportStreamingTests(unittest.IsolatedAsyncioTestCase):
                 headers={"content-type": "text/event-stream"},
             )
 
-        engine = GenReportMarkdownEngine(
+        engine = GenReportEngine(
             "http://gen-report",
             operation_id="op_1",
             response_id="resp_1",

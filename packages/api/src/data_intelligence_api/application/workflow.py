@@ -26,13 +26,13 @@ from data_intelligence_sdk.core.types import (
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.memory import MemoryContext
-from data_intelligence_sdk.registry.engine_selector import EngineDescriptor
+from data_intelligence_sdk.registry.engine_registry import SelectedEngine
 from data_intelligence_sdk.spec.markdown_builder import validate_spec_markdown
 from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
     create_example_pipeline,
 )
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
-    GenReportMarkdownEngine,
+    GenReportEngine,
 )
 
 from data_intelligence_api.application.runtime_capabilities import (
@@ -49,26 +49,10 @@ DEFAULT_QUERY = "Analyze this data corpus."
 PipelineFactory = Callable[..., DataIntelligencePipeline]
 
 ENGINE_ROUTE_MAP = {
-    "general": "general_purpose",
+    "general": "general",
     "reason": "reason",
     "report": "report",
 }
-
-
-class RequestedEngineSelector:
-    def __init__(self, engine_name: str) -> None:
-        self.engine_name = engine_name
-
-    def select(
-        self,
-        spec: ExecutionSpec,
-        engines: tuple[EngineDescriptor, ...],
-    ) -> str:
-        del spec
-        names = {engine.name for engine in engines}
-        if self.engine_name not in names:
-            raise ValueError(f"Requested engine is not registered: {self.engine_name}")
-        return self.engine_name
 
 
 class SourceValidationError(ValueError):
@@ -170,7 +154,6 @@ def default_pipeline_factory(
     resolved_options = runtime_options or WorkflowRuntimeOptions(
         method_hub_enabled=False
     )
-    requested_engine = ENGINE_ROUTE_MAP.get(resolved_options.engine or "")
     resolved_method_hub = resolve_method_hub(
         resolved_options,
         endpoint=method_hub_settings.endpoint,
@@ -178,24 +161,21 @@ def default_pipeline_factory(
     report_base_url = gen_report_base_url or os.getenv("GEN_REPORT_API_URL")
     if report_base_url is None:
         report_base_url = "http://host.docker.internal:8011"
-    markdown_report_engine = (
-        GenReportMarkdownEngine(
-            report_base_url,
-            operation_id=operation_id or "",
-            response_id=response_id or "",
-            trace_id=trace_id,
-            model=model,
-            language=language,
-            history=history,
-            public_base_url=gen_report_public_url or os.getenv("GEN_REPORT_PUBLIC_URL"),
-            execution_context=execution_context,
-            execution_files=execution_files,
-            workspace_id=workspace_id,
-            primary_source_id=primary_source_id,
-            discover_workspace_files=discover_workspace_files,
-        )
-        if resolved_options.engine == "report"
-        else None
+    markdown_report_engine = GenReportEngine(
+        report_base_url,
+        operation_id=operation_id or "",
+        response_id=response_id or "",
+        trace_id=trace_id,
+        model=model,
+        language=language,
+        organization_id=organization_id or "test-org",
+        history=history,
+        public_base_url=gen_report_public_url or os.getenv("GEN_REPORT_PUBLIC_URL"),
+        execution_context=execution_context,
+        execution_files=execution_files,
+        workspace_id=workspace_id,
+        primary_source_id=primary_source_id,
+        discover_workspace_files=discover_workspace_files,
     )
     return create_example_pipeline(
         logger=logger,
@@ -212,14 +192,9 @@ def default_pipeline_factory(
         default_organization_id=(
             organization_id or os.getenv("DEFAULT_ORGANIZATION_ID", "test-org")
         ),
-        configure_default_sandbox=resolved_options.engine != "report",
+        configure_default_sandbox=True,
         markdown_report_engine=markdown_report_engine,
         mcp_client=resolved_method_hub.client,
-        engine_selector=(
-            RequestedEngineSelector(requested_engine)
-            if requested_engine is not None
-            else None
-        ),
         mcp_tools=(
             resolved_method_hub.tools if resolved_options.method_hub_enabled else ()
         ),
@@ -355,6 +330,8 @@ def execute_prepared_markdown_workflow(
     history: list[dict[str, Any]] | None = None,
     gen_report_base_url: str | None = None,
     gen_report_public_url: str | None = None,
+    memory_context: MemoryContext | None = None,
+    selection: SelectedEngine | None = None,
 ) -> FinalResponse:
     pipeline = _create_pipeline(
         pipeline_factory,
@@ -375,27 +352,20 @@ def execute_prepared_markdown_workflow(
         gen_report_base_url=gen_report_base_url,
         gen_report_public_url=gen_report_public_url,
     )
-    if runtime_options.engine in {"general", "reason"}:
-        spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
-        prepared_execution = PreparedExecution(
-            query=prepared.query,
-            intent=spec.intent,
-            spec=spec,
-            session_context=prepared.session_context,
-            user_context=prepared.user_context,
-            intent_analysis=prepared.intent_analysis,
-            run_artifact=prepared.run_artifact,
-            run_artifact_id=prepared.run_artifact_id,
-        )
-        return pipeline.execute_confirmed_spec(prepared_execution, spec)
-    return pipeline.execute_confirmed_markdown(prepared, spec_markdown)
+    spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
+    prepared_execution = _confirmed_prepared_execution(prepared, spec)
+    execution_kwargs: dict[str, Any] = {"memory_context": memory_context}
+    if selection is not None:
+        execution_kwargs["selection"] = selection
+    return pipeline.execute_confirmed_spec(prepared_execution, spec, **execution_kwargs)
 
 
-def execute_direct_report_workflow(
-    invocation: WorkflowInvocation,
+def select_prepared_markdown_engine(
+    prepared: PreparedMarkdownExecution,
+    spec_markdown: str,
     logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
-    *,
     execution_context: dict[str, Any] | None = None,
     execution_files: list[dict[str, Any]] | None = None,
     organization_id: str | None = None,
@@ -410,13 +380,14 @@ def execute_direct_report_workflow(
     history: list[dict[str, Any]] | None = None,
     gen_report_base_url: str | None = None,
     gen_report_public_url: str | None = None,
-) -> FinalResponse:
-    if invocation.runtime_options.engine != "report":
-        raise ValueError("Direct execution currently supports the report engine only.")
+    memory_context: MemoryContext | None = None,
+) -> SelectedEngine:
+    """Resolve the engine for a confirmed Markdown specification."""
+
     pipeline = _create_pipeline(
         pipeline_factory,
         logger=logger,
-        runtime_options=invocation.runtime_options,
+        runtime_options=runtime_options,
         execution_context=execution_context,
         execution_files=execution_files,
         organization_id=organization_id,
@@ -432,11 +403,78 @@ def execute_direct_report_workflow(
         gen_report_base_url=gen_report_base_url,
         gen_report_public_url=gen_report_public_url,
     )
-    return pipeline.execute_report_direct(
-        invocation.query,
-        invocation.session_context,
-        invocation.user_context,
+    spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
+    return pipeline.select_engine(
+        _confirmed_prepared_execution(prepared, spec),
+        spec,
+        memory_context or MemoryContext(),
     )
+
+
+def execute_instant_workflow(
+    invocation: WorkflowInvocation,
+    logger: RuntimeLogger,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    selection: SelectedEngine | None = None,
+    **runtime_context: Any,
+) -> FinalResponse:
+    """Select and execute immediately without creating a user-visible spec."""
+
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=invocation.runtime_options,
+        **runtime_context,
+    )
+    spec = ExecutionSpec(
+        intent="unknown",
+        objective=invocation.query.text,
+        confirmed=True,
+        engine_hint=ENGINE_ROUTE_MAP.get(invocation.runtime_options.engine or ""),
+    )
+    prepared = PreparedExecution(
+        query=invocation.query,
+        intent=spec.intent,
+        spec=spec,
+        session_context=invocation.session_context,
+        user_context=invocation.user_context,
+    )
+    execution_kwargs: dict[str, Any] = {
+        "memory_context": invocation.memory_context,
+    }
+    if selection is not None:
+        execution_kwargs["selection"] = selection
+    return pipeline.execute_confirmed_spec(prepared, spec, **execution_kwargs)
+
+
+def select_instant_workflow(
+    invocation: WorkflowInvocation,
+    logger: RuntimeLogger,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    **runtime_context: Any,
+) -> SelectedEngine:
+    """Resolve the Instant engine without creating a user-visible spec."""
+
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=invocation.runtime_options,
+        **runtime_context,
+    )
+    spec = ExecutionSpec(
+        intent="unknown",
+        objective=invocation.query.text,
+        confirmed=True,
+        engine_hint=ENGINE_ROUTE_MAP.get(invocation.runtime_options.engine or ""),
+    )
+    prepared = PreparedExecution(
+        query=invocation.query,
+        intent=spec.intent,
+        spec=spec,
+        session_context=invocation.session_context,
+        user_context=invocation.user_context,
+    )
+    return pipeline.select_engine(prepared, spec, invocation.memory_context)
 
 
 def _execution_spec_from_markdown(
@@ -453,6 +491,22 @@ def _execution_spec_from_markdown(
         confirmed=True,
         engine_hint=ENGINE_ROUTE_MAP.get(runtime_options.engine or ""),
         preprocessing_steps=list(prepared.intent_analysis.preprocessing_steps),
+    )
+
+
+def _confirmed_prepared_execution(
+    prepared: PreparedMarkdownExecution,
+    spec: ExecutionSpec,
+) -> PreparedExecution:
+    return PreparedExecution(
+        query=prepared.query,
+        intent=spec.intent,
+        spec=spec,
+        session_context=prepared.session_context,
+        user_context=prepared.user_context,
+        intent_analysis=prepared.intent_analysis,
+        run_artifact=prepared.run_artifact,
+        run_artifact_id=prepared.run_artifact_id,
     )
 
 

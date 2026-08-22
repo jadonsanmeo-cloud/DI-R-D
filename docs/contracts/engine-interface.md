@@ -65,7 +65,7 @@ class EngineOutput:
 
 Use it like this:
 
-- `engine_name`: stable engine identifier, for example `general_purpose`.
+- `engine_name`: stable public engine identifier, for example `general`.
 - `answer`: user-facing answer when the engine can provide text directly.
 - `result`: structured or rendered result when text is not enough.
 - `evidence`: optional sources, observations, method calls, and artifacts.

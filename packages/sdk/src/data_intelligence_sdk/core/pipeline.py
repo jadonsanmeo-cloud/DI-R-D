@@ -27,6 +27,8 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.interfaces import InterfaceBuilder, InterfaceRegistry
 from data_intelligence_sdk.memory import MemoryContext
 from data_intelligence_sdk.registry.engine_registry import EngineRegistry
+from data_intelligence_sdk.registry.engine_selector import EngineSelectionRequest
+from data_intelligence_sdk.registry.engine_registry import SelectedEngine
 from data_intelligence_sdk.runtime.resource_manager import ResourceManager
 from data_intelligence_sdk.runtime.sandbox import SandboxSessionProvider
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
@@ -566,112 +568,13 @@ class DataIntelligencePipeline:
         )
         return response
 
-    def execute_report_direct(
-        self,
-        query: UserQuery,
-        session_context: SessionContext | None = None,
-        user_context: UserContext | None = None,
-    ) -> FinalResponse:
-        """Execute the Report engine from the raw query without a spec lifecycle."""
-
-        if self.markdown_report_engine is None:
-            raise RuntimeError("Markdown report engine is not configured.")
-        run_artifact = self._create_run_artifact(query)
-        self._log(
-            "pipeline.start",
-            {
-                "query": query.text,
-                "artifact_ref": (
-                    run_artifact.artifact_ref if run_artifact is not None else None
-                ),
-            },
-        )
-        self._record_artifact_event(
-            run_artifact,
-            phase="engine_execution",
-            event_type="report.direct_started",
-            payload={"query": query.text},
-        )
-        phase = "sandbox_provisioning"
-        try:
-            sandbox_context = (
-                self.sandbox_provider.open()
-                if self.sandbox_provider is not None
-                else nullcontext(None)
-            )
-            with sandbox_context as sandbox:
-                phase = "engine_execution"
-                _stage_uploaded_files(sandbox, session_context)
-                sandbox_executor = self.sandbox_executor
-                if sandbox_executor is None and sandbox is not None:
-                    sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
-
-                def record_runtime_event(**event: Any) -> dict[str, Any]:
-                    return self._record_runtime_event(run_artifact, **event)
-
-                runtime = EngineRuntimeContext(
-                    run_context=EngineRunContext(event_recorder=record_runtime_event),
-                    mcp_client=self.mcp_client,
-                    mcp_tools=self.mcp_tools,
-                    interface_registry=self.interface_registry,
-                    interface_builder=self.interface_builder,
-                    sandbox_executor=sandbox_executor,
-                    artifact_store=self.artifact_store,
-                    log_store=self.log_store,
-                    resource_manager=self.resource_manager,
-                    sandbox=sandbox,
-                    run_artifact=run_artifact,
-                )
-                result = self.markdown_report_engine.run_markdown(
-                    spec_markdown=query.text,
-                    organization_id=self.default_organization_id,
-                    runtime=runtime,
-                    user_context=user_context,
-                    user_query=query,
-                )
-        except Exception as exc:
-            if run_artifact is not None:
-                run_artifact.finalize(
-                    status="failed",
-                    engine_name="report",
-                    failure_phase=phase,
-                    error=_artifact_error(exc),
-                )
-            raise
-
-        response = (
-            result
-            if isinstance(result, FinalResponse)
-            else FinalResponse(answer=str(result), metadata={"engine_name": "report"})
-        )
-        artifact_ref = run_artifact.artifact_ref if run_artifact is not None else None
-        if artifact_ref is not None:
-            response.metadata["artifact_ref"] = artifact_ref
-        self._record_artifact_event(
-            run_artifact,
-            phase="response",
-            event_type="response.completed",
-            payload=asdict(response),
-        )
-        if run_artifact is not None:
-            run_artifact.finalize(
-                status="completed",
-                engine_name=str(response.metadata.get("engine_name") or "report"),
-                final_answer=response.answer,
-            )
-        self._log(
-            "pipeline.completed",
-            {
-                "answer_type": type(response.answer).__name__,
-                "engine_name": response.metadata.get("engine_name"),
-            },
-        )
-        return response
-
     def execute_confirmed_spec(
         self,
         prepared: PreparedExecution,
         confirmed_spec: ExecutionSpec,
+        *,
+        memory_context: MemoryContext | None = None,
+        selection: SelectedEngine | None = None,
     ) -> FinalResponse:
         """Execute a previously prepared and explicitly confirmed spec."""
 
@@ -696,23 +599,24 @@ class DataIntelligencePipeline:
         phase = "engine_selection"
         engine = None
         try:
-            engine = self.engine_registry.select(confirmed_spec)
-            self._record_artifact_event(
+            resolved_selection = selection or self.select_engine(
+                prepared,
+                confirmed_spec,
+                memory_context or MemoryContext(),
+            )
+            engine = resolved_selection.engine
+            selection_payload: dict[str, object] = {
+                "engine_name": engine.name,
+                "selection_source": resolved_selection.selection_source,
+            }
+            self._record_runtime_event(
                 run_artifact,
                 phase="engine_selection",
                 event_type="engine.selected",
-                payload={
-                    "engine_name": getattr(
-                        engine,
-                        "name",
-                        type(engine).__name__,
-                    )
-                },
+                status="completed",
+                payload=selection_payload,
             )
-            self._log(
-                "pipeline.engine_selected",
-                {"engine_name": getattr(engine, "name", type(engine).__name__)},
-            )
+            self._log("runtime.engine.selected", selection_payload)
             phase = "sandbox_provisioning"
             sandbox_context = (
                 self.sandbox_provider.open()
@@ -777,6 +681,9 @@ class DataIntelligencePipeline:
             output,
             include_evidence=self.include_evidence,
         )
+        response.metadata["engine_selection_source"] = (
+            resolved_selection.selection_source
+        )
 
         artifact_ref = run_artifact.artifact_ref if run_artifact is not None else None
         if artifact_ref is not None:
@@ -801,6 +708,23 @@ class DataIntelligencePipeline:
             },
         )
         return response
+
+    def select_engine(
+        self,
+        prepared: PreparedExecution,
+        confirmed_spec: ExecutionSpec,
+        memory_context: MemoryContext,
+    ) -> SelectedEngine:
+        """Select exactly one registered engine for a confirmed execution."""
+
+        return self.engine_registry.resolve(
+            EngineSelectionRequest(
+                query=prepared.query,
+                confirmed_spec=confirmed_spec,
+                memory_context=memory_context,
+            ),
+            explicit_engine=confirmed_spec.engine_hint,
+        )
 
     def _resolve_run_artifact(
         self,

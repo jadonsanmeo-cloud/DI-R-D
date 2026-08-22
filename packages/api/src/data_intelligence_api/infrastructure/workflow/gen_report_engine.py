@@ -8,7 +8,13 @@ from typing import Any
 
 import httpx
 
-from data_intelligence_sdk.core.types import FinalResponse
+from data_intelligence_sdk.core.types import (
+    EngineInput,
+    EngineOutput,
+    EngineTrace,
+    EvidenceBundle,
+    FinalResponse,
+)
 
 
 class GenReportProtocolError(RuntimeError):
@@ -77,7 +83,12 @@ def _absolute_url(value: object, public_base_url: str) -> object:
     return normalized
 
 
-class GenReportMarkdownEngine:
+class GenReportEngine:
+    """GenReport adapter implementing the shared SDK engine contract."""
+
+    name = "report"
+    description = "Structured report generation through the GenReport workflow."
+
     def __init__(
         self,
         base_url: str,
@@ -87,6 +98,7 @@ class GenReportMarkdownEngine:
         trace_id: str | None = None,
         model: str | None = None,
         language: str = "auto",
+        organization_id: str = "test-org",
         history: list[dict[str, Any]] | None = None,
         public_base_url: str | None = None,
         execution_context: dict[str, Any] | None = None,
@@ -104,6 +116,7 @@ class GenReportMarkdownEngine:
         self.trace_id = trace_id
         self.model = model
         self.language = language
+        self.organization_id = organization_id
         self.history = list(history or [])
         self.execution_context = execution_context
         self.execution_files = list(execution_files or [])
@@ -189,6 +202,25 @@ class GenReportMarkdownEngine:
                 "usage": usage or completion.get("usage"),
                 "process_events": process_events,
             },
+        )
+
+    def run(self, input: EngineInput) -> EngineOutput:
+        """Adapt the shared engine input to GenReport's Markdown boundary."""
+
+        response = self.run_markdown(
+            spec_markdown=input.spec.objective,
+            organization_id=self.organization_id,
+            runtime=input.runtime,
+            user_context=input.user_context,
+            user_query=input.query,
+        )
+        return EngineOutput(
+            engine_name=self.name,
+            answer=response.answer,
+            result=response.answer,
+            evidence=EvidenceBundle(),
+            trace=EngineTrace(),
+            metadata=dict(response.metadata),
         )
 
     async def stream_events(

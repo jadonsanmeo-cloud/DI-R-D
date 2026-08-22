@@ -12,28 +12,31 @@ from data_intelligence_api.application.workflow import (
     PipelineFactory,
     build_workflow_invocation,
     default_pipeline_factory,
-    execute_direct_report_workflow,
+    execute_instant_workflow,
     execute_prepared_markdown_workflow,
     prepare_workflow,
     prepared_markdown_from_payload,
     prepared_markdown_to_payload,
     revise_markdown_workflow,
+    select_instant_workflow,
+    select_prepared_markdown_engine,
 )
 from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
 from data_intelligence_api.http.schemas.runtime_operations import (
-    DirectExecuteRequest,
-    ExecuteRequest,
+    InstantExecutionRequest,
     PrepareSpecRequest,
     PrepareSpecResponse,
     ReviseSpecRequest,
     ReviseSpecResponse,
     RuntimeInput,
+    ThinkingExecutionRequest,
 )
 from data_intelligence_sdk.core.types import FinalResponse
+from data_intelligence_sdk.registry.engine_registry import SelectedEngine
 from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger, RuntimeLogger
 from data_intelligence_api.infrastructure.memory import parse_upstream_memory_context
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
-    GenReportMarkdownEngine,
+    GenReportEngine,
 )
 
 
@@ -59,11 +62,11 @@ def _logger_or_default(logger: RuntimeLogger | None) -> RuntimeLogger:
 
 
 async def stream_report_events(
-    request: ExecuteRequest | DirectExecuteRequest,
+    request: ThinkingExecutionRequest | InstantExecutionRequest,
     *,
     instruction: str,
     settings: object,
-    engine_factory: Callable[..., GenReportMarkdownEngine] = GenReportMarkdownEngine,
+    engine_factory: Callable[..., GenReportEngine] = GenReportEngine,
 ) -> AsyncIterator[dict[str, Any]]:
     runtime_input = request.runtime_input
     if runtime_input.execution_context is None:
@@ -236,12 +239,13 @@ def revise_spec(
     )
 
 
-def execute_spec(
-    request: ExecuteRequest,
+def execute_thinking(
+    request: ThinkingExecutionRequest,
     *,
     settings: object | None = None,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
+    selection: SelectedEngine | None = None,
 ) -> FinalResponse:
     prepared = prepared_markdown_from_payload(
         request.prepared_execution,
@@ -290,25 +294,128 @@ def execute_spec(
             if settings is not None
             else None
         ),
+        memory_context=parse_upstream_memory_context(request.memory_context),
+        selection=selection,
     )
 
 
-def execute_direct_report(
-    request: DirectExecuteRequest,
+def select_thinking_engine(
+    request: ThinkingExecutionRequest,
     *,
     settings: object,
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
+) -> SelectedEngine:
+    """Select the engine for a confirmed Thinking specification exactly once."""
+
+    prepared = prepared_markdown_from_payload(
+        request.prepared_execution,
+        request.spec_markdown,
+    )
+    runtime_options = resolve_runtime_options(
+        request.runtime_input.runtime_options,
+        default_enabled=False,
+    )
+    return select_prepared_markdown_engine(
+        prepared,
+        request.spec_markdown,
+        _logger_or_default(logger),
+        runtime_options,
+        pipeline_factory,
+        execution_context=(
+            request.runtime_input.execution_context.model_dump(mode="json")
+            if request.runtime_input.execution_context is not None
+            else None
+        ),
+        execution_files=[
+            item.model_dump(mode="json")
+            for item in request.runtime_input.execution_files
+        ],
+        primary_source_id=request.runtime_input.primary_source_id,
+        organization_id=request.runtime_input.organization_id,
+        workspace_id=request.runtime_input.workspace_id,
+        discover_workspace_files=(
+            request.runtime_input.runtime_options.method_hub_enabled is not False
+        ),
+        operation_id=request.operation_id,
+        response_id=request.response_id,
+        trace_id=request.trace_id,
+        model=request.runtime_input.model,
+        language=request.runtime_input.language,
+        history=[
+            item.model_dump(mode="json") for item in request.runtime_input.history
+        ],
+        gen_report_base_url=getattr(settings, "gen_report_api_url", None),
+        gen_report_public_url=getattr(settings, "gen_report_public_url", None),
+        memory_context=parse_upstream_memory_context(request.memory_context),
+    )
+
+
+def execute_instant(
+    request: InstantExecutionRequest,
+    *,
+    settings: object,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    logger: RuntimeLogger | None = None,
+    selection: SelectedEngine | None = None,
 ) -> FinalResponse:
+    """Run an Instant request without preparing a Markdown specification."""
+
     invocation = build_workflow_invocation(
         _to_workflow_request(request.runtime_input),
         settings.data_corpus_root,  # type: ignore[attr-defined]
         method_hub_default_enabled=settings.method_hub_default_enabled,  # type: ignore[attr-defined]
+        memory_context=parse_upstream_memory_context(request.memory_context),
     )
-    execution_files = [
-        item.model_dump(mode="json") for item in request.runtime_input.execution_files
-    ]
-    return execute_direct_report_workflow(
+    return execute_instant_workflow(
+        invocation,
+        _logger_or_default(logger),
+        pipeline_factory,
+        selection=selection,
+        execution_context=(
+            request.runtime_input.execution_context.model_dump(mode="json")
+            if request.runtime_input.execution_context is not None
+            else None
+        ),
+        execution_files=[
+            item.model_dump(mode="json")
+            for item in request.runtime_input.execution_files
+        ],
+        primary_source_id=request.runtime_input.primary_source_id,
+        organization_id=request.runtime_input.organization_id,
+        workspace_id=request.runtime_input.workspace_id,
+        discover_workspace_files=(
+            request.runtime_input.runtime_options.method_hub_enabled is not False
+        ),
+        operation_id=request.operation_id,
+        response_id=request.response_id,
+        trace_id=request.trace_id,
+        model=request.runtime_input.model,
+        language=request.runtime_input.language,
+        history=[
+            item.model_dump(mode="json") for item in request.runtime_input.history
+        ],
+        gen_report_base_url=getattr(settings, "gen_report_api_url", None),
+        gen_report_public_url=getattr(settings, "gen_report_public_url", None),
+    )
+
+
+def select_instant_engine(
+    request: InstantExecutionRequest,
+    *,
+    settings: object,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    logger: RuntimeLogger | None = None,
+) -> SelectedEngine:
+    """Select the engine used by an Instant operation exactly once."""
+
+    invocation = build_workflow_invocation(
+        _to_workflow_request(request.runtime_input),
+        settings.data_corpus_root,  # type: ignore[attr-defined]
+        method_hub_default_enabled=settings.method_hub_default_enabled,  # type: ignore[attr-defined]
+        memory_context=parse_upstream_memory_context(request.memory_context),
+    )
+    return select_instant_workflow(
         invocation,
         _logger_or_default(logger),
         pipeline_factory,
@@ -317,7 +424,10 @@ def execute_direct_report(
             if request.runtime_input.execution_context is not None
             else None
         ),
-        execution_files=execution_files,
+        execution_files=[
+            item.model_dump(mode="json")
+            for item in request.runtime_input.execution_files
+        ],
         primary_source_id=request.runtime_input.primary_source_id,
         organization_id=request.runtime_input.organization_id,
         workspace_id=request.runtime_input.workspace_id,
