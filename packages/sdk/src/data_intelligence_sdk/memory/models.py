@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import re
 from typing import Literal
 
-
 MemoryType = Literal[
     "profile",
     "preference",

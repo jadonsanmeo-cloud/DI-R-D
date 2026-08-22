@@ -19,7 +19,6 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 
-
 PipelineFactory = Callable[..., object]
 
 

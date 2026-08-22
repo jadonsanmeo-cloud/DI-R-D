@@ -10,7 +10,6 @@ from data_intelligence_sdk.memory import (
     MemoryType,
 )
 
-
 _MEMORY_TYPES = frozenset(
     {
         "profile",

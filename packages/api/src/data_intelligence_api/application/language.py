@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 _LANGUAGE_PREFIX = re.compile(
     r"^\s*(?P<language>en|zh|vi)(?:[-_][a-z]{2})?"
     r"(?:\s*(?:[:|,-])\s*|\s+)(?P<message>.+?)\s*$",

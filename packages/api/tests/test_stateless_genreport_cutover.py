@@ -12,7 +12,6 @@ from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
     GenReportMarkdownEngine,
 )
 
-
 WORKSPACE = Path(__file__).resolve().parents[4]
 GENREPORT_BACKEND = WORKSPACE / "GenReport" / "backend"
 if str(GENREPORT_BACKEND) not in sys.path:

@@ -13,7 +13,6 @@ from data_intelligence_sdk.memory import (
 )
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 
-
 MEMORY_TYPES: tuple[MemoryType, ...] = (
     "profile",
     "preference",

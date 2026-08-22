@@ -32,7 +32,6 @@ from data_intelligence_api.http.schemas.runtime_operations import (
 from data_intelligence_api.http.streaming import chunk_text, encode_sse
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
 
-
 logger = logging.getLogger(__name__)
 
 

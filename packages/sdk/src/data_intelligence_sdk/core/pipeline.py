@@ -953,9 +953,11 @@ def _normalize_preprocessing_steps(value: object) -> list[PreprocessingStep]:
                 description=_optional_string(raw_step.get("description")),
                 capability=_optional_string(raw_step.get("capability")),
                 required=bool(raw_step.get("required", False)),
-                depends_on=[str(item) for item in raw_step.get("depends_on", [])]
-                if isinstance(raw_step.get("depends_on"), list)
-                else [],
+                depends_on=(
+                    [str(item) for item in raw_step.get("depends_on", [])]
+                    if isinstance(raw_step.get("depends_on"), list)
+                    else []
+                ),
             )
         )
     return sorted(steps, key=lambda step: (step.order, step.name))

@@ -40,7 +40,6 @@ from data_intelligence_sdk.core.types import (
 )
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 
-
 SPEC_MARKDOWN = """# Interactive Execution Spec
 ## User Request
 Create a report.
