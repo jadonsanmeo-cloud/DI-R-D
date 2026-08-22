@@ -18,9 +18,9 @@ Tuy nhiên, API đề xuất không sao chép nguyên contract của TencentDB. 
 ```text
 User query
   -> Data Intelligence SDK load memory đúng một lần
-  -> Query Orchestrator
-       -> direct/general response
-       -> delegated intent/spec/report flow
+  -> Engine Selector (khi user chọn `auto`)
+       -> GeneralPurposeEngine | QueryAIEngine | GenReportEngine
+  -> engine được chọn tạo response
 ```
 
 Trong giai đoạn này, tài liệu chỉ tập trung vào read/recall. Capture turn, extraction và update canonical memory được coi là trách nhiệm của hệ thống khác và chưa nằm trong phạm vi tích hợp của SDK.
@@ -49,7 +49,7 @@ trace_id      optional
 
 ### 2.2 Memory được load một lần
 
-SDK không nên gọi memory service riêng tại từng bước orchestrator, intent và spec.
+SDK không nên gọi memory service riêng tại từng bước engine selection, intent và spec.
 
 Flow mong muốn:
 
@@ -58,7 +58,7 @@ Request bắt đầu
   -> gọi Context Assembly API một lần
   -> nhận structured Memory Context
   -> tạo immutable MemoryContext trong SDK
-  -> orchestrator lấy view phù hợp
+  -> Engine Selector lấy view phù hợp, chỉ như reference data
   -> spec builder lấy view phù hợp
 ```
 

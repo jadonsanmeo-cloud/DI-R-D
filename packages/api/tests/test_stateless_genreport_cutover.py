@@ -7,9 +7,11 @@ import unittest
 import httpx
 
 from data_intelligence_api.application.runtime_operations import stream_report_events
-from data_intelligence_api.http.schemas.runtime_operations import DirectExecuteRequest
+from data_intelligence_api.http.schemas.runtime_operations import (
+    InstantExecutionRequest,
+)
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
-    GenReportMarkdownEngine,
+    GenReportEngine,
 )
 
 WORKSPACE = Path(__file__).resolve().parents[4]
@@ -31,12 +33,12 @@ from app.contracts.report_execution import ReportCompletion, ReportUsage  # noqa
 from app.services.report_events import ReportEventFactory  # noqa: E402
 
 
-def direct_request(
+def instant_request(
     history: list[dict],
     *,
     primary_source: bool = False,
     method_hub_enabled: bool = False,
-) -> DirectExecuteRequest:
+) -> InstantExecutionRequest:
     execution_files: list[dict] = []
     primary_source_id: str | None = None
     if primary_source:
@@ -54,7 +56,7 @@ def direct_request(
                 "source_last_modified": "2026-08-20T09:00:00Z",
             }
         )
-    return DirectExecuteRequest.model_validate(
+    return InstantExecutionRequest.model_validate(
         {
             "schema_version": "1",
             "operation_id": "op_1",
@@ -170,7 +172,7 @@ class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
         events = [
             event
             async for event in stream_report_events(
-                direct_request([], primary_source=True, method_hub_enabled=True),
+                instant_request([], primary_source=True, method_hub_enabled=True),
                 instruction="Create a PDF report",
                 settings=SimpleNamespace(
                     gen_report_api_url="http://genreport.test",
@@ -202,7 +204,7 @@ class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
         )
 
         def engine_factory(base_url, **kwargs):
-            return GenReportMarkdownEngine(
+            return GenReportEngine(
                 base_url,
                 transport=httpx.ASGITransport(app=recording_app),
                 **kwargs,
@@ -217,7 +219,7 @@ class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
         first_events = [
             event
             async for event in stream_report_events(
-                direct_request([]),
+                instant_request([]),
                 instruction="Create the baseline report",
                 settings=settings,
                 engine_factory=engine_factory,
@@ -247,7 +249,7 @@ class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
         second_events = [
             event
             async for event in stream_report_events(
-                direct_request(history),
+                instant_request(history),
                 instruction="Create the follow-up report",
                 settings=settings,
                 engine_factory=engine_factory,

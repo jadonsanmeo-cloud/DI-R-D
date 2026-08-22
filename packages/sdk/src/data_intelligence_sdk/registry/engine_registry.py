@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Literal, Protocol
 
-from data_intelligence_sdk.core.errors import EngineNotFoundError
-from data_intelligence_sdk.core.types import ExecutionSpec
+from data_intelligence_sdk.core.errors import EngineSelectionError
 from data_intelligence_sdk.engines.base import Engine
 from data_intelligence_sdk.registry.engine_selector import (
     EngineDescriptor,
     EngineSelector,
+    EngineSelectionRequest,
 )
 
 
@@ -19,28 +20,29 @@ class EngineRegistry(Protocol):
     def register(self, engine: Engine) -> None:
         """Register an engine implementation."""
 
-    def select(self, spec: ExecutionSpec) -> Engine:
-        """Return the engine selected for the spec."""
+    def resolve(
+        self,
+        request: EngineSelectionRequest,
+        *,
+        explicit_engine: str | None = None,
+    ) -> "SelectedEngine":
+        """Return the explicit or automatically selected engine."""
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedEngine:
+    """A catalog engine together with the source of its selection."""
+
+    engine: Engine
+    selection_source: Literal["explicit", "auto"]
 
 
 class InMemoryEngineRegistry:
     """In-memory engine registry that delegates selection when configured."""
 
-    def __init__(
-        self,
-        fallback_engine: Engine | None = None,
-        *,
-        selector: EngineSelector | None = None,
-        fallback_engine_name: str | None = None,
-    ) -> None:
+    def __init__(self, *, selector: EngineSelector | None = None) -> None:
         self._engines: dict[str, Engine] = {}
-        self._fallback_engine = fallback_engine
         self._selector = selector
-        self._fallback_engine_name = fallback_engine_name
-
-    def set_fallback(self, engine: Engine | None) -> None:
-        self._fallback_engine = engine
-        self._fallback_engine_name = None
 
     def register(self, engine: Engine) -> None:
         self._engines[engine.name] = engine
@@ -56,30 +58,33 @@ class InMemoryEngineRegistry:
             for engine in self._engines.values()
         )
 
-    def select(self, spec: ExecutionSpec) -> Engine:
-        if self._selector is not None:
-            try:
-                selected_name = self._selector.select(spec, self.descriptors())
-            except Exception:
-                return self._fallback(spec)
-            selected = self._engines.get(selected_name)
-            return selected if selected is not None else self._fallback(spec)
+    def resolve(
+        self,
+        request: EngineSelectionRequest,
+        *,
+        explicit_engine: str | None = None,
+    ) -> SelectedEngine:
+        """Resolve explicit overrides or one valid LLM selection."""
 
-        return self._fallback(spec)
+        if explicit_engine is not None:
+            return SelectedEngine(
+                engine=self._registered_engine(explicit_engine),
+                selection_source="explicit",
+            )
 
-    def _fallback(self, spec: ExecutionSpec) -> Engine:
-        if self._fallback_engine_name is not None:
-            fallback = self._engines.get(self._fallback_engine_name)
-            if fallback is None:
-                raise EngineNotFoundError(
-                    "Configured fallback engine is not registered: "
-                    f"{self._fallback_engine_name}"
-                )
-            return fallback
-
-        if self._fallback_engine is not None:
-            return self._fallback_engine
-
-        raise EngineNotFoundError(
-            f"No engine registered for spec objective: {spec.objective}"
+        if self._selector is None:
+            raise EngineSelectionError("Automatic engine selection is not configured.")
+        try:
+            selected_name = self._selector.select(request, self.descriptors())
+        except Exception as exc:
+            raise EngineSelectionError("Automatic engine selection failed.") from exc
+        return SelectedEngine(
+            engine=self._registered_engine(selected_name),
+            selection_source="auto",
         )
+
+    def _registered_engine(self, name: str) -> Engine:
+        selected = self._engines.get(name)
+        if selected is None:
+            raise EngineSelectionError(f"Selected engine is not registered: {name!r}")
+        return selected

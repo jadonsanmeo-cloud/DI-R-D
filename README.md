@@ -649,17 +649,23 @@ uv run uvicorn data_intelligence_api.main:app --reload --host 127.0.0.1 --port 8
 curl http://127.0.0.1:8000/health
 ```
 
-AXIOM calls three authenticated operations:
+AXIOM calls four authenticated operations:
 
 - `POST /v1/specs:prepare` builds a Markdown spec and serializable prepared input.
 - `POST /v1/specs:revise` validates a replacement Markdown spec.
-- `POST /v1/executions:stream` executes the confirmed prepared input and emits
-  correlated runtime SSE events.
+- `POST /v1/execution:instant` selects (when the engine is `auto`) and runs an
+  engine without producing a user-visible specification.
+- `POST /v1/execution:thinking` selects and runs an engine after the caller has
+  confirmed or revised the prepared Markdown specification.
 
 Each payload carries `schema_version`, `operation_id`, `attempt`, `response_id`,
-and a complete `runtime_input`. The runtime never accepts or returns a
-confirmation token. The legacy `/api/v1/responses` paths are intentionally absent
-and return `404`.
+and a complete `runtime_input`. The public engines are `general`, `reason`, and
+`report`; `auto` is resolved once by the SDK's LLM-backed Engine Selector. The
+execution streams one `runtime.engine.selected` event before engine output.
+When the selected engine is `report`, both Instant and Thinking forward its live
+progress, output, usage, and completion SSE events. The runtime never accepts or
+returns a confirmation token. The legacy
+`/api/v1/responses` paths are intentionally absent and return `404`.
 
 ### Backend Docker Service
 

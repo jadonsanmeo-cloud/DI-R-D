@@ -44,16 +44,6 @@ class RuntimeInput(BaseModel):
     primary_source_id: str | None = Field(default=None, max_length=2048)
 
 
-class DirectRuntimeOptions(RuntimeOptionsRequest):
-    model_config = ConfigDict(extra="forbid")
-
-    engine: Literal["report"]
-
-
-class DirectRuntimeInput(RuntimeInput):
-    runtime_options: DirectRuntimeOptions
-
-
 class PrepareSpecRequest(OperationEnvelope):
     runtime_input: RuntimeInput
     memory_scope: dict[str, Any] | None = None
@@ -80,7 +70,7 @@ class ReviseSpecResponse(OperationEnvelope):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ExecuteRequest(OperationEnvelope):
+class ThinkingExecutionRequest(OperationEnvelope):
     runtime_input: RuntimeInput
     prepared_execution: dict[str, Any]
     spec_markdown: str = Field(min_length=1)
@@ -88,8 +78,10 @@ class ExecuteRequest(OperationEnvelope):
     memory_context: dict[str, Any] | None = None
 
 
-class DirectExecuteRequest(OperationEnvelope):
-    runtime_input: DirectRuntimeInput
+class InstantExecutionRequest(OperationEnvelope):
+    """Execute immediately without building or confirming a spec."""
+
+    runtime_input: RuntimeInput
     memory_scope: dict[str, Any] | None = None
     memory_context: dict[str, Any] | None = None
 

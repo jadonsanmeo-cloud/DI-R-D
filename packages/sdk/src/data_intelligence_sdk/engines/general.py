@@ -104,7 +104,7 @@ def _exception_leaves(exc: BaseException) -> list[BaseException]:
 class GeneralPurposeEngine:
     """Analyze staged data with one Deep Agent and one execution tool."""
 
-    name = "general_purpose"
+    name = "general"
     description = (
         "General-purpose agent for exploratory data analysis, code execution, "
         "question answering, and tasks that do not require a structured report."

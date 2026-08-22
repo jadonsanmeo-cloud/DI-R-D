@@ -9,6 +9,10 @@ class EngineNotFoundError(DataIntelligenceError):
     """Raised when the registry cannot find a suitable engine."""
 
 
+class EngineSelectionError(DataIntelligenceError):
+    """Raised when automatic routing cannot select a registered engine."""
+
+
 class SpecConfirmationRequired(DataIntelligenceError):
     """Raised when a spec requires user confirmation before execution."""
 
