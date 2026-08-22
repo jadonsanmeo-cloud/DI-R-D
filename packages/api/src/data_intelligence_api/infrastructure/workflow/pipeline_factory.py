@@ -559,14 +559,13 @@ def create_example_pipeline(
                 allow_method_generation=allow_method_generation,
             )
         if engine_selector is None:
-            if shared_llm_client is None:
-                settings = resolved_config_manager.openrouter_settings()
-                shared_llm_client = OpenAICompatibleLLMClient(
-                    base_url=settings.base_url,
-                    api_key=api_key or settings.api_key,
-                    model=model or settings.model,
-                )
-            engine_selector = LLMEngineSelector(shared_llm_client)
+            settings = resolved_config_manager.openrouter_settings()
+            routing_llm_client = OpenAICompatibleLLMClient(
+                base_url=settings.base_url,
+                api_key=api_key or settings.api_key,
+                model=settings.model,
+            )
+            engine_selector = LLMEngineSelector(routing_llm_client)
         registry = InMemoryEngineRegistry(selector=engine_selector)
         registry.register(general_engine)
         registry.register(reason_engine)
