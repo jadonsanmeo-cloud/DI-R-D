@@ -225,35 +225,47 @@ class _AxiomSandboxProvider:
         *,
         workspace_id: UUID,
         cleanup: bool,
-        capability_profiles: tuple[str, ...] = (),
+        ready_timeout_seconds: float,
+        pool_enabled: bool = True,
+        existing_sandbox: object | None = None,
     ) -> None:
         self.client = client
         self.workspace_id = workspace_id
         self.cleanup = cleanup
-        self.capability_profiles = capability_profiles
+        self.ready_timeout_seconds = ready_timeout_seconds
+        self.pool_enabled = pool_enabled
+        self.existing_sandbox = existing_sandbox
 
     @contextmanager
     def open(self):
         def create_sandbox():
-            return self.client.create_sandbox(
-                self.workspace_id,
-                capability_profiles=list(self.capability_profiles),
-            )
+            return self.client.create_sandbox(self.workspace_id)
 
-        sandbox = create_sandbox()
+        lease = None
+        sandbox = None
         session = None
         try:
-            sandbox.wait_until_ready()
+            if self.existing_sandbox is not None:
+                sandbox = self.existing_sandbox
+            elif self.pool_enabled:
+                lease = self.client.lease_pool_sandbox(self.workspace_id)
+                sandbox = lease.sandbox
+            else:
+                sandbox = create_sandbox()
+                sandbox.wait_until_ready(timeout=self.ready_timeout_seconds)
             session = EngineSandboxSession(
                 sandbox=sandbox,
                 environment=SandboxEnvironment.from_payload(
                     getattr(sandbox, "capabilities", None)
                 ),
-                sandbox_factory=create_sandbox,
+                sandbox_factory=None if self.pool_enabled else create_sandbox,
             )
             yield session
         finally:
-            if self.cleanup:
+            if lease is not None:
+                with suppress(Exception):
+                    self.client.retire_pool_lease(lease.lease_id, self.workspace_id)
+            elif self.cleanup and sandbox is not None and self.existing_sandbox is None:
                 with suppress(Exception):
                     (session.sandbox if session is not None else sandbox).delete()
 
@@ -261,18 +273,15 @@ class _AxiomSandboxProvider:
 def _configure_axiom_sandbox_provider(
     *,
     config_manager: ConfigManager,
-    method_hub_enabled: bool,
+    execution_context: dict[str, object] | None = None,
 ) -> SandboxSessionProvider:
     """Build the request-scoped AXIOM sandbox provider."""
 
     settings = config_manager.sandbox_settings()
     if not settings.enabled:
         raise RuntimeError("AXIOM sandbox configuration is disabled.")
-    if not settings.workspace_id:
-        raise ValueError("SANDBOX_WORKSPACE_ID is required when SANDBOX_ENABLED=true.")
-
     try:
-        from axiom_sandbox_client import SandboxClient
+        from axiom_sandbox_client import Sandbox, SandboxClient
     except ImportError as exc:
         raise RuntimeError(
             "AXIOM sandbox integration is enabled but axiom-sandbox-client is not "
@@ -280,6 +289,22 @@ def _configure_axiom_sandbox_provider(
         ) from exc
 
     sandbox_client = SandboxClient(settings.endpoint)
+    existing_sandbox = None
+    existing_workspace_id = None
+    if execution_context is not None:
+        sandbox_id = execution_context.get("sandbox_id")
+        execution_workspace_id = execution_context.get("execution_workspace_id")
+        if sandbox_id and execution_workspace_id:
+            existing_workspace_id = UUID(str(execution_workspace_id))
+            record = sandbox_client.get_sandbox(
+                UUID(str(sandbox_id)),
+                existing_workspace_id,
+            )
+            existing_sandbox = Sandbox(sandbox_client, record)
+
+    if not settings.workspace_id and existing_workspace_id is None:
+        raise ValueError("SANDBOX_WORKSPACE_ID is required when SANDBOX_ENABLED=true.")
+
     keep_sandbox = str(os.environ.get("AXIOM_SANDBOX_KEEP", "false")).lower() in {
         "1",
         "true",
@@ -288,22 +313,24 @@ def _configure_axiom_sandbox_provider(
     }
     return _AxiomSandboxProvider(
         sandbox_client,
-        workspace_id=UUID(settings.workspace_id),
+        workspace_id=existing_workspace_id or UUID(str(settings.workspace_id)),
         cleanup=not keep_sandbox,
-        capability_profiles=("method_hub",) if method_hub_enabled else (),
+        ready_timeout_seconds=settings.ready_timeout_seconds,
+        pool_enabled=settings.pool_enabled,
+        existing_sandbox=existing_sandbox,
     )
 
 
 def _configure_request_sandbox_provider(
     *,
     config_manager: ConfigManager,
-    method_hub_enabled: bool,
+    execution_context: dict[str, object] | None = None,
 ) -> SandboxSessionProvider:
     """Build the AXIOM-managed request sandbox used by QA workflows."""
 
     return _configure_axiom_sandbox_provider(
         config_manager=config_manager,
-        method_hub_enabled=method_hub_enabled,
+        execution_context=execution_context,
     )
 
 
@@ -482,6 +509,7 @@ def create_example_pipeline(
     api_key: str | None = None,
     config_path: str | Path | None = None,
     config_manager: ConfigManager | None = None,
+    execution_context: dict[str, object] | None = None,
     spec_builder: object | None = None,
     spec_llm_client: LLMClient | None = None,
     engine_selector: EngineSelector | None = None,
@@ -503,9 +531,6 @@ def create_example_pipeline(
     markdown_report_engine: _MarkdownReportEngine | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
-    resolved_method_hub_enabled = (
-        mcp_client is not None if method_hub_enabled is None else method_hub_enabled
-    )
     resolved_mcp_tools = mcp_tools
     if method_hub_enabled is None and mcp_client is not None and not resolved_mcp_tools:
         resolved_mcp_tools = tuple(mcp_client.list_tools())
@@ -536,7 +561,7 @@ def create_example_pipeline(
         if sandbox_settings.enabled:
             sandbox_provider = _configure_request_sandbox_provider(
                 config_manager=resolved_config_manager,
-                method_hub_enabled=resolved_method_hub_enabled,
+                execution_context=execution_context,
             )
     if uses_default_engine:
         reason_engine = QueryAIEngine(
@@ -557,14 +582,13 @@ def create_example_pipeline(
                 allow_method_generation=allow_method_generation,
             )
         if engine_selector is None:
-            if shared_llm_client is None:
-                settings = resolved_config_manager.openrouter_settings()
-                shared_llm_client = OpenAICompatibleLLMClient(
-                    base_url=settings.base_url,
-                    api_key=api_key or settings.api_key,
-                    model=model or settings.model,
-                )
-            engine_selector = LLMEngineSelector(shared_llm_client)
+            settings = resolved_config_manager.openrouter_settings()
+            routing_llm_client = OpenAICompatibleLLMClient(
+                base_url=settings.base_url,
+                api_key=api_key or settings.api_key,
+                model=settings.model,
+            )
+            engine_selector = LLMEngineSelector(routing_llm_client)
         registry = InMemoryEngineRegistry(selector=engine_selector)
         registry.register(general_engine)
         registry.register(reason_engine)
