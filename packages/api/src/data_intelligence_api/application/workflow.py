@@ -185,6 +185,7 @@ def default_pipeline_factory(
     return create_example_pipeline(
         logger=logger,
         config_manager=config_manager,
+        execution_context=execution_context,
         use_llm_spec_builder=True,
         intent_service_base_url=(
             os.getenv("INTENT_SERVICE_BASE_URL")

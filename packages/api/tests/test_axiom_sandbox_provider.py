@@ -13,9 +13,13 @@ class _Sandbox:
     def __init__(self) -> None:
         self.capabilities = None
         self.ready_timeout: float | None = None
+        self.delete_calls = 0
 
     def wait_until_ready(self, *, timeout: float) -> None:
         self.ready_timeout = timeout
+
+    def delete(self) -> None:
+        self.delete_calls += 1
 
 
 class _SandboxClient:
@@ -52,6 +56,25 @@ class _PoolClient:
 
 
 class AxiomSandboxProviderTests(unittest.TestCase):
+    def test_reuses_existing_sandbox_without_leasing_or_deleting(self) -> None:
+        sandbox = _Sandbox()
+        client = _PoolClient(sandbox)
+        provider = _AxiomSandboxProvider(
+            client,
+            workspace_id=uuid4(),
+            cleanup=True,
+            ready_timeout_seconds=90,
+            pool_enabled=True,
+            existing_sandbox=sandbox,
+        )
+
+        with provider.open() as session:
+            self.assertIs(session.sandbox, sandbox)
+
+        self.assertEqual(client.lease_calls, 0)
+        self.assertEqual(client.create_calls, 0)
+        self.assertEqual(sandbox.delete_calls, 0)
+
     def test_uses_configured_ready_timeout(self) -> None:
         sandbox = _Sandbox()
         provider = _AxiomSandboxProvider(
