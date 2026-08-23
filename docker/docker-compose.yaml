@@ -7,7 +7,6 @@ services:
       dockerfile: Data-Intelligence-SDK/docker/Dockerfile
     image: data-intelligence-api:local
     init: true
-    restart: unless-stopped
     ports:
       - "${API_PORT:-8036}:8000"
     env_file:
