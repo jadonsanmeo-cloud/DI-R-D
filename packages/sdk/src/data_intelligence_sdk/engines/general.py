@@ -194,12 +194,10 @@ class GeneralPurposeEngine:
         )
         result = agent.invoke(
             {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": spec.objective,
-                    }
-                ]
+                "messages": self._conversation_messages(
+                    input.query,
+                    current_text=spec.objective,
+                )
             }
         )
         answer = _last_message_text(result).strip()
@@ -247,6 +245,37 @@ class GeneralPurposeEngine:
                 "objective": spec.objective,
             },
         )
+
+    def _conversation_messages(
+        self,
+        query: UserQuery,
+        *,
+        current_text: str | None = None,
+    ) -> list[dict[str, str]]:
+        """Build chronological prior-turn messages plus the current request."""
+
+        raw_history = query.metadata.get("history", [])
+        messages: list[dict[str, str]] = []
+        if isinstance(raw_history, list):
+            for item in raw_history[-10:]:
+                if not isinstance(item, dict):
+                    continue
+                role = item.get("role")
+                content = item.get("content")
+                if role not in {"user", "assistant"}:
+                    continue
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                messages.append({"role": role, "content": content.strip()})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    current_text if current_text is not None else query.text
+                ).strip(),
+            }
+        )
+        return messages
 
     def _synthesize_execution_answer(
         self,

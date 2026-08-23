@@ -17,6 +17,7 @@ from data_intelligence_api.application.runtime_operations import (
     stream_report_events,
 )
 from data_intelligence_api.application.workflow import (
+    build_workflow_invocation,
     default_pipeline_factory,
     execute_instant_workflow,
     select_instant_workflow,
@@ -37,6 +38,7 @@ from data_intelligence_api.http.schemas.runtime_operations import (
     ReviseSpecRequest,
     ThinkingExecutionRequest,
 )
+from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
 from data_intelligence_sdk.core.types import (
     FinalResponse,
     IntentAnalysis,
@@ -148,6 +150,32 @@ def execution_context_payload() -> dict:
 
 
 class RuntimeOperationModelTests(unittest.TestCase):
+    def test_workflow_invocation_keeps_conversation_history_on_query(self):
+        invocation = build_workflow_invocation(
+            WorkflowRequest(
+                input="Who am I?",
+                session_id="session_1",
+                history=[
+                    {
+                        "role": "user",
+                        "content": "My name is Anh.",
+                    }
+                ],
+            ),
+            Path("/tmp/data-corpus"),
+        )
+
+        self.assertEqual(
+            invocation.query.metadata["history"],
+            [
+                {
+                    "role": "user",
+                    "content": "My name is Anh.",
+                    "artifact_refs": [],
+                }
+            ],
+        )
+
     def test_instant_execution_accepts_every_public_engine_choice(self):
         for engine in ("auto", "general", "reason", "report"):
             request = InstantExecutionRequest.model_validate(
