@@ -175,7 +175,9 @@ class EngineSandboxSession:
                 status_text = str(getattr(status, "value", status) or "").lower()
                 if status_text == "running":
                     return True
-            except Exception:  # noqa: BLE001, S110 - retry by replacing an unavailable sandbox
+            except (
+                Exception
+            ):  # noqa: BLE001, S110 - retry by replacing an unavailable sandbox
                 pass
             previous = self.sandbox
             replacement = self.sandbox_factory()
@@ -185,7 +187,9 @@ class EngineSandboxSession:
             self.sandbox = replacement
             try:
                 previous.delete()
-            except Exception:  # noqa: BLE001, S110 - cleanup cannot prevent reprovisioning
+            except (
+                Exception
+            ):  # noqa: BLE001, S110 - cleanup cannot prevent reprovisioning
                 pass
             return True
 

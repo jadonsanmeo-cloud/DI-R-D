@@ -108,9 +108,7 @@ def build_workflow_invocation(
             session_id=request.session_id,
             metadata={
                 "uploaded_files": public_uploaded_files,
-                "history": [
-                    item.model_dump(mode="json") for item in request.history
-                ],
+                "history": [item.model_dump(mode="json") for item in request.history],
                 **request_scope,
             },
         ),
