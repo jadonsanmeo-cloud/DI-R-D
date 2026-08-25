@@ -1070,9 +1070,17 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
             gen_report_api_url="http://gen-report",
         )
         app = create_app(settings=settings)
+        captured_user_authorizations: list[str | None] = []
 
-        async def fake_report_stream(request, *, instruction, settings):
+        async def fake_report_stream(
+            request,
+            *,
+            instruction,
+            settings,
+            user_authorization=None,
+        ):
             del settings
+            captured_user_authorizations.append(user_authorization)
             yield {
                 "type": "runtime.output_text.delta",
                 "operation_id": request.operation_id,
@@ -1136,11 +1144,15 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
                         "operation_id": "op_live_report",
                         "runtime_input": runtime_input,
                     },
-                    headers=self.headers,
+                    headers={
+                        **self.headers,
+                        "X-Axiom-User-Authorization": "Bearer user-token",
+                    },
                 )
 
         self.assertEqual(response.status_code, 200)
         select_engine.assert_called_once()
+        self.assertEqual(captured_user_authorizations, ["Bearer user-token"])
         self.assertEqual(response.text.count("event: runtime.engine.selected"), 1)
         self.assertEqual(response.text.count("event: runtime.output_text.delta"), 1)
         self.assertEqual(response.text.count("event: runtime.usage"), 1)
@@ -1156,6 +1168,7 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
             gen_report_api_url="http://gen-report",
         )
         app = create_app(settings=settings)
+        captured_user_authorizations: list[str | None] = []
         prepared = prepare_spec(
             PrepareSpecRequest.model_validate(
                 {
@@ -1167,8 +1180,15 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
             pipeline_factory=fake_pipeline_factory,
         )
 
-        async def fake_report_stream(request, *, instruction, settings):
+        async def fake_report_stream(
+            request,
+            *,
+            instruction,
+            settings,
+            user_authorization=None,
+        ):
             del settings
+            captured_user_authorizations.append(user_authorization)
             yield {
                 "type": "runtime.output_text.delta",
                 "operation_id": request.operation_id,
@@ -1231,12 +1251,16 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
                         "prepared_execution": prepared.prepared_execution,
                         "spec_markdown": prepared.spec_markdown,
                     },
-                    headers=self.headers,
+                    headers={
+                        **self.headers,
+                        "X-Axiom-User-Authorization": "Bearer user-token",
+                    },
                 )
 
         self.assertEqual(response.status_code, 200)
         select_engine.assert_called_once()
         execute.assert_not_called()
+        self.assertEqual(captured_user_authorizations, ["Bearer user-token"])
         self.assertEqual(response.text.count("event: runtime.engine.selected"), 1)
         self.assertEqual(response.text.count("event: runtime.output_text.delta"), 1)
         self.assertEqual(response.text.count("event: runtime.usage"), 1)

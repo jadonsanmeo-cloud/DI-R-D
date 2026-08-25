@@ -96,6 +96,7 @@ class GenReportEngine:
         operation_id: str = "",
         response_id: str = "",
         trace_id: str | None = None,
+        user_authorization: str | None = None,
         model: str | None = None,
         language: str = "auto",
         organization_id: str = "test-org",
@@ -114,6 +115,7 @@ class GenReportEngine:
         self.operation_id = operation_id
         self.response_id = response_id
         self.trace_id = trace_id
+        self.user_authorization = user_authorization
         self.model = model
         self.language = language
         self.organization_id = organization_id
@@ -148,7 +150,7 @@ class GenReportEngine:
                 "POST",
                 f"{self.base_url}/api/v1/reports:stream",
                 json=payload,
-                headers={"Accept": "text/event-stream"},
+                headers=self._request_headers(),
             ) as response:
                 response.raise_for_status()
                 events = _sse_payloads(response.iter_text())
@@ -241,7 +243,7 @@ class GenReportEngine:
                 "POST",
                 f"{self.base_url}/api/v1/reports:stream",
                 json=payload,
-                headers={"Accept": "text/event-stream"},
+                headers=self._request_headers(),
             ) as response:
                 response.raise_for_status()
                 async for event in _iter_sse_payloads(response.aiter_text()):
@@ -297,6 +299,14 @@ class GenReportEngine:
             "workspace_id": self.workspace_id,
             "capabilities": list(context.get("capabilities") or []),
         }
+
+    def _request_headers(self) -> dict[str, str]:
+        headers = {"Accept": "text/event-stream"}
+        if self.user_authorization:
+            headers["X-Axiom-User-Authorization"] = self.user_authorization
+        if self.trace_id:
+            headers["X-Trace-ID"] = self.trace_id
+        return headers
 
     def _validate_event_correlation(self, event: dict[str, Any]) -> None:
         expected_run_id = (

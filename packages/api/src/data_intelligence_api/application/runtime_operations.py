@@ -66,6 +66,7 @@ async def stream_report_events(
     *,
     instruction: str,
     settings: object,
+    user_authorization: str | None = None,
     engine_factory: Callable[..., GenReportEngine] = GenReportEngine,
 ) -> AsyncIterator[dict[str, Any]]:
     runtime_input = request.runtime_input
@@ -79,6 +80,7 @@ async def stream_report_events(
         operation_id=request.operation_id,
         response_id=request.response_id,
         trace_id=request.trace_id,
+        user_authorization=user_authorization,
         model=runtime_input.model,
         language=runtime_input.language,
         history=[item.model_dump(mode="json") for item in runtime_input.history],

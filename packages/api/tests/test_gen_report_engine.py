@@ -249,6 +249,54 @@ class GenReportEngineTests(unittest.TestCase):
 
 
 class GenReportStreamingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_events_forwards_user_context_without_replacing_service_auth(self):
+        captured_headers: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_headers.update(request.headers)
+            return httpx.Response(
+                200,
+                text=report_event(
+                    "evt_1",
+                    "report.completed",
+                    {"output_text": "done", "artifacts": []},
+                ),
+                headers={"content-type": "text/event-stream"},
+            )
+
+        engine = GenReportEngine(
+            "http://gen-report",
+            operation_id="op_1",
+            response_id="resp_1",
+            trace_id="trace-1",
+            user_authorization="Bearer user-token",
+            execution_context={
+                "run_id": "resp_1",
+                "gateway_url": "http://axiom/runtime/resp_1",
+                "capability_token": "runtime-token",
+                "expires_at": 1234567890,
+                "capabilities": [],
+            },
+            workspace_id="workspace-1",
+            transport=httpx.MockTransport(handler),
+        )
+
+        events = [
+            event
+            async for event in engine.stream_events(
+                instruction="Create a report",
+                organization_id="org-1",
+            )
+        ]
+
+        self.assertEqual(events[0]["type"], "report.completed")
+        self.assertEqual(
+            captured_headers["x-axiom-user-authorization"],
+            "Bearer user-token",
+        )
+        self.assertEqual(captured_headers["x-trace-id"], "trace-1")
+        self.assertNotIn("authorization", captured_headers)
+
     async def test_stream_events_yields_normalized_events_in_order(self):
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(

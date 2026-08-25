@@ -145,6 +145,10 @@ def create_runtime_operations_router(
         request: ThinkingExecutionRequest,
         authorization: str | None = Header(default=None, alias="Authorization"),
         consumer_service: str | None = Header(default=None, alias="X-Consumer-Service"),
+        user_authorization: str | None = Header(
+            default=None,
+            alias="X-Axiom-User-Authorization",
+        ),
     ) -> StreamingResponse:
         _authorize_service(settings, authorization, consumer_service)
 
@@ -174,6 +178,7 @@ def create_runtime_operations_router(
                             request,
                             instruction=request.spec_markdown,
                             settings=settings,
+                            user_authorization=user_authorization,
                         ):
                             yield encode_sse(event["type"], event)
                         return
@@ -247,6 +252,10 @@ def create_runtime_operations_router(
         request: InstantExecutionRequest,
         authorization: str | None = Header(default=None, alias="Authorization"),
         consumer_service: str | None = Header(default=None, alias="X-Consumer-Service"),
+        user_authorization: str | None = Header(
+            default=None,
+            alias="X-Axiom-User-Authorization",
+        ),
     ) -> StreamingResponse:
         _authorize_service(settings, authorization, consumer_service)
 
@@ -310,6 +319,7 @@ def create_runtime_operations_router(
                             request,
                             instruction=request.runtime_input.input,
                             settings=settings,
+                            user_authorization=user_authorization,
                         ):
                             yield encode_sse(event["type"], event)
                 except Exception as exc:
