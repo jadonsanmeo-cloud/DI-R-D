@@ -36,6 +36,7 @@ from data_intelligence_api.http.schemas.runtime_operations import (
     InstantExecutionRequest,
     PrepareSpecRequest,
     ReviseSpecRequest,
+    RuntimeInput,
     ThinkingExecutionRequest,
 )
 from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
@@ -150,6 +151,9 @@ def execution_context_payload() -> dict:
 
 
 class RuntimeOperationModelTests(unittest.TestCase):
+    def test_runtime_input_exposes_explicit_workspace_discovery_policy(self):
+        self.assertIn("discover_workspace_files", RuntimeInput.model_fields)
+
     def test_workflow_invocation_keeps_conversation_history_on_query(self):
         invocation = build_workflow_invocation(
             WorkflowRequest(
