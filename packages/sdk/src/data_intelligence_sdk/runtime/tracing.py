@@ -43,9 +43,7 @@ def traceable_llm_call(
         name=name,
         run_type="llm",
         project_name=(
-            os.getenv("LANGSMITH_PROJECT")
-            or os.getenv("LANGCHAIN_PROJECT")
-            or None
+            os.getenv("LANGSMITH_PROJECT") or os.getenv("LANGCHAIN_PROJECT") or None
         ),
         reduce_fn=reduce_fn,
     )(function)

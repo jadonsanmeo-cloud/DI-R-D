@@ -26,20 +26,52 @@ class InternalMemoryClient:
         self._http = http_client or httpx
 
     def session_search(self, query: str, *, limit: int) -> list[dict[str, Any]]:
-        return self._get("/internal-memory/session-search", {"query": query, "limit": limit})
+        return self._get(
+            "/internal-memory/session-search", {"query": query, "limit": limit}
+        )
 
     def session_scroll(
-        self, conversation_id: str, around_message_id: str, *, direction: str, limit: int
+        self,
+        conversation_id: str,
+        around_message_id: str,
+        *,
+        direction: str,
+        limit: int,
     ) -> list[dict[str, Any]]:
-        return self._get("/internal-memory/session-scroll", {"conversation_id": conversation_id, "around_message_id": around_message_id, "direction": direction, "limit": limit})
+        return self._get(
+            "/internal-memory/session-scroll",
+            {
+                "conversation_id": conversation_id,
+                "around_message_id": around_message_id,
+                "direction": direction,
+                "limit": limit,
+            },
+        )
 
-    def write(self, *, target: str, operation: str, content: str | None, match: str | None) -> dict[str, Any]:
-        response = self._http.post(f"{self._base_url}/internal-memory/write", json={"target": target, "operation": operation, "content": content, "match": match}, headers=self._headers, timeout=10.0)
+    def write(
+        self, *, target: str, operation: str, content: str | None, match: str | None
+    ) -> dict[str, Any]:
+        response = self._http.post(
+            f"{self._base_url}/internal-memory/write",
+            json={
+                "target": target,
+                "operation": operation,
+                "content": content,
+                "match": match,
+            },
+            headers=self._headers,
+            timeout=10.0,
+        )
         response.raise_for_status()
         return dict(response.json())
 
     def _get(self, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-        response = self._http.get(f"{self._base_url}{path}", params=params, headers=self._headers, timeout=10.0)
+        response = self._http.get(
+            f"{self._base_url}{path}",
+            params=params,
+            headers=self._headers,
+            timeout=10.0,
+        )
         response.raise_for_status()
         return list(response.json())
 

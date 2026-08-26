@@ -12,12 +12,13 @@ def create_internal_memory_tools(runtime: EngineRuntimeContext) -> list[BaseTool
 
     if runtime.internal_memory_client is None:
         return []
+    client = runtime.internal_memory_client
 
     @tool
     def session_search(query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Search the current user's prior conversations for relevant messages."""
 
-        return runtime.internal_memory_client.session_search(query, limit=limit)
+        return client.session_search(query, limit=limit)
 
     @tool
     def session_scroll(
@@ -28,7 +29,7 @@ def create_internal_memory_tools(runtime: EngineRuntimeContext) -> list[BaseTool
     ) -> list[dict[str, Any]]:
         """Read prior-conversation messages before or after a known message."""
 
-        return runtime.internal_memory_client.session_scroll(
+        return client.session_scroll(
             conversation_id,
             around_message_id,
             direction=direction,
@@ -44,7 +45,7 @@ def create_internal_memory_tools(runtime: EngineRuntimeContext) -> list[BaseTool
     ) -> dict[str, Any]:
         """Persist one durable fact; replace and remove use an exact `match`."""
 
-        return runtime.internal_memory_client.write(
+        return client.write(
             target=target,
             operation=operation,
             content=content,

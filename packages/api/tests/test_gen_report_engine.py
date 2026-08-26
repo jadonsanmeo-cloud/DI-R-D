@@ -249,7 +249,9 @@ class GenReportEngineTests(unittest.TestCase):
 
 
 class GenReportStreamingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_stream_events_forwards_user_context_without_replacing_service_auth(self):
+    async def test_stream_events_forwards_user_context_without_replacing_service_auth(
+        self,
+    ):
         captured_headers: dict[str, str] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:

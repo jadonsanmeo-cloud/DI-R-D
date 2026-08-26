@@ -26,7 +26,9 @@ def test_internal_memory_tools_delegate_session_search_to_request_client() -> No
 
 def test_internal_memory_tools_delegate_scroll_and_write() -> None:
     class Client:
-        def session_scroll(self, conversation_id, around_message_id, *, direction, limit):
+        def session_scroll(
+            self, conversation_id, around_message_id, *, direction, limit
+        ):
             return [{"message_id": "msg-3", "direction": direction}]
 
         def write(self, *, target, operation, content, match):
@@ -37,7 +39,12 @@ def test_internal_memory_tools_delegate_scroll_and_write() -> None:
     )
 
     scroll = next(tool for tool in tools if tool.name == "session_scroll").invoke(
-        {"conversation_id": "conversation-a", "around_message_id": "msg-2", "direction": "forward", "limit": 5}
+        {
+            "conversation_id": "conversation-a",
+            "around_message_id": "msg-2",
+            "direction": "forward",
+            "limit": 5,
+        }
     )
     write = next(tool for tool in tools if tool.name == "memory").invoke(
         {"target": "memory", "operation": "add", "content": "Uses rtk"}

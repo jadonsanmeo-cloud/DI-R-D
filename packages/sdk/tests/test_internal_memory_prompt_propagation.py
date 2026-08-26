@@ -31,7 +31,9 @@ def test_internal_memory_context_normalizes_untrusted_runtime_payload() -> None:
 
 
 def test_internal_memory_context_ignores_non_mapping_payload() -> None:
-    assert InternalMemoryContext.from_payload("not a mapping") == InternalMemoryContext()
+    assert (
+        InternalMemoryContext.from_payload("not a mapping") == InternalMemoryContext()
+    )
 
 
 def test_pipeline_builds_request_scoped_memory_client_when_enabled() -> None:
