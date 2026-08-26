@@ -40,6 +40,14 @@ class IntentServiceSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class InternalMemoryServiceSettings:
+    """Connection settings for the Intelligence internal-memory API."""
+
+    endpoint: str = "http://intelligence-service:8006/api/v1"
+    enabled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxSettings:
     """Connection settings for an external sandbox execution service."""
 
@@ -195,6 +203,29 @@ class ConfigManager:
         }
         return IntentServiceSettings(
             endpoint=str(endpoint or "http://localhost:8005"),
+            enabled=enabled,
+        )
+
+    def internal_memory_service_settings(self) -> InternalMemoryServiceSettings:
+        """Resolve optional request-scoped internal-memory integration."""
+
+        payload = self.load().get("internal_memory_service", {})
+        endpoint = _resolve_env_value(payload.get("endpoint"))
+        raw_enabled = payload.get(
+            "enabled", os.environ.get("INTERNAL_MEMORY_ENABLED", "false")
+        )
+        enabled = str(_resolve_env_value(raw_enabled)).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        return InternalMemoryServiceSettings(
+            endpoint=str(
+                endpoint
+                or os.environ.get("INTERNAL_MEMORY_SERVICE_URL")
+                or "http://intelligence-service:8006/api/v1"
+            ),
             enabled=enabled,
         )
 
