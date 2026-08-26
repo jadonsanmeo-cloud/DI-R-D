@@ -17,6 +17,7 @@ from data_intelligence_sdk.memory import MemoryContext
 class WorkflowRuntimeOptions:
     method_hub_enabled: bool
     engine: str | None = None
+    workflow: str = "report"
 
 
 @dataclass(frozen=True, slots=True)

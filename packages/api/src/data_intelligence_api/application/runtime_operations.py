@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
+
+from data_intelligence_sdk.core.types import FinalResponse
+from data_intelligence_sdk.registry.engine_registry import SelectedEngine
+from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger, RuntimeLogger
 
 from data_intelligence_api.application.runtime_capabilities import (
     resolve_runtime_options,
@@ -31,9 +35,6 @@ from data_intelligence_api.http.schemas.runtime_operations import (
     RuntimeInput,
     ThinkingExecutionRequest,
 )
-from data_intelligence_sdk.core.types import FinalResponse
-from data_intelligence_sdk.registry.engine_registry import SelectedEngine
-from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger, RuntimeLogger
 from data_intelligence_api.infrastructure.memory import parse_upstream_memory_context
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
     GenReportEngine,
@@ -81,7 +82,7 @@ async def stream_report_events(
     if not runtime_input.organization_id or not runtime_input.workspace_id:
         raise ValueError("report execution requires organization and workspace scope")
     engine = engine_factory(
-        getattr(settings, "gen_report_api_url"),
+        settings.gen_report_api_url,
         public_base_url=getattr(settings, "gen_report_public_url", None),
         operation_id=request.operation_id,
         response_id=request.response_id,
@@ -97,6 +98,7 @@ async def stream_report_events(
         workspace_id=runtime_input.workspace_id,
         primary_source_id=runtime_input.primary_source_id,
         discover_workspace_files=_discover_workspace_files(runtime_input),
+        workflow=runtime_input.runtime_options.workflow,
     )
     latest_usage: dict[str, Any] | None = None
     async for event in engine.stream_events(

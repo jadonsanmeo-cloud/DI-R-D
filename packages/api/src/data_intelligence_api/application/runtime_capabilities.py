@@ -34,7 +34,11 @@ def resolve_runtime_options(
         else requested.method_hub_enabled
     )
     engine = None if requested.engine in (None, "auto") else requested.engine
-    return WorkflowRuntimeOptions(method_hub_enabled=enabled, engine=engine)
+    return WorkflowRuntimeOptions(
+        method_hub_enabled=enabled,
+        engine=engine,
+        workflow=requested.workflow,
+    )
 
 
 def resolve_method_hub(

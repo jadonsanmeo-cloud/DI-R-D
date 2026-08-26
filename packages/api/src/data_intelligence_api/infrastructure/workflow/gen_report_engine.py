@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 import httpx
-
 from data_intelligence_sdk.core.types import (
     EngineInput,
     EngineOutput,
@@ -107,6 +106,7 @@ class GenReportEngine:
         workspace_id: str | None = None,
         primary_source_id: str | None = None,
         discover_workspace_files: bool = False,
+        workflow: Literal["report", "dashboard_extraction"] = "report",
         timeout_seconds: float = 900.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -125,6 +125,7 @@ class GenReportEngine:
         self.workspace_id = workspace_id
         self.primary_source_id = primary_source_id
         self.discover_workspace_files = discover_workspace_files
+        self.workflow = workflow
         self.timeout_seconds = timeout_seconds
         self.transport = transport
 
@@ -145,15 +146,14 @@ class GenReportEngine:
         with httpx.Client(
             timeout=self.timeout_seconds,
             transport=self.transport,
-        ) as client:
-            with client.stream(
-                "POST",
-                f"{self.base_url}/api/v1/reports:stream",
-                json=payload,
-                headers=self._request_headers(),
-            ) as response:
-                response.raise_for_status()
-                events = _sse_payloads(response.iter_text())
+        ) as client, client.stream(
+            "POST",
+            self._endpoint(),
+            json=payload,
+            headers=self._request_headers(),
+        ) as response:
+            response.raise_for_status()
+            events = _sse_payloads(response.iter_text())
 
         output_chunks: list[str] = []
         process_events: list[dict[str, Any]] = []
@@ -238,17 +238,16 @@ class GenReportEngine:
         async with httpx.AsyncClient(
             timeout=self.timeout_seconds,
             transport=self.transport,
-        ) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/api/v1/reports:stream",
-                json=payload,
-                headers=self._request_headers(),
-            ) as response:
-                response.raise_for_status()
-                async for event in _iter_sse_payloads(response.aiter_text()):
-                    self._validate_event_correlation(event)
-                    yield event
+        ) as client, client.stream(
+            "POST",
+            self._endpoint(),
+            json=payload,
+            headers=self._request_headers(),
+        ) as response:
+            response.raise_for_status()
+            async for event in _iter_sse_payloads(response.aiter_text()):
+                self._validate_event_correlation(event)
+                yield event
 
     def request_payload(
         self,
@@ -281,6 +280,13 @@ class GenReportEngine:
             "runtime_gateway": self._runtime_gateway(),
             "discover_workspace_files": self.discover_workspace_files,
         }
+
+    def _endpoint(self) -> str:
+        endpoint_by_workflow = {
+            "report": "/api/v1/reports:stream",
+            "dashboard_extraction": "/api/v1/reports:extract-dashboard",
+        }
+        return f"{self.base_url}{endpoint_by_workflow[self.workflow]}"
 
     def _runtime_gateway(self) -> dict[str, Any]:
         context = self.execution_context

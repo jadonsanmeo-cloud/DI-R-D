@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import inspect
 import os
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from data_intelligence_sdk.core.pipeline import DataIntelligencePipeline
 from data_intelligence_sdk.core.types import (
@@ -23,17 +24,11 @@ from data_intelligence_sdk.core.types import (
     UserContext,
     UserQuery,
 )
-from data_intelligence_sdk.runtime.config import ConfigManager
-from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.memory import MemoryContext
 from data_intelligence_sdk.registry.engine_registry import SelectedEngine
+from data_intelligence_sdk.runtime.config import ConfigManager
+from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.spec.markdown_builder import validate_spec_markdown
-from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
-    create_example_pipeline,
-)
-from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
-    GenReportEngine,
-)
 
 from data_intelligence_api.application.runtime_capabilities import (
     resolve_method_hub,
@@ -44,6 +39,12 @@ from data_intelligence_api.domain.workflow import (
     WorkflowRuntimeOptions,
 )
 from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
+from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
+    GenReportEngine,
+)
+from data_intelligence_api.infrastructure.workflow.pipeline_factory import (
+    create_example_pipeline,
+)
 
 DEFAULT_QUERY = "Analyze this data corpus."
 PipelineFactory = Callable[..., DataIntelligencePipeline]
@@ -140,6 +141,7 @@ def default_pipeline_factory(
     workspace_id: str | None = None,
     primary_source_id: str | None = None,
     discover_workspace_files: bool = False,
+    workflow: str = "report",
     operation_id: str | None = None,
     response_id: str | None = None,
     trace_id: str | None = None,
@@ -156,6 +158,8 @@ def default_pipeline_factory(
     resolved_options = runtime_options or WorkflowRuntimeOptions(
         method_hub_enabled=False
     )
+    if workflow == "report" and resolved_options.workflow != "report":
+        workflow = resolved_options.workflow
     resolved_method_hub = (
         resolve_method_hub(
             resolved_options,
@@ -182,6 +186,7 @@ def default_pipeline_factory(
         workspace_id=workspace_id,
         primary_source_id=primary_source_id,
         discover_workspace_files=discover_workspace_files,
+        workflow=workflow,
     )
     return create_example_pipeline(
         logger=logger,
@@ -261,6 +266,8 @@ def _create_pipeline(
         kwargs["primary_source_id"] = primary_source_id
     if supports_kwargs or "discover_workspace_files" in parameter_names:
         kwargs["discover_workspace_files"] = discover_workspace_files
+    if supports_kwargs or "workflow" in parameter_names:
+        kwargs["workflow"] = runtime_options.workflow
     if supports_kwargs or "include_method_hub" in parameter_names:
         kwargs["include_method_hub"] = include_method_hub
     optional_values = {

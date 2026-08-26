@@ -722,6 +722,7 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["response_id"], "resp_1")
         self.assertEqual(captured["history"], report_history_payload())
         self.assertEqual(captured["instruction"], "Create a report")
+        self.assertEqual(captured["workflow"], "report")
         self.assertNotIn("service_token", captured)
 
 
