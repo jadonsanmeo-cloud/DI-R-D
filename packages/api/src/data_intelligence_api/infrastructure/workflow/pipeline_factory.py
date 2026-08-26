@@ -33,7 +33,10 @@ from data_intelligence_sdk.registry.engine_selector import (
     EngineSelector,
     LLMEngineSelector,
 )
-from data_intelligence_sdk.runtime.config import ConfigManager
+from data_intelligence_sdk.runtime.config import (
+    ConfigManager,
+    InternalMemoryServiceSettings,
+)
 from data_intelligence_sdk.runtime.sandbox import (
     EngineSandboxSession,
     SandboxEnvironment,
@@ -531,6 +534,16 @@ def create_example_pipeline(
     markdown_report_engine: _MarkdownReportEngine | None = None,
 ) -> DataIntelligencePipeline:
     resolved_config_manager = config_manager or ConfigManager(config_path)
+    get_internal_memory_settings = getattr(
+        resolved_config_manager,
+        "internal_memory_service_settings",
+        None,
+    )
+    internal_memory_settings = (
+        get_internal_memory_settings()
+        if callable(get_internal_memory_settings)
+        else InternalMemoryServiceSettings()
+    )
     resolved_mcp_tools = mcp_tools
     if method_hub_enabled is None and mcp_client is not None and not resolved_mcp_tools:
         resolved_mcp_tools = tuple(mcp_client.list_tools())
@@ -633,6 +646,11 @@ def create_example_pipeline(
         ),
         markdown_report_engine=resolved_markdown_report_engine,
         default_organization_id=resolved_default_organization_id,
+        internal_memory_service_url=(
+            internal_memory_settings.endpoint
+            if internal_memory_settings.enabled
+            else None
+        ),
     )
 
 
