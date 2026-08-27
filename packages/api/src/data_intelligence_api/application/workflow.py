@@ -37,6 +37,7 @@ from data_intelligence_api.application.runtime_capabilities import (
 from data_intelligence_api.domain.workflow import (
     WorkflowInvocation,
     WorkflowRuntimeOptions,
+    WorkflowName,
 )
 from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
@@ -141,7 +142,7 @@ def default_pipeline_factory(
     workspace_id: str | None = None,
     primary_source_id: str | None = None,
     discover_workspace_files: bool = False,
-    workflow: str = "report",
+    workflow: WorkflowName = "report",
     operation_id: str | None = None,
     response_id: str | None = None,
     trace_id: str | None = None,

@@ -82,7 +82,7 @@ async def stream_report_events(
     if not runtime_input.organization_id or not runtime_input.workspace_id:
         raise ValueError("report execution requires organization and workspace scope")
     engine = engine_factory(
-        settings.gen_report_api_url,
+        getattr(settings, "gen_report_api_url"),
         public_base_url=getattr(settings, "gen_report_public_url", None),
         operation_id=request.operation_id,
         response_id=request.response_id,
