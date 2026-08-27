@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
+
+from data_intelligence_sdk.core.types import FinalResponse
+from data_intelligence_sdk.registry.engine_registry import SelectedEngine
+from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger, RuntimeLogger
 
 from data_intelligence_api.application.runtime_capabilities import (
     resolve_runtime_options,
@@ -31,9 +35,6 @@ from data_intelligence_api.http.schemas.runtime_operations import (
     RuntimeInput,
     ThinkingExecutionRequest,
 )
-from data_intelligence_sdk.core.types import FinalResponse
-from data_intelligence_sdk.registry.engine_registry import SelectedEngine
-from data_intelligence_sdk.runtime.logger import ConsoleRuntimeLogger, RuntimeLogger
 from data_intelligence_api.infrastructure.memory import parse_upstream_memory_context
 from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
     GenReportEngine,
@@ -61,6 +62,12 @@ def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
 
 def _logger_or_default(logger: RuntimeLogger | None) -> RuntimeLogger:
     return logger or ConsoleRuntimeLogger()
+
+
+def _discover_workspace_files(runtime_input: RuntimeInput) -> bool:
+    if runtime_input.discover_workspace_files is not None:
+        return runtime_input.discover_workspace_files
+    return runtime_input.runtime_options.method_hub_enabled is not False
 
 
 async def stream_report_events(
@@ -92,9 +99,8 @@ async def stream_report_events(
         ],
         workspace_id=runtime_input.workspace_id,
         primary_source_id=runtime_input.primary_source_id,
-        discover_workspace_files=(
-            runtime_input.runtime_options.method_hub_enabled is not False
-        ),
+        discover_workspace_files=_discover_workspace_files(runtime_input),
+        workflow=runtime_input.runtime_options.workflow,
     )
     latest_usage: dict[str, Any] | None = None
     async for event in engine.stream_events(
@@ -277,9 +283,7 @@ def execute_thinking(
         primary_source_id=request.runtime_input.primary_source_id,
         organization_id=request.runtime_input.organization_id,
         workspace_id=request.runtime_input.workspace_id,
-        discover_workspace_files=(
-            request.runtime_input.runtime_options.method_hub_enabled is not False
-        ),
+        discover_workspace_files=_discover_workspace_files(request.runtime_input),
         operation_id=request.operation_id,
         response_id=request.response_id,
         trace_id=request.trace_id,
@@ -338,9 +342,7 @@ def select_thinking_engine(
         primary_source_id=request.runtime_input.primary_source_id,
         organization_id=request.runtime_input.organization_id,
         workspace_id=request.runtime_input.workspace_id,
-        discover_workspace_files=(
-            request.runtime_input.runtime_options.method_hub_enabled is not False
-        ),
+        discover_workspace_files=_discover_workspace_files(request.runtime_input),
         operation_id=request.operation_id,
         response_id=request.response_id,
         trace_id=request.trace_id,
@@ -388,9 +390,7 @@ def execute_instant(
         primary_source_id=request.runtime_input.primary_source_id,
         organization_id=request.runtime_input.organization_id,
         workspace_id=request.runtime_input.workspace_id,
-        discover_workspace_files=(
-            request.runtime_input.runtime_options.method_hub_enabled is not False
-        ),
+        discover_workspace_files=_discover_workspace_files(request.runtime_input),
         operation_id=request.operation_id,
         response_id=request.response_id,
         trace_id=request.trace_id,
@@ -435,9 +435,7 @@ def select_instant_engine(
         primary_source_id=request.runtime_input.primary_source_id,
         organization_id=request.runtime_input.organization_id,
         workspace_id=request.runtime_input.workspace_id,
-        discover_workspace_files=(
-            request.runtime_input.runtime_options.method_hub_enabled is not False
-        ),
+        discover_workspace_files=_discover_workspace_files(request.runtime_input),
         operation_id=request.operation_id,
         response_id=request.response_id,
         trace_id=request.trace_id,

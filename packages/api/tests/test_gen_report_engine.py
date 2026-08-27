@@ -3,19 +3,26 @@ import unittest
 from types import SimpleNamespace
 
 import httpx
-
+from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
+    GenReportEngine,
+)
 from data_intelligence_sdk.core.types import (
     EngineInput,
     ExecutionSpec,
     FinalResponse,
     UserQuery,
 )
-from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
-    GenReportEngine,
-)
 
 
-def report_event(event_id: str, event_type: str, payload: dict) -> str:
+def report_event(
+    event_id: str,
+    event_type: str,
+    payload: dict,
+    *,
+    operation_id: str = "op_1",
+    response_id: str = "resp_1",
+    run_id: str = "resp_1",
+) -> str:
     return (
         f"event: {event_type}\n"
         "data: "
@@ -26,9 +33,9 @@ def report_event(event_id: str, event_type: str, payload: dict) -> str:
                 "type": event_type,
                 "producer": "gen-report",
                 "occurred_at": "2026-08-17T00:00:00Z",
-                "operation_id": "op_1",
-                "response_id": "resp_1",
-                "run_id": "resp_1",
+                "operation_id": operation_id,
+                "response_id": response_id,
+                "run_id": run_id,
                 "organization_id": "org-1",
                 "workspace_id": "workspace-1",
                 "trace_id": "trace-1",
@@ -246,6 +253,74 @@ class GenReportEngineTests(unittest.TestCase):
         self.assertEqual(requests[0]["organization_id"], "org-1")
         self.assertEqual(requests[0]["workspace_id"], "workspace-1")
         self.assertTrue(requests[0]["discover_workspace_files"])
+
+    def test_dashboard_extraction_uses_distinct_endpoint_without_discovery(self):
+        requests: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/v1/reports:extract-dashboard")
+            requests.append(json.loads(request.content))
+            return httpx.Response(
+                200,
+                text=report_event(
+                    "evt_dashboard_1",
+                    "report.completed",
+                    {
+                        "output_text": "Dashboard extracted.",
+                        "artifacts": [
+                            {
+                                "artifact_ref": "artifact://dashboard-1",
+                                "filename": "report-dashboard.json",
+                            }
+                        ],
+                    },
+                    operation_id="op_dashboard",
+                    response_id="resp_dashboard",
+                    run_id="resp_dashboard",
+                ),
+                headers={"content-type": "text/event-stream"},
+            )
+
+        engine = GenReportEngine(
+            "http://gen-report",
+            operation_id="op_dashboard",
+            response_id="resp_dashboard",
+            trace_id="trace-dashboard",
+            model="deepseek-v4-pro",
+            execution_context={
+                "run_id": "resp_dashboard",
+                "gateway_url": "http://axiom/api/v1/runtime/runs/resp_dashboard",
+                "capability_token": "runtime-token",
+                "expires_at": 1234567890,
+                "capabilities": ["sandbox.files", "sandbox.commands"],
+            },
+            execution_files=[
+                {
+                    "artifact_id": "report-pdf",
+                    "filename": "report.pdf",
+                    "sandbox_path": "/workspace/runs/resp_dashboard/inputs/report.pdf",
+                    "content_type": "application/pdf",
+                    "size": 10,
+                }
+            ],
+            workspace_id="workspace-1",
+            discover_workspace_files=False,
+            workflow="dashboard_extraction",
+            transport=httpx.MockTransport(handler),
+        )
+
+        result = engine.run_markdown(
+            spec_markdown="Extract the dashboard.",
+            organization_id="org-1",
+            runtime=SimpleNamespace(),
+            user_context=SimpleNamespace(),
+            user_query=SimpleNamespace(text="Extract the dashboard"),
+        )
+
+        self.assertEqual(result.answer, "Dashboard extracted.")
+        self.assertEqual(len(requests), 1)
+        self.assertFalse(requests[0]["discover_workspace_files"])
+        self.assertNotIn("workflow", requests[0])
 
 
 class GenReportStreamingTests(unittest.IsolatedAsyncioTestCase):

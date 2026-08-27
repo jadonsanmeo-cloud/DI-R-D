@@ -12,6 +12,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 class RuntimeOptionsRequest(BaseModel):
     method_hub_enabled: bool | None = None
     engine: Literal["auto", "general", "reason", "report"] | None = None
+    workflow: Literal["report", "dashboard_extraction"] = "report"
 
 
 class UploadedFileRequest(BaseModel):

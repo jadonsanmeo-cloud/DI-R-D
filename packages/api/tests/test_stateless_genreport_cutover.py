@@ -38,6 +38,7 @@ def instant_request(
     *,
     primary_source: bool = False,
     method_hub_enabled: bool = False,
+    discover_workspace_files: bool | None = None,
 ) -> InstantExecutionRequest:
     execution_files: list[dict] = []
     primary_source_id: str | None = None
@@ -56,6 +57,37 @@ def instant_request(
                 "source_last_modified": "2026-08-20T09:00:00Z",
             }
         )
+    runtime_input = {
+        "input": "Create the follow-up report",
+        "session_id": "conv_1",
+        "model": "deepseek-v4-pro",
+        "language": "en",
+        "history": history,
+        "organization_id": "org-1",
+        "workspace_id": "workspace-1",
+        "runtime_options": {
+            "engine": "report",
+            "method_hub_enabled": method_hub_enabled,
+        },
+        "execution_context": {
+            "version": "v1",
+            "run_id": "resp_1",
+            "conversation_id": "conv_1",
+            "sandbox_id": "40acc1d4-2dae-45a0-b137-bb6f8a8d9bee",
+            "execution_workspace_id": "dea1b114-40c7-50da-b196-f511fcde5185",
+            "gateway_url": "http://axiom/api/v1/runtime/runs/resp_1",
+            "capability_token": "runtime-token",
+            "expires_at": 2_000_000_000,
+            "input_path": "/workspace/runs/resp_1/inputs",
+            "work_path": "/workspace/runs/resp_1/work",
+            "output_path": "/workspace/runs/resp_1/outputs",
+            "capabilities": ["sandbox.files", "sandbox.commands"],
+        },
+        "execution_files": execution_files,
+        "primary_source_id": primary_source_id,
+    }
+    if discover_workspace_files is not None:
+        runtime_input["discover_workspace_files"] = discover_workspace_files
     return InstantExecutionRequest.model_validate(
         {
             "schema_version": "1",
@@ -63,35 +95,7 @@ def instant_request(
             "attempt": 1,
             "response_id": "resp_1",
             "trace_id": "trace_1",
-            "runtime_input": {
-                "input": "Create the follow-up report",
-                "session_id": "conv_1",
-                "model": "deepseek-v4-pro",
-                "language": "en",
-                "history": history,
-                "organization_id": "org-1",
-                "workspace_id": "workspace-1",
-                "runtime_options": {
-                    "engine": "report",
-                    "method_hub_enabled": method_hub_enabled,
-                },
-                "execution_context": {
-                    "version": "v1",
-                    "run_id": "resp_1",
-                    "conversation_id": "conv_1",
-                    "sandbox_id": "40acc1d4-2dae-45a0-b137-bb6f8a8d9bee",
-                    "execution_workspace_id": "dea1b114-40c7-50da-b196-f511fcde5185",
-                    "gateway_url": "http://axiom/api/v1/runtime/runs/resp_1",
-                    "capability_token": "runtime-token",
-                    "expires_at": 2_000_000_000,
-                    "input_path": "/workspace/runs/resp_1/inputs",
-                    "work_path": "/workspace/runs/resp_1/work",
-                    "output_path": "/workspace/runs/resp_1/outputs",
-                    "capabilities": ["sandbox.files", "sandbox.commands"],
-                },
-                "execution_files": execution_files,
-                "primary_source_id": primary_source_id,
-            },
+            "runtime_input": runtime_input,
         }
     )
 
@@ -144,6 +148,40 @@ class RecordingAsgiApp:
 
 
 class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_discovery_policy_skips_workspace_discovery(self):
+        captured_engine_kwargs: dict = {}
+
+        class FakeStreamingEngine:
+            def __init__(self, _base_url, **kwargs) -> None:
+                captured_engine_kwargs.update(kwargs)
+
+            async def stream_events(self, *, instruction, organization_id):
+                del instruction, organization_id
+                yield {
+                    "type": "report.completed",
+                    "payload": {"output_text": "Report ready.", "artifacts": []},
+                }
+
+        _ = [
+            event
+            async for event in stream_report_events(
+                instant_request(
+                    [],
+                    primary_source=True,
+                    method_hub_enabled=True,
+                    discover_workspace_files=False,
+                ),
+                instruction="Create a PDF report from the supplied file",
+                settings=SimpleNamespace(
+                    gen_report_api_url="http://genreport.test",
+                    gen_report_public_url=None,
+                ),
+                engine_factory=FakeStreamingEngine,
+            )
+        ]
+
+        self.assertFalse(captured_engine_kwargs["discover_workspace_files"])
+
     async def test_forwards_selected_inputs_as_runtime_progress(self):
         captured_engine_kwargs: dict = {}
 

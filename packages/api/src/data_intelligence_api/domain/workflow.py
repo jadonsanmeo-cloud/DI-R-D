@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from data_intelligence_sdk.core.types import (
     SessionContext,
@@ -14,10 +15,14 @@ from data_intelligence_sdk.memory import MemoryContext
 from data_intelligence_sdk.internal_memory.context import InternalMemoryContext
 
 
+WorkflowName = Literal["report", "dashboard_extraction"]
+
+
 @dataclass(frozen=True, slots=True)
 class WorkflowRuntimeOptions:
     method_hub_enabled: bool
     engine: str | None = None
+    workflow: WorkflowName = "report"
 
 
 @dataclass(frozen=True, slots=True)
