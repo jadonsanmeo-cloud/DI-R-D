@@ -34,6 +34,7 @@ class RuntimeInput(BaseModel):
     language: str = Field(default="auto", min_length=1, max_length=32)
     history: list[ReportHistoryMessage] = Field(default_factory=list, max_length=200)
     organization_id: str | None = None
+    user_id: str | None = None
     workspace_id: str | None = None
     uploaded_files: list[UploadedFileRequest] = Field(default_factory=list)
     runtime_options: RuntimeOptionsRequest = Field(
@@ -43,6 +44,7 @@ class RuntimeInput(BaseModel):
     execution_files: list[ExecutionFileRequest] = Field(default_factory=list)
     primary_source_id: str | None = Field(default=None, max_length=2048)
     discover_workspace_files: bool | None = None
+    internal_memory_context: dict[str, Any] | None = None
 
 
 class PrepareSpecRequest(OperationEnvelope):

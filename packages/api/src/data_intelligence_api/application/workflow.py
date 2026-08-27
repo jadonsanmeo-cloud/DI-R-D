@@ -25,6 +25,7 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.memory import MemoryContext
+from data_intelligence_sdk.internal_memory.context import InternalMemoryContext
 from data_intelligence_sdk.registry.engine_registry import SelectedEngine
 from data_intelligence_sdk.runtime.config import ConfigManager
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
@@ -110,6 +111,7 @@ def build_workflow_invocation(
             metadata={
                 "uploaded_files": public_uploaded_files,
                 "history": [item.model_dump(mode="json") for item in request.history],
+                "internal_memory_context": request.internal_memory_context or {},
                 **request_scope,
             },
         ),
@@ -128,6 +130,9 @@ def build_workflow_invocation(
             default_enabled=method_hub_default_enabled,
         ),
         memory_context=memory_context or MemoryContext(),
+        internal_memory_context=InternalMemoryContext(
+            **(request.internal_memory_context or {})
+        ),
     )
 
 

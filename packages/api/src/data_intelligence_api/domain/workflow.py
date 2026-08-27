@@ -11,6 +11,7 @@ from data_intelligence_sdk.core.types import (
     UserQuery,
 )
 from data_intelligence_sdk.memory import MemoryContext
+from data_intelligence_sdk.internal_memory.context import InternalMemoryContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,3 +29,6 @@ class WorkflowInvocation:
     user_context: UserContext
     runtime_options: WorkflowRuntimeOptions
     memory_context: MemoryContext = field(default_factory=MemoryContext)
+    internal_memory_context: InternalMemoryContext = field(
+        default_factory=InternalMemoryContext
+    )

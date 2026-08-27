@@ -26,6 +26,11 @@ from data_intelligence_sdk.core.types import (
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.interfaces import InterfaceBuilder, InterfaceRegistry
 from data_intelligence_sdk.memory import MemoryContext
+from data_intelligence_sdk.internal_memory.context import InternalMemoryContext
+from data_intelligence_sdk.internal_memory.client import (
+    InternalMemoryClient,
+    create_internal_memory_client,
+)
 from data_intelligence_sdk.registry.engine_registry import EngineRegistry
 from data_intelligence_sdk.registry.engine_selector import EngineSelectionRequest
 from data_intelligence_sdk.registry.engine_registry import SelectedEngine
@@ -116,6 +121,7 @@ class DataIntelligencePipeline:
         markdown_spec_builder: _MarkdownSpecBuilder | None = None,
         markdown_report_engine: _MarkdownReportEngine | None = None,
         default_organization_id: str = "test-org",
+        internal_memory_service_url: str | None = None,
     ) -> None:
         self.intent_analyzer = intent_analyzer
         self.spec_builder = spec_builder
@@ -138,6 +144,22 @@ class DataIntelligencePipeline:
         self.markdown_spec_builder = markdown_spec_builder
         self.markdown_report_engine = markdown_report_engine
         self.default_organization_id = default_organization_id
+        self.internal_memory_service_url = internal_memory_service_url
+
+    def _internal_memory_client(
+        self,
+        query: UserQuery,
+    ) -> InternalMemoryClient | None:
+        return create_internal_memory_client(
+            self.internal_memory_service_url,
+            query,
+        )
+
+    @staticmethod
+    def _internal_memory_context(query: UserQuery) -> InternalMemoryContext:
+        return InternalMemoryContext.from_payload(
+            query.metadata.get("internal_memory_context")
+        )
 
     def _log(self, event: str, payload: dict[str, object] | None = None) -> None:
         if self.logger is not None:
@@ -521,6 +543,10 @@ class DataIntelligencePipeline:
                     resource_manager=self.resource_manager,
                     sandbox=sandbox,
                     run_artifact=run_artifact,
+                    internal_memory_context=self._internal_memory_context(
+                        prepared.query
+                    ),
+                    internal_memory_client=self._internal_memory_client(prepared.query),
                 )
                 result = self.markdown_report_engine.run_markdown(
                     spec_markdown=spec_markdown,
@@ -647,6 +673,10 @@ class DataIntelligencePipeline:
                     resource_manager=self.resource_manager,
                     sandbox=sandbox,
                     run_artifact=run_artifact,
+                    internal_memory_context=self._internal_memory_context(
+                        prepared.query
+                    ),
+                    internal_memory_client=self._internal_memory_client(prepared.query),
                 )
                 output = engine.run(
                     EngineInput(

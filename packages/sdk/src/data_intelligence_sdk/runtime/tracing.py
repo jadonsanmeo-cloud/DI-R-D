@@ -10,9 +10,17 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def langsmith_tracing_enabled() -> bool:
-    """Return whether explicit LangSmith tracing is enabled."""
+    """Return whether explicit LangSmith tracing is enabled.
 
-    return os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower() in {
+    Prefer LangSmith's current environment-variable name while retaining the
+    legacy LangChain spelling for existing deployments.  An explicitly set
+    current value takes precedence, including when it disables tracing.
+    """
+
+    configured_value = os.getenv("LANGSMITH_TRACING")
+    if configured_value is None:
+        configured_value = os.getenv("LANGCHAIN_TRACING_V2", "")
+    return configured_value.strip().lower() in {
         "true",
     }
 
@@ -34,6 +42,8 @@ def traceable_llm_call(
     return traceable(
         name=name,
         run_type="llm",
-        project_name=os.getenv("LANGCHAIN_PROJECT") or None,
+        project_name=(
+            os.getenv("LANGSMITH_PROJECT") or os.getenv("LANGCHAIN_PROJECT") or None
+        ),
         reduce_fn=reduce_fn,
     )(function)

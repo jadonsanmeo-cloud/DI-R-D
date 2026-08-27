@@ -30,6 +30,7 @@ from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.mcp_client import MCPToolError
 from data_intelligence_sdk.tools import (
     create_execute_python_tool,
+    create_internal_memory_tools,
     create_mcp_tools,
 )
 
@@ -182,10 +183,11 @@ class GeneralPurposeEngine:
         )
         execute_python = create_execute_python_tool(runtime)
         mcp_tools = create_mcp_tools(runtime)
+        internal_memory_tools = create_internal_memory_tools(runtime)
         self._register_minimal_profile()
         agent = self.agent_factory(
             model=self.llm,
-            tools=[*mcp_tools, execute_python],
+            tools=[*mcp_tools, *internal_memory_tools, execute_python],
             middleware=[_recover_tool_errors],
             system_prompt=self._system_prompt(spec, runtime, input.query),
             backend=DeepAgentSandboxBackend(runtime.sandbox),
@@ -361,11 +363,30 @@ class GeneralPurposeEngine:
             if uploaded_files
             else ""
         )
+        internal_memory_instructions = (
+            "Internal memory is available. The USER.md and MEMORY.md sections "
+            "below are a frozen snapshot for this request. If they and the "
+            "current conversation are insufficient, use `session_search` to find "
+            "prior conversation messages, then `session_scroll` to inspect their "
+            "neighbourhood. Use `memory` only for durable, high-value facts: "
+            "write stable user preferences to `user`, and durable agent/project "
+            "knowledge to `memory`. Do not save transient task state, raw logs, "
+            "or duplicate facts. `replace` and `remove` require the exact existing "
+            "entry in `match`.\n\n"
+            if runtime.internal_memory_client is not None
+            else ""
+        )
+        rendered_internal_memory = runtime.internal_memory_context.render()
+        internal_memory_context = (
+            f"{rendered_internal_memory}\n\n" if rendered_internal_memory else ""
+        )
         return (
             "You are the only analysis agent for this request. Use the "
             "available tools to answer the objective.\n\n"
             f"{method_hub_instructions}"
             f"{uploaded_file_instructions}"
+            f"{internal_memory_instructions}"
+            f"{internal_memory_context}"
             "When using tools, base the final answer only on "
             "successful tool or sandbox output and never invent data. If an "
             "execution fails, inspect the structured error and correct the next "

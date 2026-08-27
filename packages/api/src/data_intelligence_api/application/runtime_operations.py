@@ -49,12 +49,14 @@ def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
         language=runtime_input.language,
         history=runtime_input.history,
         organization_id=runtime_input.organization_id,
+        user_id=runtime_input.user_id,
         workspace_id=runtime_input.workspace_id,
         uploaded_files=runtime_input.uploaded_files,
         runtime_options=runtime_input.runtime_options,
         execution_context=runtime_input.execution_context,
         execution_files=runtime_input.execution_files,
         primary_source_id=runtime_input.primary_source_id,
+        internal_memory_context=runtime_input.internal_memory_context,
     )
 
 
