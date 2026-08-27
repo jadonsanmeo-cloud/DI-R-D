@@ -143,15 +143,18 @@ class GenReportEngine:
             instruction=spec_markdown,
             organization_id=organization_id,
         )
-        with httpx.Client(
-            timeout=self.timeout_seconds,
-            transport=self.transport,
-        ) as client, client.stream(
-            "POST",
-            self._endpoint(),
-            json=payload,
-            headers=self._request_headers(),
-        ) as response:
+        with (
+            httpx.Client(
+                timeout=self.timeout_seconds,
+                transport=self.transport,
+            ) as client,
+            client.stream(
+                "POST",
+                self._endpoint(),
+                json=payload,
+                headers=self._request_headers(),
+            ) as response,
+        ):
             response.raise_for_status()
             events = _sse_payloads(response.iter_text())
 
@@ -235,15 +238,18 @@ class GenReportEngine:
             instruction=instruction,
             organization_id=organization_id,
         )
-        async with httpx.AsyncClient(
-            timeout=self.timeout_seconds,
-            transport=self.transport,
-        ) as client, client.stream(
-            "POST",
-            self._endpoint(),
-            json=payload,
-            headers=self._request_headers(),
-        ) as response:
+        async with (
+            httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+                transport=self.transport,
+            ) as client,
+            client.stream(
+                "POST",
+                self._endpoint(),
+                json=payload,
+                headers=self._request_headers(),
+            ) as response,
+        ):
             response.raise_for_status()
             async for event in _iter_sse_payloads(response.aiter_text()):
                 self._validate_event_correlation(event)
