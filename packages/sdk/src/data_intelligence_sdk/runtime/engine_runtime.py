@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from data_intelligence_sdk.runtime.interfaces import InterfaceBuilder, InterfaceRegistry
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
@@ -12,6 +13,7 @@ from data_intelligence_sdk.runtime.sandbox import (
 )
 from data_intelligence_sdk.runtime.resource_manager import ResourceManager
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
+from data_intelligence_sdk.internal_memory.context import InternalMemoryContext
 from data_intelligence_sdk.sandbox.artifacts import ArtifactStore, RunArtifactSession
 from data_intelligence_sdk.sandbox.executor import SandboxExecutor
 from data_intelligence_sdk.sandbox.logs import LogStore
@@ -32,6 +34,10 @@ class EngineRuntimeContext:
     resource_manager: ResourceManager | None = None
     sandbox: EngineSandboxSession | None = None
     run_artifact: RunArtifactSession | None = None
+    internal_memory_client: Any | None = None
+    internal_memory_context: InternalMemoryContext = field(
+        default_factory=InternalMemoryContext
+    )
 
     @property
     def sandbox_environment(self) -> SandboxEnvironment | None:

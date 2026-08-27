@@ -90,3 +90,4 @@ class WorkflowRequest(BaseModel):
     execution_context: ExecutionContextRequest | None = None
     execution_files: list[ExecutionFileRequest] = Field(default_factory=list)
     primary_source_id: str | None = Field(default=None, max_length=2048)
+    internal_memory_context: dict[str, Any] | None = None

@@ -26,6 +26,10 @@ endpoint = "http://host.docker.internal:38000/mcp"
 enabled = true
 endpoint = "http://host.docker.internal:8005"
 
+[internal_memory_service]
+enabled = "${env:INTERNAL_MEMORY_ENABLED:-false}"
+endpoint = "${env:INTERNAL_MEMORY_SERVICE_URL:-http://host.docker.internal:8006/api/v1}"
+
 [artifacts]
 root = "/app/artifacts"
 
