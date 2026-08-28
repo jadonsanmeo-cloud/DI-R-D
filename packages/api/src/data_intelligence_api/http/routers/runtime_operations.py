@@ -11,6 +11,8 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from data_intelligence_api.application.runtime_operations import (
+    execute_instant,  # noqa: F401 - retained for downstream patch compatibility
+    execute_thinking,  # noqa: F401 - retained for downstream patch compatibility
     prepare_spec,
     revise_spec,
     select_instant_engine,
@@ -42,9 +44,7 @@ logger = logging.getLogger(__name__)
 def _completed_runtime_payload(result: FinalResponse) -> dict[str, object]:
     return {
         "output_text": result.answer,
-        "evidence": (
-            asdict(result.evidence) if result.evidence is not None else None
-        ),
+        "evidence": (asdict(result.evidence) if result.evidence is not None else None),
         "metadata": dict(result.metadata),
     }
 
@@ -233,15 +233,15 @@ def create_runtime_operations_router(
                         },
                     )
                     if selection.engine.name == "report":
-                        async for event in stream_report_events(
+                        async for report_event in stream_report_events(
                             request,
                             instruction=request.spec_markdown,
                             settings=settings,
                             user_authorization=user_authorization,
                         ):
-                            yield encode_sse(event["type"], event)
+                            yield encode_sse(report_event["type"], report_event)
                         return
-                async for event in _stream_execution_events(
+                async for runtime_event in _stream_execution_events(
                     stream_thinking(
                         request,
                         settings=settings,
@@ -251,7 +251,7 @@ def create_runtime_operations_router(
                     operation_id=request.operation_id,
                     response_id=request.response_id,
                 ):
-                    yield event
+                    yield runtime_event
             except Exception as exc:
                 logger.exception(
                     "Runtime execution failed operation_id=%s response_id=%s",
@@ -317,7 +317,7 @@ def create_runtime_operations_router(
                         },
                     )
                     if selection.engine.name != "report":
-                        async for event in _stream_execution_events(
+                        async for runtime_event in _stream_execution_events(
                             stream_instant(
                                 request,
                                 settings=settings,
@@ -327,15 +327,15 @@ def create_runtime_operations_router(
                             operation_id=request.operation_id,
                             response_id=request.response_id,
                         ):
-                            yield event
+                            yield runtime_event
                     else:
-                        async for event in stream_report_events(
+                        async for report_event in stream_report_events(
                             request,
                             instruction=request.runtime_input.input,
                             settings=settings,
                             user_authorization=user_authorization,
                         ):
-                            yield encode_sse(event["type"], event)
+                            yield encode_sse(report_event["type"], report_event)
                 except Exception as exc:
                     logger.exception(
                         "Runtime Instant execution failed operation_id=%s response_id=%s",
@@ -365,7 +365,7 @@ def create_runtime_operations_router(
                     )
                 return
             try:
-                async for event in _stream_execution_events(
+                async for runtime_event in _stream_execution_events(
                     stream_instant(
                         request,
                         settings=settings,
@@ -374,7 +374,7 @@ def create_runtime_operations_router(
                     operation_id=request.operation_id,
                     response_id=request.response_id,
                 ):
-                    yield event
+                    yield runtime_event
             except Exception as exc:
                 logger.exception(
                     "Runtime direct execution failed operation_id=%s response_id=%s",

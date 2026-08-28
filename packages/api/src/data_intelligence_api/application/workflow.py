@@ -411,12 +411,20 @@ def stream_prepared_markdown_workflow(
     )
     spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
     prepared_execution = _confirmed_prepared_execution(prepared, spec)
-    yield from pipeline.stream_confirmed_spec(
-        prepared_execution,
-        spec,
-        memory_context=memory_context,
-        selection=selection,
-    )
+    stream = getattr(pipeline, "stream_confirmed_spec", None)
+    if callable(stream):
+        yield from stream(
+            prepared_execution,
+            spec,
+            memory_context=memory_context,
+            selection=selection,
+        )
+    else:
+        yield pipeline.execute_confirmed_spec(
+            prepared_execution,
+            spec,
+            memory_context=memory_context,
+        )
 
 
 def select_prepared_markdown_engine(
@@ -535,12 +543,20 @@ def stream_instant_workflow(
         session_context=invocation.session_context,
         user_context=invocation.user_context,
     )
-    yield from pipeline.stream_confirmed_spec(
-        prepared,
-        spec,
-        memory_context=invocation.memory_context,
-        selection=selection,
-    )
+    stream = getattr(pipeline, "stream_confirmed_spec", None)
+    if callable(stream):
+        yield from stream(
+            prepared,
+            spec,
+            memory_context=invocation.memory_context,
+            selection=selection,
+        )
+    else:
+        yield pipeline.execute_confirmed_spec(
+            prepared,
+            spec,
+            memory_context=invocation.memory_context,
+        )
 
 
 def select_instant_workflow(
