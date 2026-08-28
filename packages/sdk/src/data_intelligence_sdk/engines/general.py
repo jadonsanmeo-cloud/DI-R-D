@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 from builtins import BaseExceptionGroup
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -38,6 +40,13 @@ from data_intelligence_sdk.tools import (
 class AgentInvoker(Protocol):
     def invoke(self, payload: dict[str, Any]) -> Any: ...
 
+    def stream(
+        self,
+        payload: dict[str, Any],
+        *,
+        stream_mode: list[str],
+    ) -> Iterator[Any]: ...
+
 
 class LLMInvoker(Protocol):
     def invoke(self, messages: list[Any]) -> Any: ...
@@ -58,6 +67,11 @@ _HIDDEN_DEEP_AGENT_TOOLS = frozenset(
         "write_file",
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _AgentStreamResult:
+    value: object
 
 
 @wrap_tool_call(name="RecoverToolErrorsMiddleware")
@@ -160,6 +174,7 @@ class GeneralPurposeEngine:
             api_key=resolved_key,
             base_url=settings.base_url,
             model=resolved_model,
+            streaming=True,
         )
 
     def run(
@@ -175,25 +190,7 @@ class GeneralPurposeEngine:
                 "GeneralPurposeEngine requires a request-scoped sandbox."
             )
 
-        runtime.run_context.record_step(
-            "deep_agent_started",
-            inputs={
-                "objective": spec.objective,
-            },
-        )
-        execute_python = create_execute_python_tool(runtime)
-        mcp_tools = create_mcp_tools(runtime)
-        internal_memory_tools = create_internal_memory_tools(runtime)
-        self._register_minimal_profile()
-        agent = self.agent_factory(
-            model=self.llm,
-            tools=[*mcp_tools, *internal_memory_tools, execute_python],
-            middleware=[_recover_tool_errors],
-            system_prompt=self._system_prompt(spec, runtime, input.query),
-            backend=DeepAgentSandboxBackend(runtime.sandbox),
-            subagents=[],
-            name="general-purpose",
-        )
+        agent = self._build_agent(input)
         result = agent.invoke(
             {
                 "messages": self._conversation_messages(
@@ -236,6 +233,142 @@ class GeneralPurposeEngine:
             answer = _render_execution_result(grounding).strip()
         if not answer:
             raise RuntimeError("GeneralPurposeEngine produced no usable answer.")
+        return self._build_output(
+            spec,
+            runtime,
+            answer,
+        )
+
+    def stream(
+        self,
+        input: EngineInput,
+    ) -> Iterator[str | EngineOutput]:
+        """Stream final model text while retaining the normal engine result."""
+
+        spec = input.spec
+        runtime = input.runtime
+        if runtime.sandbox is None:
+            raise RuntimeError(
+                "GeneralPurposeEngine requires a request-scoped sandbox."
+            )
+
+        agent = self._build_agent(input)
+        result: object | None = None
+        for event in self._stream_agent_attempt(
+            agent,
+            self._conversation_messages(
+                input.query,
+                current_text=spec.objective,
+            ),
+        ):
+            if isinstance(event, _AgentStreamResult):
+                result = event.value
+            else:
+                yield event
+        if result is None:
+            raise RuntimeError("Deep Agent returned no streamed result.")
+
+        answer = _last_message_text(result).strip()
+        grounding = _latest_successful_grounding(runtime)
+        if not answer:
+            runtime.run_context.record_step(
+                "deep_agent_retry_started",
+                inputs={
+                    "blank_answer": True,
+                    "has_successful_grounding": grounding is not None,
+                },
+            )
+            previous_result = result
+            result = None
+            for event in self._stream_agent_attempt(
+                agent,
+                _retry_messages(previous_result, spec.objective),
+            ):
+                if isinstance(event, _AgentStreamResult):
+                    result = event.value
+                else:
+                    yield event
+            if result is None:
+                raise RuntimeError("Deep Agent retry returned no streamed result.")
+            answer = _last_message_text(result).strip()
+            grounding = _latest_successful_grounding(runtime)
+            runtime.run_context.record_step(
+                "deep_agent_retry_completed",
+                outputs={
+                    "has_answer": bool(answer),
+                    "has_successful_grounding": grounding is not None,
+                },
+            )
+        if not answer and grounding is not None:
+            runtime.run_context.record_step(
+                "deep_agent_fallback_synthesis",
+                inputs={"objective": spec.objective},
+            )
+            answer = self._synthesize_execution_answer(spec, grounding).strip()
+        if not answer:
+            answer = _render_execution_result(grounding).strip()
+        if not answer:
+            raise RuntimeError("GeneralPurposeEngine produced no usable answer.")
+        yield self._build_output(spec, runtime, answer)
+
+    def _build_agent(self, input: EngineInput) -> AgentInvoker:
+        spec = input.spec
+        runtime = input.runtime
+        if runtime.sandbox is None:
+            raise RuntimeError(
+                "GeneralPurposeEngine requires a request-scoped sandbox."
+            )
+        runtime.run_context.record_step(
+            "deep_agent_started",
+            inputs={"objective": spec.objective},
+        )
+        execute_python = create_execute_python_tool(runtime)
+        mcp_tools = create_mcp_tools(runtime)
+        internal_memory_tools = create_internal_memory_tools(runtime)
+        self._register_minimal_profile()
+        return self.agent_factory(
+            model=self.llm,
+            tools=[*mcp_tools, *internal_memory_tools, execute_python],
+            middleware=[_recover_tool_errors],
+            system_prompt=self._system_prompt(spec, runtime, input.query),
+            backend=DeepAgentSandboxBackend(runtime.sandbox),
+            subagents=[],
+            name="general-purpose",
+        )
+
+    def _stream_agent_attempt(
+        self,
+        agent: AgentInvoker,
+        messages: list[Any],
+    ) -> Iterator[str | _AgentStreamResult]:
+        stream = getattr(agent, "stream", None)
+        if not callable(stream):
+            yield _AgentStreamResult(agent.invoke({"messages": messages}))
+            return
+        result: object | None = None
+        for item in stream(
+            {"messages": messages},
+            stream_mode=["messages", "values"],
+        ):
+            if not isinstance(item, tuple) or len(item) != 2:
+                continue
+            mode, payload = item
+            if mode == "messages":
+                delta = _stream_message_text(payload)
+                if delta:
+                    yield delta
+            elif mode == "values":
+                result = payload
+        if result is None:
+            raise RuntimeError("Deep Agent stream did not produce a final state.")
+        yield _AgentStreamResult(result)
+
+    def _build_output(
+        self,
+        spec: ExecutionSpec,
+        runtime: EngineRuntimeContext,
+        answer: str,
+    ) -> EngineOutput:
         runtime.run_context.record_step(
             "deep_agent_completed",
             outputs={"answer": answer},
@@ -411,6 +544,22 @@ def _message_text(message: object) -> str:
                 text_parts.append(block)
         return "\n".join(text_parts)
     return "" if content is None else str(content)
+
+
+def _stream_message_text(payload: object) -> str:
+    """Extract visible text from a LangGraph message stream item."""
+
+    if not isinstance(payload, tuple) or len(payload) != 2:
+        return ""
+    message = payload[0]
+    if getattr(message, "type", None) not in {"AIMessage", "AIMessageChunk"}:
+        return ""
+    if any(
+        getattr(message, attribute, None)
+        for attribute in ("tool_calls", "tool_call_chunks", "invalid_tool_calls")
+    ):
+        return ""
+    return _message_text(message)
 
 
 def _uploaded_file_names(query: UserQuery) -> list[str]:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 from data_intelligence_sdk.core.types import FinalResponse
@@ -24,6 +24,8 @@ from data_intelligence_api.application.workflow import (
     revise_markdown_workflow,
     select_instant_workflow,
     select_prepared_markdown_engine,
+    stream_instant_workflow,
+    stream_prepared_markdown_workflow,
 )
 from data_intelligence_api.http.schemas.runtime_inputs import WorkflowRequest
 from data_intelligence_api.http.schemas.runtime_operations import (
@@ -307,6 +309,66 @@ def execute_thinking(
     )
 
 
+def stream_thinking(
+    request: ThinkingExecutionRequest,
+    *,
+    settings: object | None = None,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    logger: RuntimeLogger | None = None,
+    selection: SelectedEngine | None = None,
+) -> Iterator[str | FinalResponse]:
+    """Stream a confirmed Thinking execution from the runtime engine."""
+
+    prepared = prepared_markdown_from_payload(
+        request.prepared_execution,
+        request.spec_markdown,
+    )
+    runtime_options = resolve_runtime_options(
+        request.runtime_input.runtime_options,
+        default_enabled=False,
+    )
+    yield from stream_prepared_markdown_workflow(
+        prepared,
+        request.spec_markdown,
+        _logger_or_default(logger),
+        runtime_options,
+        pipeline_factory,
+        execution_context=(
+            request.runtime_input.execution_context.model_dump(mode="json")
+            if request.runtime_input.execution_context is not None
+            else None
+        ),
+        execution_files=[
+            item.model_dump(mode="json")
+            for item in request.runtime_input.execution_files
+        ],
+        primary_source_id=request.runtime_input.primary_source_id,
+        organization_id=request.runtime_input.organization_id,
+        workspace_id=request.runtime_input.workspace_id,
+        discover_workspace_files=_discover_workspace_files(request.runtime_input),
+        operation_id=request.operation_id,
+        response_id=request.response_id,
+        trace_id=request.trace_id,
+        model=request.runtime_input.model,
+        language=request.runtime_input.language,
+        history=[
+            item.model_dump(mode="json") for item in request.runtime_input.history
+        ],
+        gen_report_base_url=(
+            getattr(settings, "gen_report_api_url", None)
+            if settings is not None
+            else None
+        ),
+        gen_report_public_url=(
+            getattr(settings, "gen_report_public_url", None)
+            if settings is not None
+            else None
+        ),
+        memory_context=parse_upstream_memory_context(request.memory_context),
+        selection=selection,
+    )
+
+
 def select_thinking_engine(
     request: ThinkingExecutionRequest,
     *,
@@ -374,6 +436,53 @@ def execute_instant(
         memory_context=parse_upstream_memory_context(request.memory_context),
     )
     return execute_instant_workflow(
+        invocation,
+        _logger_or_default(logger),
+        pipeline_factory,
+        selection=selection,
+        execution_context=(
+            request.runtime_input.execution_context.model_dump(mode="json")
+            if request.runtime_input.execution_context is not None
+            else None
+        ),
+        execution_files=[
+            item.model_dump(mode="json")
+            for item in request.runtime_input.execution_files
+        ],
+        primary_source_id=request.runtime_input.primary_source_id,
+        organization_id=request.runtime_input.organization_id,
+        workspace_id=request.runtime_input.workspace_id,
+        discover_workspace_files=_discover_workspace_files(request.runtime_input),
+        operation_id=request.operation_id,
+        response_id=request.response_id,
+        trace_id=request.trace_id,
+        model=request.runtime_input.model,
+        language=request.runtime_input.language,
+        history=[
+            item.model_dump(mode="json") for item in request.runtime_input.history
+        ],
+        gen_report_base_url=getattr(settings, "gen_report_api_url", None),
+        gen_report_public_url=getattr(settings, "gen_report_public_url", None),
+    )
+
+
+def stream_instant(
+    request: InstantExecutionRequest,
+    *,
+    settings: object,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    logger: RuntimeLogger | None = None,
+    selection: SelectedEngine | None = None,
+) -> Iterator[str | FinalResponse]:
+    """Stream an Instant execution from the runtime engine."""
+
+    invocation = build_workflow_invocation(
+        _to_workflow_request(request.runtime_input),
+        settings.data_corpus_root,  # type: ignore[attr-defined]
+        method_hub_default_enabled=settings.method_hub_default_enabled,  # type: ignore[attr-defined]
+        memory_context=parse_upstream_memory_context(request.memory_context),
+    )
+    yield from stream_instant_workflow(
         invocation,
         _logger_or_default(logger),
         pipeline_factory,

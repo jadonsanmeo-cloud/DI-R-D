@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterable, Protocol, cast
+from typing import Any, Iterable, Iterator, Protocol, cast
 
 import httpx
 
@@ -738,6 +738,162 @@ class DataIntelligencePipeline:
             },
         )
         return response
+
+    def stream_confirmed_spec(
+        self,
+        prepared: PreparedExecution,
+        confirmed_spec: ExecutionSpec,
+        *,
+        memory_context: MemoryContext | None = None,
+        selection: SelectedEngine | None = None,
+    ) -> Iterator[str | FinalResponse]:
+        """Stream engine text and yield the completed response last."""
+
+        if not confirmed_spec.confirmed:
+            raise ValueError(
+                "Execution spec must be confirmed before engine selection."
+            )
+        run_artifact = self._resolve_run_artifact(prepared)
+        self._record_artifact_event(
+            run_artifact,
+            phase="spec_builder",
+            event_type="spec.confirmed",
+            payload=asdict(confirmed_spec),
+        )
+        self._log(
+            "pipeline.spec_confirmed",
+            {
+                "confirmed": confirmed_spec.confirmed,
+                "engine_hint": confirmed_spec.engine_hint,
+            },
+        )
+        phase = "engine_selection"
+        engine = None
+        try:
+            resolved_selection = selection or self.select_engine(
+                prepared,
+                confirmed_spec,
+                memory_context or MemoryContext(),
+            )
+            engine = resolved_selection.engine
+            selection_payload: dict[str, object] = {
+                "engine_name": engine.name,
+                "selection_source": resolved_selection.selection_source,
+            }
+            self._record_runtime_event(
+                run_artifact,
+                phase="engine_selection",
+                event_type="engine.selected",
+                status="completed",
+                payload=selection_payload,
+            )
+            self._log("runtime.engine.selected", selection_payload)
+            phase = "sandbox_provisioning"
+            sandbox_context = (
+                self.sandbox_provider.open()
+                if self.sandbox_provider is not None
+                else nullcontext(None)
+            )
+            with sandbox_context as sandbox:
+                phase = "engine_execution"
+                _stage_uploaded_files(sandbox, prepared.session_context)
+                sandbox_executor = self.sandbox_executor
+                if sandbox_executor is None and sandbox is not None:
+                    sandbox_executor = RequestSandboxExecutor(sandbox, run_artifact)
+
+                def record_runtime_event(**event: Any) -> dict[str, Any]:
+                    return self._record_runtime_event(run_artifact, **event)
+
+                runtime = EngineRuntimeContext(
+                    run_context=EngineRunContext(
+                        event_recorder=record_runtime_event,
+                    ),
+                    mcp_client=self.mcp_client,
+                    mcp_tools=self.mcp_tools,
+                    interface_registry=self.interface_registry,
+                    interface_builder=self.interface_builder,
+                    sandbox_executor=sandbox_executor,
+                    artifact_store=self.artifact_store,
+                    log_store=self.log_store,
+                    resource_manager=self.resource_manager,
+                    sandbox=sandbox,
+                    run_artifact=run_artifact,
+                    internal_memory_context=self._internal_memory_context(
+                        prepared.query
+                    ),
+                    internal_memory_client=self._internal_memory_client(prepared.query),
+                )
+                engine_input = EngineInput(
+                    query=prepared.query,
+                    spec=confirmed_spec,
+                    runtime=runtime,
+                    user_context=prepared.user_context,
+                )
+                output: EngineOutput | None = None
+                stream = getattr(engine, "stream", None)
+                if callable(stream):
+                    for item in stream(engine_input):
+                        if isinstance(item, str):
+                            if item:
+                                yield item
+                        elif isinstance(item, EngineOutput):
+                            output = item
+                else:
+                    output = engine.run(engine_input)
+                if output is None:
+                    raise RuntimeError("Streaming engine returned no final output.")
+        except Exception as exc:
+            if run_artifact is not None:
+                run_artifact.finalize(
+                    status="failed",
+                    engine_name=(
+                        getattr(engine, "name", type(engine).__name__)
+                        if engine is not None
+                        else None
+                    ),
+                    failure_phase=phase,
+                    error=_artifact_error(exc),
+                )
+            raise
+        self._log(
+            "pipeline.engine_completed",
+            {
+                "engine_name": output.engine_name,
+                "step_count": len(output.trace.steps),
+                "method_call_count": len(output.trace.method_calls),
+            },
+        )
+        response = _final_response_from_engine_output(
+            output,
+            include_evidence=self.include_evidence,
+        )
+        response.metadata["engine_selection_source"] = (
+            resolved_selection.selection_source
+        )
+
+        artifact_ref = run_artifact.artifact_ref if run_artifact is not None else None
+        if artifact_ref is not None:
+            response.metadata["artifact_ref"] = artifact_ref
+        self._record_artifact_event(
+            run_artifact,
+            phase="response",
+            event_type="response.completed",
+            payload=asdict(response),
+        )
+        if run_artifact is not None:
+            run_artifact.finalize(
+                status="completed",
+                engine_name=output.engine_name,
+                final_answer=response.answer,
+            )
+        self._log(
+            "pipeline.completed",
+            {
+                "answer_type": type(response.answer).__name__,
+                "engine_name": response.metadata.get("engine_name"),
+            },
+        )
+        yield response
 
     def select_engine(
         self,

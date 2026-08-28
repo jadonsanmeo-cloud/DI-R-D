@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
@@ -391,6 +391,34 @@ def execute_prepared_markdown_workflow(
     return pipeline.execute_confirmed_spec(prepared_execution, spec, **execution_kwargs)
 
 
+def stream_prepared_markdown_workflow(
+    prepared: PreparedMarkdownExecution,
+    spec_markdown: str,
+    logger: RuntimeLogger,
+    runtime_options: WorkflowRuntimeOptions,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    memory_context: MemoryContext | None = None,
+    selection: SelectedEngine | None = None,
+    **runtime_context: Any,
+) -> Iterator[str | FinalResponse]:
+    """Stream a confirmed Markdown execution through the selected engine."""
+
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=runtime_options,
+        **runtime_context,
+    )
+    spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
+    prepared_execution = _confirmed_prepared_execution(prepared, spec)
+    yield from pipeline.stream_confirmed_spec(
+        prepared_execution,
+        spec,
+        memory_context=memory_context,
+        selection=selection,
+    )
+
+
 def select_prepared_markdown_engine(
     prepared: PreparedMarkdownExecution,
     spec_markdown: str,
@@ -477,6 +505,42 @@ def execute_instant_workflow(
     if selection is not None:
         execution_kwargs["selection"] = selection
     return pipeline.execute_confirmed_spec(prepared, spec, **execution_kwargs)
+
+
+def stream_instant_workflow(
+    invocation: WorkflowInvocation,
+    logger: RuntimeLogger,
+    pipeline_factory: PipelineFactory = default_pipeline_factory,
+    selection: SelectedEngine | None = None,
+    **runtime_context: Any,
+) -> Iterator[str | FinalResponse]:
+    """Stream an Instant request through the selected engine."""
+
+    pipeline = _create_pipeline(
+        pipeline_factory,
+        logger=logger,
+        runtime_options=invocation.runtime_options,
+        **runtime_context,
+    )
+    spec = ExecutionSpec(
+        intent="unknown",
+        objective=invocation.query.text,
+        confirmed=True,
+        engine_hint=ENGINE_ROUTE_MAP.get(invocation.runtime_options.engine or ""),
+    )
+    prepared = PreparedExecution(
+        query=invocation.query,
+        intent=spec.intent,
+        spec=spec,
+        session_context=invocation.session_context,
+        user_context=invocation.user_context,
+    )
+    yield from pipeline.stream_confirmed_spec(
+        prepared,
+        spec,
+        memory_context=invocation.memory_context,
+        selection=selection,
+    )
 
 
 def select_instant_workflow(

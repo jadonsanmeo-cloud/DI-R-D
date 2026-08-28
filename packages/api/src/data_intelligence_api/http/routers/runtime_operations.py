@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import logging
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import asdict
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from data_intelligence_api.application.runtime_operations import (
-    execute_instant,
-    execute_thinking,
     prepare_spec,
     revise_spec,
     select_instant_engine,
     select_thinking_engine,
+    stream_instant,
     stream_report_events,
+    stream_thinking,
 )
 from data_intelligence_api.application.workflow import (
     PipelineFactory,
@@ -34,8 +34,67 @@ from data_intelligence_api.http.schemas.runtime_operations import (
 from data_intelligence_api.http.streaming import chunk_text, encode_sse
 from data_intelligence_api.infrastructure.config.settings import ApiSettings
 from data_intelligence_sdk.core.errors import EngineSelectionError
+from data_intelligence_sdk.core.types import FinalResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _completed_runtime_payload(result: FinalResponse) -> dict[str, object]:
+    return {
+        "output_text": result.answer,
+        "evidence": (
+            asdict(result.evidence) if result.evidence is not None else None
+        ),
+        "metadata": dict(result.metadata),
+    }
+
+
+async def _stream_execution_events(
+    events: Iterator[str | FinalResponse],
+    *,
+    operation_id: str,
+    response_id: str,
+) -> AsyncIterator[str]:
+    result: FinalResponse | None = None
+    emitted_delta = False
+    for item in events:
+        if isinstance(item, str):
+            if not item:
+                continue
+            emitted_delta = True
+            yield encode_sse(
+                "runtime.output_text.delta",
+                {
+                    "type": "runtime.output_text.delta",
+                    "operation_id": operation_id,
+                    "response_id": response_id,
+                    "payload": {"delta": item},
+                },
+            )
+        elif isinstance(item, FinalResponse):
+            result = item
+    if result is None:
+        raise RuntimeError("Runtime stream returned no completed response.")
+    if not emitted_delta:
+        for delta in chunk_text(result.answer):
+            yield encode_sse(
+                "runtime.output_text.delta",
+                {
+                    "type": "runtime.output_text.delta",
+                    "operation_id": operation_id,
+                    "response_id": response_id,
+                    "payload": {"delta": delta},
+                },
+            )
+    yield encode_sse(
+        "runtime.completed",
+        {
+            "type": "runtime.completed",
+            "operation_id": operation_id,
+            "response_id": response_id,
+            "payload": _completed_runtime_payload(result),
+        },
+    )
 
 
 def _authorize_service(
@@ -182,12 +241,17 @@ def create_runtime_operations_router(
                         ):
                             yield encode_sse(event["type"], event)
                         return
-                result = execute_thinking(
-                    request,
-                    settings=settings,
-                    pipeline_factory=pipeline_factory,
-                    selection=selection,
-                )
+                async for event in _stream_execution_events(
+                    stream_thinking(
+                        request,
+                        settings=settings,
+                        pipeline_factory=pipeline_factory,
+                        selection=selection,
+                    ),
+                    operation_id=request.operation_id,
+                    response_id=request.response_id,
+                ):
+                    yield event
             except Exception as exc:
                 logger.exception(
                     "Runtime execution failed operation_id=%s response_id=%s",
@@ -216,34 +280,6 @@ def create_runtime_operations_router(
                     },
                 )
                 return
-
-            for delta in chunk_text(result.answer):
-                yield encode_sse(
-                    "runtime.output_text.delta",
-                    {
-                        "type": "runtime.output_text.delta",
-                        "operation_id": request.operation_id,
-                        "response_id": request.response_id,
-                        "payload": {"delta": delta},
-                    },
-                )
-            yield encode_sse(
-                "runtime.completed",
-                {
-                    "type": "runtime.completed",
-                    "operation_id": request.operation_id,
-                    "response_id": request.response_id,
-                    "payload": {
-                        "output_text": result.answer,
-                        "evidence": (
-                            asdict(result.evidence)
-                            if result.evidence is not None
-                            else None
-                        ),
-                        "metadata": dict(result.metadata),
-                    },
-                },
-            )
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -281,39 +317,17 @@ def create_runtime_operations_router(
                         },
                     )
                     if selection.engine.name != "report":
-                        result = execute_instant(
-                            request,
-                            settings=settings,
-                            pipeline_factory=pipeline_factory,
-                            selection=selection,
-                        )
-                        for delta in chunk_text(result.answer):
-                            yield encode_sse(
-                                "runtime.output_text.delta",
-                                {
-                                    "type": "runtime.output_text.delta",
-                                    "operation_id": request.operation_id,
-                                    "response_id": request.response_id,
-                                    "payload": {"delta": delta},
-                                },
-                            )
-                        yield encode_sse(
-                            "runtime.completed",
-                            {
-                                "type": "runtime.completed",
-                                "operation_id": request.operation_id,
-                                "response_id": request.response_id,
-                                "payload": {
-                                    "output_text": result.answer,
-                                    "evidence": (
-                                        asdict(result.evidence)
-                                        if result.evidence is not None
-                                        else None
-                                    ),
-                                    "metadata": dict(result.metadata),
-                                },
-                            },
-                        )
+                        async for event in _stream_execution_events(
+                            stream_instant(
+                                request,
+                                settings=settings,
+                                pipeline_factory=pipeline_factory,
+                                selection=selection,
+                            ),
+                            operation_id=request.operation_id,
+                            response_id=request.response_id,
+                        ):
+                            yield event
                     else:
                         async for event in stream_report_events(
                             request,
@@ -351,11 +365,16 @@ def create_runtime_operations_router(
                     )
                 return
             try:
-                result = execute_instant(
-                    request,
-                    settings=settings,
-                    pipeline_factory=pipeline_factory,
-                )
+                async for event in _stream_execution_events(
+                    stream_instant(
+                        request,
+                        settings=settings,
+                        pipeline_factory=pipeline_factory,
+                    ),
+                    operation_id=request.operation_id,
+                    response_id=request.response_id,
+                ):
+                    yield event
             except Exception as exc:
                 logger.exception(
                     "Runtime direct execution failed operation_id=%s response_id=%s",
@@ -384,34 +403,6 @@ def create_runtime_operations_router(
                     },
                 )
                 return
-
-            for delta in chunk_text(result.answer):
-                yield encode_sse(
-                    "runtime.output_text.delta",
-                    {
-                        "type": "runtime.output_text.delta",
-                        "operation_id": request.operation_id,
-                        "response_id": request.response_id,
-                        "payload": {"delta": delta},
-                    },
-                )
-            yield encode_sse(
-                "runtime.completed",
-                {
-                    "type": "runtime.completed",
-                    "operation_id": request.operation_id,
-                    "response_id": request.response_id,
-                    "payload": {
-                        "output_text": result.answer,
-                        "evidence": (
-                            asdict(result.evidence)
-                            if result.evidence is not None
-                            else None
-                        ),
-                        "metadata": dict(result.metadata),
-                    },
-                },
-            )
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
