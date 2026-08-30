@@ -45,13 +45,18 @@ class MCPMethodClient:
         endpoint: str,
         *,
         session_factory: SessionFactory | None = None,
+        user_authorization: str | None = None,
+        organization_id: str | None = None,
     ) -> None:
         endpoint = endpoint.strip()
         if not endpoint:
             raise ValueError("MCP endpoint must not be empty.")
         self.endpoint = endpoint
+        self.organization_id = organization_id.strip() if organization_id else None
         self._session_factory = session_factory or _default_factory_for_endpoint(
-            endpoint
+            endpoint,
+            user_authorization=user_authorization,
+            organization_id=self.organization_id,
         )
 
     def connect(self) -> None:
@@ -100,7 +105,12 @@ class MCPMethodClient:
             return _normalize_result(response)
 
 
-def _default_factory_for_endpoint(endpoint: str) -> SessionFactory:
+def _default_factory_for_endpoint(
+    endpoint: str,
+    *,
+    user_authorization: str | None = None,
+    organization_id: str | None = None,
+) -> SessionFactory:
     @asynccontextmanager
     async def session_context() -> Any:
         try:
@@ -110,6 +120,26 @@ def _default_factory_for_endpoint(endpoint: str) -> SessionFactory:
             raise MCPClientError(
                 "The 'mcp' package is required to connect to Methods-Hub."
             ) from exc
+        if user_authorization or organization_id:
+            from mcp.client.streamable_http import create_mcp_http_client
+
+            headers: dict[str, str] = {}
+            if user_authorization:
+                headers["Authorization"] = user_authorization
+            if organization_id:
+                headers["X-Org-ID"] = organization_id
+            async with create_mcp_http_client(
+                headers=headers,
+            ) as http_client:
+                async with streamable_http_client(
+                    endpoint,
+                    http_client=http_client,
+                ) as streams:
+                    read_stream, write_stream = streams[:2]
+                    async with ClientSession(read_stream, write_stream) as session:
+                        yield session
+            return
+
         async with streamable_http_client(endpoint) as streams:
             read_stream, write_stream = streams[:2]
             async with ClientSession(read_stream, write_stream) as session:

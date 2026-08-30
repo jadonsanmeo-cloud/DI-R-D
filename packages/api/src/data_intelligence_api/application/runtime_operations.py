@@ -267,6 +267,7 @@ def execute_thinking(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> FinalResponse:
     prepared = prepared_markdown_from_payload(
         request.prepared_execution,
@@ -315,6 +316,7 @@ def execute_thinking(
         ),
         memory_context=parse_upstream_memory_context(request.memory_context),
         selection=selection,
+        user_authorization=user_authorization,
     )
 
 
@@ -325,6 +327,7 @@ def stream_thinking(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> Iterator[str | FinalResponse]:
     """Stream a confirmed Thinking execution from the runtime engine."""
 
@@ -375,6 +378,7 @@ def stream_thinking(
         ),
         memory_context=parse_upstream_memory_context(request.memory_context),
         selection=selection,
+        user_authorization=user_authorization,
     )
 
 
@@ -435,6 +439,7 @@ def execute_instant(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> FinalResponse:
     """Run an Instant request without preparing a Markdown specification."""
 
@@ -472,6 +477,7 @@ def execute_instant(
         ],
         gen_report_base_url=getattr(settings, "gen_report_api_url", None),
         gen_report_public_url=getattr(settings, "gen_report_public_url", None),
+        user_authorization=user_authorization,
     )
 
 
@@ -482,6 +488,7 @@ def stream_instant(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> Iterator[str | FinalResponse]:
     """Stream an Instant execution from the runtime engine."""
 
@@ -519,6 +526,7 @@ def stream_instant(
         ],
         gen_report_base_url=getattr(settings, "gen_report_api_url", None),
         gen_report_public_url=getattr(settings, "gen_report_public_url", None),
+        user_authorization=user_authorization,
     )
 
 

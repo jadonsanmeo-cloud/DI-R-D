@@ -514,6 +514,7 @@ def create_example_pipeline(
     config_manager: ConfigManager | None = None,
     execution_context: dict[str, object] | None = None,
     execution_files: list[dict[str, Any]] | None = None,
+    workspace_id: str | None = None,
     spec_builder: object | None = None,
     spec_llm_client: LLMClient | None = None,
     engine_selector: EngineSelector | None = None,
@@ -647,6 +648,7 @@ def create_example_pipeline(
         ),
         markdown_report_engine=resolved_markdown_report_engine,
         default_organization_id=resolved_default_organization_id,
+        workspace_id=workspace_id,
         execution_files=execution_files,
         internal_memory_service_url=(
             internal_memory_settings.endpoint

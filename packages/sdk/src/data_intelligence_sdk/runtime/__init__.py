@@ -38,6 +38,10 @@ from data_intelligence_sdk.runtime.mcp_client import (
     MCPToolError,
 )
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
+from data_intelligence_sdk.runtime.selected_files import (
+    SelectedFilesScope,
+    SelectedFilesScopeError,
+)
 from data_intelligence_sdk.runtime.tracing import langsmith_tracing_enabled
 from data_intelligence_sdk.sandbox.artifacts import (
     ArtifactPersistenceError,
@@ -78,6 +82,8 @@ __all__ = [
     "RuntimeLogger",
     "RunArtifactSession",
     "SandboxSessionProvider",
+    "SelectedFilesScope",
+    "SelectedFilesScopeError",
     "get_config_manager",
     "langsmith_tracing_enabled",
 ]
