@@ -38,3 +38,45 @@ def test_general_engine_builds_llm_messages_from_conversation_history() -> None:
         {"role": "assistant", "content": "Nice to meet you, Anh."},
         {"role": "user", "content": "Who am I?"},
     ]
+
+
+def test_general_engine_prompt_explains_selected_workspace_files() -> None:
+    engine = GeneralPurposeEngine(llm=object())
+    prompt = engine._system_prompt(
+        ExecutionSpec(intent="general", objective="What is this file about?"),
+        EngineRuntimeContext(
+            selected_files={
+                "mode": "selected",
+                "resource_ids": ["document-1"],
+                "resource_names": ["report.pdf"],
+            }
+        ),
+        UserQuery(text="What is this file about?"),
+    )
+
+    assert "report.pdf" in prompt
+    assert "selected workspace file" in prompt.lower()
+    assert "do not ask the user for a local path" in prompt.lower()
+
+
+def test_general_engine_prompt_exposes_the_staged_sandbox_path() -> None:
+    engine = GeneralPurposeEngine(llm=object())
+    prompt = engine._system_prompt(
+        ExecutionSpec(intent="general", objective="What is this file about?"),
+        EngineRuntimeContext(
+            selected_files={
+                "mode": "selected",
+                "resource_ids": ["document-1"],
+                "resource_names": ["report.pdf"],
+            },
+            execution_files=(
+                {
+                    "filename": "report.pdf",
+                    "sandbox_path": "/workspace/runs/resp-1/inputs/report.pdf",
+                },
+            ),
+        ),
+        UserQuery(text="What is this file about?"),
+    )
+
+    assert "/workspace/runs/resp-1/inputs/report.pdf" in prompt

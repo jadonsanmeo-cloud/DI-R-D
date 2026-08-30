@@ -58,6 +58,7 @@ def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
         execution_context=runtime_input.execution_context,
         execution_files=runtime_input.execution_files,
         primary_source_id=runtime_input.primary_source_id,
+        selected_files=runtime_input.selected_files,
         internal_memory_context=runtime_input.internal_memory_context,
     )
 
@@ -102,6 +103,14 @@ async def stream_report_events(
         workspace_id=runtime_input.workspace_id,
         primary_source_id=runtime_input.primary_source_id,
         discover_workspace_files=_discover_workspace_files(runtime_input),
+        selected_files=(
+            runtime_input.selected_files.model_dump(
+                mode="json",
+                exclude_defaults=True,
+            )
+            if runtime_input.selected_files is not None
+            else None
+        ),
         workflow=runtime_input.runtime_options.workflow,
     )
     latest_usage: dict[str, Any] | None = None

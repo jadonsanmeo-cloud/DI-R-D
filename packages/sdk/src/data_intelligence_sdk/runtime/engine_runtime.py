@@ -38,6 +38,8 @@ class EngineRuntimeContext:
     internal_memory_context: InternalMemoryContext = field(
         default_factory=InternalMemoryContext
     )
+    selected_files: dict[str, Any] | None = None
+    execution_files: tuple[dict[str, Any], ...] = ()
 
     @property
     def sandbox_environment(self) -> SandboxEnvironment | None:

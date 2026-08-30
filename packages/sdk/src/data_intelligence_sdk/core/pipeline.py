@@ -122,6 +122,7 @@ class DataIntelligencePipeline:
         markdown_report_engine: _MarkdownReportEngine | None = None,
         default_organization_id: str = "test-org",
         internal_memory_service_url: str | None = None,
+        execution_files: list[dict[str, Any]] | None = None,
     ) -> None:
         self.intent_analyzer = intent_analyzer
         self.spec_builder = spec_builder
@@ -145,6 +146,7 @@ class DataIntelligencePipeline:
         self.markdown_report_engine = markdown_report_engine
         self.default_organization_id = default_organization_id
         self.internal_memory_service_url = internal_memory_service_url
+        self.execution_files = tuple(execution_files or ())
 
     def _internal_memory_client(
         self,
@@ -547,6 +549,8 @@ class DataIntelligencePipeline:
                         prepared.query
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
+                    selected_files=_request_selected_files(prepared.session_context),
+                    execution_files=self.execution_files,
                 )
                 result = self.markdown_report_engine.run_markdown(
                     spec_markdown=spec_markdown,
@@ -677,6 +681,8 @@ class DataIntelligencePipeline:
                         prepared.query
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
+                    selected_files=_request_selected_files(prepared.session_context),
+                    execution_files=self.execution_files,
                 )
                 output = engine.run(
                     EngineInput(
@@ -822,6 +828,8 @@ class DataIntelligencePipeline:
                         prepared.query
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
+                    selected_files=_request_selected_files(prepared.session_context),
+                    execution_files=self.execution_files,
                 )
                 engine_input = EngineInput(
                     query=prepared.query,
@@ -1136,6 +1144,15 @@ def _stage_uploaded_files(
         source_paths = getattr(sandbox, "source_paths", None)
         if isinstance(source_paths, dict):
             source_paths[filename] = filename
+
+
+def _request_selected_files(
+    session_context: SessionContext | None,
+) -> dict[str, Any] | None:
+    if session_context is None:
+        return None
+    scope = session_context.state.get("selected_files")
+    return dict(scope) if isinstance(scope, dict) else None
 
 
 def _final_response_from_engine_output(

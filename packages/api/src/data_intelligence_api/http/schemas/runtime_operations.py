@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from data_intelligence_api.http.schemas.runtime_inputs import (
+    SelectedFilesRequest,
     ExecutionContextRequest,
     ExecutionFileRequest,
     ReportHistoryMessage,
@@ -44,6 +45,7 @@ class RuntimeInput(BaseModel):
     execution_files: list[ExecutionFileRequest] = Field(default_factory=list)
     primary_source_id: str | None = Field(default=None, max_length=2048)
     discover_workspace_files: bool | None = None
+    selected_files: SelectedFilesRequest | None = None
     internal_memory_context: dict[str, Any] | None = None
 
 

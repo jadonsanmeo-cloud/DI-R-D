@@ -496,6 +496,7 @@ class GeneralPurposeEngine:
             if uploaded_files
             else ""
         )
+        selected_file_instructions = _selected_file_instructions(runtime)
         internal_memory_instructions = (
             "Internal memory is available. The USER.md and MEMORY.md sections "
             "below are a frozen snapshot for this request. If they and the "
@@ -518,6 +519,7 @@ class GeneralPurposeEngine:
             "available tools to answer the objective.\n\n"
             f"{method_hub_instructions}"
             f"{uploaded_file_instructions}"
+            f"{selected_file_instructions}"
             f"{internal_memory_instructions}"
             f"{internal_memory_context}"
             "When using tools, base the final answer only on "
@@ -575,6 +577,49 @@ def _uploaded_file_names(query: UserQuery) -> list[str]:
         if normalized and normalized not in names:
             names.append(normalized)
     return names
+
+
+def _selected_file_instructions(runtime: EngineRuntimeContext) -> str:
+    selected_files = runtime.selected_files
+    if not isinstance(selected_files, dict):
+        return ""
+    if selected_files.get("mode") != "selected":
+        return ""
+
+    names = [
+        item
+        for item in selected_files.get("resource_names", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    staged_paths = []
+    for item in runtime.execution_files:
+        if not isinstance(item, dict):
+            continue
+        filename = item.get("filename")
+        sandbox_path = item.get("sandbox_path")
+        if not isinstance(filename, str) or not filename.strip():
+            continue
+        if not isinstance(sandbox_path, str) or not sandbox_path.startswith(
+            "/workspace/"
+        ):
+            continue
+        staged_paths.append({"filename": filename, "sandbox_path": sandbox_path})
+
+    if staged_paths:
+        return (
+            "Selected workspace files are already copied into the request sandbox. "
+            "Use these exact paths for local inspection:\n"
+            f"{json.dumps(staged_paths, ensure_ascii=False)}\n"
+            "Do not ask the user for a local path.\n\n"
+        )
+    if names:
+        return (
+            "Selected workspace file(s) for this request: "
+            f"{json.dumps(names, ensure_ascii=False)}. Use the selected-file retrieval "
+            "scope when Method Hub is available, or explain that a local sandbox "
+            "path is unavailable. Do not ask the user for a local path.\n\n"
+        )
+    return ""
 
 
 def _last_message_text(result: object) -> str:

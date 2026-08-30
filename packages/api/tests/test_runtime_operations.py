@@ -10,6 +10,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from data_intelligence_api.application.runtime_operations import (
+    _to_workflow_request,
     execute_instant,
     execute_thinking,
     prepare_spec,
@@ -153,6 +154,40 @@ def execution_context_payload() -> dict:
 class RuntimeOperationModelTests(unittest.TestCase):
     def test_runtime_input_exposes_explicit_workspace_discovery_policy(self):
         self.assertIn("discover_workspace_files", RuntimeInput.model_fields)
+
+    def test_selected_files_survive_runtime_to_workflow_mapping(self):
+        request = InstantExecutionRequest.model_validate(
+            {
+                **operation_payload(),
+                "runtime_input": {
+                    **runtime_input_payload(),
+                    "selected_files": {
+                        "mode": "selected",
+                        "resource_ids": ["document-1"],
+                        "resource_names": ["report.pdf"],
+                    },
+                },
+            }
+        )
+
+        workflow_request = _to_workflow_request(request.runtime_input)
+        invocation = build_workflow_invocation(
+            workflow_request,
+            Path("/tmp/data-corpus"),
+        )
+
+        self.assertEqual(
+            invocation.query.metadata["selected_files"],
+            {
+                "mode": "selected",
+                "resource_ids": ["document-1"],
+                "resource_names": ["report.pdf"],
+            },
+        )
+        self.assertEqual(
+            invocation.session_context.state["selected_files"]["resource_ids"],
+            ["document-1"],
+        )
 
     def test_workflow_invocation_keeps_conversation_history_on_query(self):
         invocation = build_workflow_invocation(
@@ -665,6 +700,11 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "language": "en",
                 "history": report_history_payload(),
                 "execution_context": execution_context_payload(),
+                "selected_files": {
+                    "mode": "selected",
+                    "resource_ids": ["document-1"],
+                    "resource_names": ["report.pdf"],
+                },
             }
         )
         request = InstantExecutionRequest.model_validate(
@@ -723,6 +763,7 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["history"], report_history_payload())
         self.assertEqual(captured["instruction"], "Create a report")
         self.assertEqual(captured["workflow"], "report")
+        self.assertEqual(captured["selected_files"]["resource_ids"], ["document-1"])
         self.assertNotIn("service_token", captured)
 
 

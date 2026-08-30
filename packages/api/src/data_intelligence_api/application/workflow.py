@@ -103,6 +103,11 @@ def build_workflow_invocation(
         "organization_id": request.organization_id,
         "workspace_id": request.workspace_id,
         "workspace_ids": list(request.workspace_ids or []),
+        "selected_files": (
+            request.selected_files.model_dump(mode="json", exclude_defaults=True)
+            if request.selected_files is not None
+            else None
+        ),
     }
     return WorkflowInvocation(
         query=UserQuery(
