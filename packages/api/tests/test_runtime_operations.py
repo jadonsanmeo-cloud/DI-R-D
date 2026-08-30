@@ -10,6 +10,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from data_intelligence_api.application.runtime_operations import (
+    _to_workflow_request,
     execute_instant,
     execute_thinking,
     prepare_spec,
@@ -154,6 +155,40 @@ class RuntimeOperationModelTests(unittest.TestCase):
     def test_runtime_input_exposes_explicit_workspace_discovery_policy(self):
         self.assertIn("discover_workspace_files", RuntimeInput.model_fields)
 
+    def test_selected_files_survive_runtime_to_workflow_mapping(self):
+        request = InstantExecutionRequest.model_validate(
+            {
+                **operation_payload(),
+                "runtime_input": {
+                    **runtime_input_payload(),
+                    "selected_files": {
+                        "mode": "selected",
+                        "resource_ids": ["document-1"],
+                        "resource_names": ["report.pdf"],
+                    },
+                },
+            }
+        )
+
+        workflow_request = _to_workflow_request(request.runtime_input)
+        invocation = build_workflow_invocation(
+            workflow_request,
+            Path("/tmp/data-corpus"),
+        )
+
+        self.assertEqual(
+            invocation.query.metadata["selected_files"],
+            {
+                "mode": "selected",
+                "resource_ids": ["document-1"],
+                "resource_names": ["report.pdf"],
+            },
+        )
+        self.assertEqual(
+            invocation.session_context.state["selected_files"]["resource_ids"],
+            ["document-1"],
+        )
+
     def test_workflow_invocation_keeps_conversation_history_on_query(self):
         invocation = build_workflow_invocation(
             WorkflowRequest(
@@ -278,6 +313,7 @@ class RuntimeOperationModelTests(unittest.TestCase):
         self.assertEqual(engine.language, "en")
         self.assertEqual(engine.organization_id, "org-1")
         self.assertEqual(engine.history, report_history_payload())
+        self.assertEqual(captured["workspace_id"], "workspace-1")
         self.assertFalse(hasattr(engine, "service_token"))
 
     def test_default_pipeline_factory_skips_method_hub_for_engine_selection(self):
@@ -312,6 +348,42 @@ class RuntimeOperationModelTests(unittest.TestCase):
         self.assertEqual(captured["mcp_tools"], ())
         self.assertFalse(captured["method_hub_enabled"])
         self.assertFalse(captured["configure_default_sandbox"])
+
+    def test_default_pipeline_factory_passes_user_authorization_to_method_hub(self):
+        pipeline = object()
+
+        def capture_pipeline(**kwargs):
+            return pipeline
+
+        with (
+            patch(
+                "data_intelligence_api.application.workflow.create_example_pipeline",
+                side_effect=capture_pipeline,
+            ),
+            patch(
+                "data_intelligence_api.application.workflow.resolve_method_hub",
+                return_value=SimpleNamespace(client=object(), tools=()),
+            ) as resolve_method_hub,
+        ):
+            result = default_pipeline_factory(
+                logger=SimpleNamespace(),
+                runtime_options=WorkflowRuntimeOptions(
+                    method_hub_enabled=True,
+                    engine="general",
+                ),
+                organization_id="org-1",
+                user_authorization="Bearer user-token",
+            )
+
+        self.assertIs(result, pipeline)
+        self.assertEqual(
+            resolve_method_hub.call_args.kwargs["user_authorization"],
+            "Bearer user-token",
+        )
+        self.assertEqual(
+            resolve_method_hub.call_args.kwargs["organization_id"],
+            "org-1",
+        )
 
     def test_instant_engine_selection_skips_method_hub_setup(self):
         captured: dict = {}
@@ -665,6 +737,11 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "language": "en",
                 "history": report_history_payload(),
                 "execution_context": execution_context_payload(),
+                "selected_files": {
+                    "mode": "selected",
+                    "resource_ids": ["document-1"],
+                    "resource_names": ["report.pdf"],
+                },
             }
         )
         request = InstantExecutionRequest.model_validate(
@@ -723,6 +800,7 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["history"], report_history_payload())
         self.assertEqual(captured["instruction"], "Create a report")
         self.assertEqual(captured["workflow"], "report")
+        self.assertEqual(captured["selected_files"]["resource_ids"], ["document-1"])
         self.assertNotIn("service_token", captured)
 
 
@@ -766,6 +844,36 @@ class RuntimeOperationAdapterTests(unittest.TestCase):
         self.assertEqual(captured["prepared"].query.text, "Create a report")
         self.assertTrue(captured["spec"].confirmed)
         self.assertEqual(captured["spec"].engine_hint, "general")
+
+    def test_instant_execution_forwards_user_authorization_to_pipeline_factory(self):
+        captured: dict[str, str | None] = {}
+
+        def auth_pipeline_factory(
+            *, logger, runtime_options=None, user_authorization=None
+        ):
+            del logger, runtime_options
+            captured["user_authorization"] = user_authorization
+            return FakePipeline()
+
+        request = InstantExecutionRequest.model_validate(
+            {
+                **operation_payload(),
+                "operation_id": "op_instant_auth",
+                "runtime_input": {
+                    **runtime_input_payload(),
+                    "runtime_options": {"engine": "general"},
+                },
+            }
+        )
+
+        execute_instant(
+            request,
+            settings=self.settings,
+            pipeline_factory=auth_pipeline_factory,
+            user_authorization="Bearer user-token",
+        )
+
+        self.assertEqual(captured["user_authorization"], "Bearer user-token")
 
     def test_prepare_is_self_contained_and_preserves_operation_envelope(self):
         first = prepare_spec(
@@ -1048,6 +1156,39 @@ class RuntimeOperationEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: runtime.completed", response.text)
         self.assertNotIn("response.requires_confirmation", response.text)
+
+    async def test_instant_endpoint_forwards_user_authorization_to_general_runtime(
+        self,
+    ):
+        captured: list[str | None] = []
+
+        def fake_stream(*args, user_authorization=None, **kwargs):
+            del args, kwargs
+            captured.append(user_authorization)
+            yield FinalResponse(answer="General result")
+
+        with patch(
+            "data_intelligence_api.http.routers.runtime_operations.stream_instant",
+            side_effect=fake_stream,
+        ):
+            response = await self.client.post(
+                "/v1/execution:instant",
+                json={
+                    **operation_payload(),
+                    "operation_id": "op_instant_auth_header",
+                    "runtime_input": {
+                        **runtime_input_payload(),
+                        "runtime_options": {"engine": "general"},
+                    },
+                },
+                headers={
+                    **self.headers,
+                    "X-Axiom-User-Authorization": "Bearer user-token",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured, ["Bearer user-token"])
 
     async def test_direct_report_execution_streams_without_confirmation(self):
         response = await self.client.post(

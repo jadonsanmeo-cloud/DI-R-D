@@ -58,6 +58,7 @@ def _to_workflow_request(runtime_input: RuntimeInput) -> WorkflowRequest:
         execution_context=runtime_input.execution_context,
         execution_files=runtime_input.execution_files,
         primary_source_id=runtime_input.primary_source_id,
+        selected_files=runtime_input.selected_files,
         internal_memory_context=runtime_input.internal_memory_context,
     )
 
@@ -102,6 +103,14 @@ async def stream_report_events(
         workspace_id=runtime_input.workspace_id,
         primary_source_id=runtime_input.primary_source_id,
         discover_workspace_files=_discover_workspace_files(runtime_input),
+        selected_files=(
+            runtime_input.selected_files.model_dump(
+                mode="json",
+                exclude_defaults=True,
+            )
+            if runtime_input.selected_files is not None
+            else None
+        ),
         workflow=runtime_input.runtime_options.workflow,
     )
     latest_usage: dict[str, Any] | None = None
@@ -258,6 +267,7 @@ def execute_thinking(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> FinalResponse:
     prepared = prepared_markdown_from_payload(
         request.prepared_execution,
@@ -306,6 +316,7 @@ def execute_thinking(
         ),
         memory_context=parse_upstream_memory_context(request.memory_context),
         selection=selection,
+        user_authorization=user_authorization,
     )
 
 
@@ -316,6 +327,7 @@ def stream_thinking(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> Iterator[str | FinalResponse]:
     """Stream a confirmed Thinking execution from the runtime engine."""
 
@@ -366,6 +378,7 @@ def stream_thinking(
         ),
         memory_context=parse_upstream_memory_context(request.memory_context),
         selection=selection,
+        user_authorization=user_authorization,
     )
 
 
@@ -426,6 +439,7 @@ def execute_instant(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> FinalResponse:
     """Run an Instant request without preparing a Markdown specification."""
 
@@ -463,6 +477,7 @@ def execute_instant(
         ],
         gen_report_base_url=getattr(settings, "gen_report_api_url", None),
         gen_report_public_url=getattr(settings, "gen_report_public_url", None),
+        user_authorization=user_authorization,
     )
 
 
@@ -473,6 +488,7 @@ def stream_instant(
     pipeline_factory: PipelineFactory = default_pipeline_factory,
     logger: RuntimeLogger | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> Iterator[str | FinalResponse]:
     """Stream an Instant execution from the runtime engine."""
 
@@ -510,6 +526,7 @@ def stream_instant(
         ],
         gen_report_base_url=getattr(settings, "gen_report_api_url", None),
         gen_report_public_url=getattr(settings, "gen_report_public_url", None),
+        user_authorization=user_authorization,
     )
 
 

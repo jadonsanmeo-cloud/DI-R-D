@@ -476,7 +476,7 @@ class GeneralPurposeEngine:
             "Use execute_python only for local file inspection, calculations, "
             "or transformations that do not require Method Hub access. Never "
             "attempt HTTP or Method Hub access from generated code. For question answering "
-            "over a specific document, prefer `document_retrieve_context` and "
+            "over a specific document, prefer `corpus_retrieve_context` and "
             "answer from its returned chunks. For question answering across the "
             "indexed corpus, prefer `corpus_retrieve_context` and answer from "
             "its returned chunks. Use retrieval tools instead of previewing an "
@@ -496,6 +496,8 @@ class GeneralPurposeEngine:
             if uploaded_files
             else ""
         )
+        selected_file_instructions = _selected_file_instructions(runtime)
+        workspace_scope_instructions = _workspace_scope_instructions(runtime)
         internal_memory_instructions = (
             "Internal memory is available. The USER.md and MEMORY.md sections "
             "below are a frozen snapshot for this request. If they and the "
@@ -518,6 +520,8 @@ class GeneralPurposeEngine:
             "available tools to answer the objective.\n\n"
             f"{method_hub_instructions}"
             f"{uploaded_file_instructions}"
+            f"{workspace_scope_instructions}"
+            f"{selected_file_instructions}"
             f"{internal_memory_instructions}"
             f"{internal_memory_context}"
             "When using tools, base the final answer only on "
@@ -575,6 +579,29 @@ def _uploaded_file_names(query: UserQuery) -> list[str]:
         if normalized and normalized not in names:
             names.append(normalized)
     return names
+
+
+def _selected_file_instructions(runtime: EngineRuntimeContext) -> str:
+    scope = runtime.selected_files_scope
+    if scope is None or not scope.document_ids:
+        return ""
+    return (
+        "This run is limited to the selected workspace document IDs: "
+        f"{json.dumps(list(scope.document_ids))}. Use the retrieval tools; the "
+        "runtime automatically applies this document scope. Do not search the "
+        "local filesystem for workspace files and do not ask the user for a local "
+        "path.\n\n"
+    )
+
+
+def _workspace_scope_instructions(runtime: EngineRuntimeContext) -> str:
+    if not runtime.workspace_id:
+        return ""
+    return (
+        f"This run is scoped to workspace {runtime.workspace_id!r}. The runtime "
+        "automatically adds workspace_id to each Method Hub call. Do not ask the "
+        "user for a workspace_id or select another workspace.\n\n"
+    )
 
 
 def _last_message_text(result: object) -> str:

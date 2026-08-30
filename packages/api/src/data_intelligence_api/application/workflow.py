@@ -103,6 +103,11 @@ def build_workflow_invocation(
         "organization_id": request.organization_id,
         "workspace_id": request.workspace_id,
         "workspace_ids": list(request.workspace_ids or []),
+        "selected_files": (
+            request.selected_files.model_dump(mode="json", exclude_defaults=True)
+            if request.selected_files is not None
+            else None
+        ),
     }
     return WorkflowInvocation(
         query=UserQuery(
@@ -151,6 +156,7 @@ def default_pipeline_factory(
     operation_id: str | None = None,
     response_id: str | None = None,
     trace_id: str | None = None,
+    user_authorization: str | None = None,
     model: str | None = None,
     language: str = "auto",
     history: list[dict[str, Any]] | None = None,
@@ -170,6 +176,8 @@ def default_pipeline_factory(
         resolve_method_hub(
             resolved_options,
             endpoint=method_hub_settings.endpoint,
+            user_authorization=user_authorization,
+            organization_id=organization_id,
         )
         if include_method_hub
         else None
@@ -198,6 +206,7 @@ def default_pipeline_factory(
         logger=logger,
         config_manager=config_manager,
         execution_context=execution_context,
+        workspace_id=workspace_id,
         use_llm_spec_builder=True,
         intent_service_base_url=(
             os.getenv("INTENT_SERVICE_BASE_URL")
@@ -242,6 +251,7 @@ def _create_pipeline(
     operation_id: str | None = None,
     response_id: str | None = None,
     trace_id: str | None = None,
+    user_authorization: str | None = None,
     model: str | None = None,
     language: str = "auto",
     history: list[dict[str, Any]] | None = None,
@@ -280,6 +290,7 @@ def _create_pipeline(
         "operation_id": operation_id,
         "response_id": response_id,
         "trace_id": trace_id,
+        "user_authorization": user_authorization,
         "model": model,
         "language": language,
         "history": history,
@@ -363,6 +374,7 @@ def execute_prepared_markdown_workflow(
     gen_report_public_url: str | None = None,
     memory_context: MemoryContext | None = None,
     selection: SelectedEngine | None = None,
+    user_authorization: str | None = None,
 ) -> FinalResponse:
     pipeline = _create_pipeline(
         pipeline_factory,
@@ -382,6 +394,7 @@ def execute_prepared_markdown_workflow(
         history=history,
         gen_report_base_url=gen_report_base_url,
         gen_report_public_url=gen_report_public_url,
+        user_authorization=user_authorization,
     )
     spec = _execution_spec_from_markdown(prepared, spec_markdown, runtime_options)
     prepared_execution = _confirmed_prepared_execution(prepared, spec)

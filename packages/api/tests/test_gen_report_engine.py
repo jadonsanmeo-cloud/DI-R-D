@@ -169,7 +169,13 @@ class GenReportEngineTests(unittest.TestCase):
         result = engine.run_markdown(
             spec_markdown="# Report spec",
             organization_id="org-1",
-            runtime=SimpleNamespace(),
+            runtime=SimpleNamespace(
+                selected_files={
+                    "mode": "selected",
+                    "resource_ids": ["document-1"],
+                    "resource_names": ["report.pdf"],
+                }
+            ),
             user_context=SimpleNamespace(),
             user_query=SimpleNamespace(text="Create a report"),
         )
@@ -193,6 +199,14 @@ class GenReportEngineTests(unittest.TestCase):
         self.assertEqual(payload["language"], "en")
         self.assertEqual(payload["execution_context"], execution_context)
         self.assertEqual(payload["execution_files"], execution_files)
+        self.assertEqual(
+            payload["selected_files"],
+            {
+                "mode": "selected",
+                "resource_ids": ["document-1"],
+                "resource_names": ["report.pdf"],
+            },
+        )
         self.assertEqual(
             payload["runtime_gateway"],
             {

@@ -36,6 +36,7 @@ from data_intelligence_sdk.registry.engine_selector import EngineSelectionReques
 from data_intelligence_sdk.registry.engine_registry import SelectedEngine
 from data_intelligence_sdk.runtime.resource_manager import ResourceManager
 from data_intelligence_sdk.runtime.sandbox import SandboxSessionProvider
+from data_intelligence_sdk.runtime.selected_files import SelectedFilesScope
 from data_intelligence_sdk.runtime.logger import RuntimeLogger
 from data_intelligence_sdk.runtime.mcp_client import MCPMethodClient, MCPToolDefinition
 from data_intelligence_sdk.runtime.event_payload import runtime_event_payload
@@ -121,7 +122,9 @@ class DataIntelligencePipeline:
         markdown_spec_builder: _MarkdownSpecBuilder | None = None,
         markdown_report_engine: _MarkdownReportEngine | None = None,
         default_organization_id: str = "test-org",
+        workspace_id: str | None = None,
         internal_memory_service_url: str | None = None,
+        execution_files: list[dict[str, Any]] | None = None,
     ) -> None:
         self.intent_analyzer = intent_analyzer
         self.spec_builder = spec_builder
@@ -144,7 +147,9 @@ class DataIntelligencePipeline:
         self.markdown_spec_builder = markdown_spec_builder
         self.markdown_report_engine = markdown_report_engine
         self.default_organization_id = default_organization_id
+        self.workspace_id = workspace_id
         self.internal_memory_service_url = internal_memory_service_url
+        self.execution_files = tuple(execution_files or ())
 
     def _internal_memory_client(
         self,
@@ -547,6 +552,11 @@ class DataIntelligencePipeline:
                         prepared.query
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
+                    workspace_id=self.workspace_id,
+                    selected_files_scope=_selected_files_scope(
+                        prepared.session_context
+                    ),
+                    execution_files=self.execution_files,
                 )
                 result = self.markdown_report_engine.run_markdown(
                     spec_markdown=spec_markdown,
@@ -608,7 +618,7 @@ class DataIntelligencePipeline:
             raise ValueError(
                 "Execution spec must be confirmed before engine selection."
             )
-        run_artifact = self._resolve_run_artifact(prepared)
+        run_artifact = self._ensure_run_artifact(prepared)
         self._record_artifact_event(
             run_artifact,
             phase="spec_builder",
@@ -677,6 +687,11 @@ class DataIntelligencePipeline:
                         prepared.query
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
+                    workspace_id=self.workspace_id,
+                    selected_files_scope=_selected_files_scope(
+                        prepared.session_context
+                    ),
+                    execution_files=self.execution_files,
                 )
                 output = engine.run(
                     EngineInput(
@@ -753,7 +768,7 @@ class DataIntelligencePipeline:
             raise ValueError(
                 "Execution spec must be confirmed before engine selection."
             )
-        run_artifact = self._resolve_run_artifact(prepared)
+        run_artifact = self._ensure_run_artifact(prepared)
         self._record_artifact_event(
             run_artifact,
             phase="spec_builder",
@@ -822,6 +837,11 @@ class DataIntelligencePipeline:
                         prepared.query
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
+                    workspace_id=self.workspace_id,
+                    selected_files_scope=_selected_files_scope(
+                        prepared.session_context
+                    ),
+                    execution_files=self.execution_files,
                 )
                 engine_input = EngineInput(
                     query=prepared.query,
@@ -928,6 +948,22 @@ class DataIntelligencePipeline:
             )
         prepared.run_artifact = open_run(prepared.run_artifact_id)
         return prepared.run_artifact
+
+    def _ensure_run_artifact(
+        self,
+        prepared: PreparedExecution | PreparedMarkdownExecution,
+    ) -> RunArtifactSession | None:
+        """Ensure confirmed executions have an artifact session when supported."""
+
+        run_artifact = self._resolve_run_artifact(prepared)
+        if run_artifact is not None:
+            return run_artifact
+
+        run_artifact = self._create_run_artifact(prepared.query)
+        if run_artifact is not None:
+            prepared.run_artifact = run_artifact
+            prepared.run_artifact_id = run_artifact.run_id
+        return run_artifact
 
     def _create_run_artifact(self, query: UserQuery) -> RunArtifactSession | None:
         create_run = getattr(self.artifact_store, "create_run", None)
@@ -1136,6 +1172,23 @@ def _stage_uploaded_files(
         source_paths = getattr(sandbox, "source_paths", None)
         if isinstance(source_paths, dict):
             source_paths[filename] = filename
+
+
+def _selected_files_scope(
+    session_context: SessionContext | None,
+) -> SelectedFilesScope | None:
+    if session_context is None:
+        return None
+    selected_files = session_context.state.get("selected_files")
+    if not isinstance(selected_files, dict) or selected_files.get("mode") != "selected":
+        return None
+    resource_ids = selected_files.get("resource_ids", [])
+    if not isinstance(resource_ids, (list, tuple)):
+        return None
+    document_ids = tuple(
+        normalized for value in resource_ids if (normalized := str(value).strip())
+    )
+    return SelectedFilesScope(document_ids=document_ids) if document_ids else None
 
 
 def _final_response_from_engine_output(

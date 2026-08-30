@@ -45,10 +45,16 @@ def resolve_method_hub(
     options: WorkflowRuntimeOptions,
     *,
     endpoint: str,
+    user_authorization: str | None = None,
+    organization_id: str | None = None,
 ) -> ResolvedMethodHub:
     if not options.method_hub_enabled:
         return ResolvedMethodHub(client=None, tools=())
-    client = MCPMethodClient(endpoint)
+    client = MCPMethodClient(
+        endpoint,
+        user_authorization=user_authorization,
+        organization_id=organization_id,
+    )
     try:
         tools = tuple(client.list_tools())
         names: set[str] = set()

@@ -106,6 +106,7 @@ class GenReportEngine:
         workspace_id: str | None = None,
         primary_source_id: str | None = None,
         discover_workspace_files: bool = False,
+        selected_files: dict[str, Any] | None = None,
         workflow: Literal["report", "dashboard_extraction"] = "report",
         timeout_seconds: float = 900.0,
         transport: httpx.BaseTransport | None = None,
@@ -125,6 +126,9 @@ class GenReportEngine:
         self.workspace_id = workspace_id
         self.primary_source_id = primary_source_id
         self.discover_workspace_files = discover_workspace_files
+        self.selected_files = (
+            dict(selected_files) if isinstance(selected_files, dict) else None
+        )
         self.workflow = workflow
         self.timeout_seconds = timeout_seconds
         self.transport = transport
@@ -138,7 +142,17 @@ class GenReportEngine:
         user_context: object,
         user_query: object,
     ) -> FinalResponse:
-        del runtime, user_context, user_query
+        del user_context
+        request_scope = getattr(runtime, "selected_files", None)
+        if not isinstance(request_scope, dict):
+            query_metadata = getattr(user_query, "metadata", None)
+            request_scope = (
+                query_metadata.get("selected_files")
+                if isinstance(query_metadata, dict)
+                else None
+            )
+        if isinstance(request_scope, dict):
+            self.selected_files = dict(request_scope)
         payload = self.request_payload(
             instruction=spec_markdown,
             organization_id=organization_id,
@@ -285,6 +299,7 @@ class GenReportEngine:
             "primary_source_id": self.primary_source_id,
             "runtime_gateway": self._runtime_gateway(),
             "discover_workspace_files": self.discover_workspace_files,
+            "selected_files": self.selected_files,
         }
 
     def _endpoint(self) -> str:
