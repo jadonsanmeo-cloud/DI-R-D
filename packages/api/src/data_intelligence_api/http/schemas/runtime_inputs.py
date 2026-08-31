@@ -28,7 +28,7 @@ class SelectedFileReferenceRequest(BaseModel):
 class SelectedFilesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["all", "selected"] = "all"
+    mode: Literal["all", "selected", "none"] = "all"
     resource_ids: list[str] = Field(default_factory=list, max_length=100)
     resource_names: list[str] = Field(default_factory=list, max_length=100)
     resource_refs: list[SelectedFileReferenceRequest] = Field(
@@ -45,6 +45,12 @@ class SelectedFilesRequest(BaseModel):
         if self.mode == "selected" and not self.resource_ids:
             raise ValueError(
                 "selected_files.selected requires at least one resource_id"
+            )
+        if self.mode == "none" and (
+            self.resource_ids or self.resource_names or self.resource_refs
+        ):
+            raise ValueError(
+                "selected_files.none cannot include workspace resources"
             )
         if len(set(self.resource_ids)) != len(self.resource_ids):
             raise ValueError("selected_files.resource_ids must be unique")

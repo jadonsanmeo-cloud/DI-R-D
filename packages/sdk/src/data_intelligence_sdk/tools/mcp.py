@@ -125,6 +125,7 @@ def _scope_adjusted_definition(
     if (
         runtime.selected_files_scope is None
         or definition.name != "get_neighbor_chunk"
+        or not runtime.selected_files_scope.document_ids
         or len(_selected_document_ids(runtime)) != 1
     ):
         return definition
@@ -226,8 +227,14 @@ def _is_unscopable_tool(
     runtime: EngineRuntimeContext,
     definition: MCPToolDefinition,
 ) -> bool:
+    scope = runtime.selected_files_scope
+    if scope is None:
+        return False
+    if not scope.document_ids:
+        return definition.name.startswith("corpus_") or definition.name == (
+            "get_neighbor_chunk"
+        )
     return (
-        runtime.selected_files_scope is not None
-        and definition.name.startswith("corpus_")
+        definition.name.startswith("corpus_")
         and definition.name not in _SUPPORTED_SELECTED_SCOPE_TOOL_NAMES
     )

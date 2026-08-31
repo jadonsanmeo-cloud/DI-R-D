@@ -583,8 +583,13 @@ def _uploaded_file_names(query: UserQuery) -> list[str]:
 
 def _selected_file_instructions(runtime: EngineRuntimeContext) -> str:
     scope = runtime.selected_files_scope
-    if scope is None or not scope.document_ids:
+    if scope is None:
         return ""
+    if not scope.document_ids:
+        return (
+            "No workspace files are selected for this run. Do not call workspace "
+            "retrieval tools or ask the user for a local file path.\n\n"
+        )
     return (
         "This run is limited to the selected workspace document IDs: "
         f"{json.dumps(list(scope.document_ids))}. Use the retrieval tools; the "

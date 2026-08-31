@@ -1180,7 +1180,12 @@ def _selected_files_scope(
     if session_context is None:
         return None
     selected_files = session_context.state.get("selected_files")
-    if not isinstance(selected_files, dict) or selected_files.get("mode") != "selected":
+    if not isinstance(selected_files, dict):
+        return None
+    mode = selected_files.get("mode")
+    if mode == "none":
+        return SelectedFilesScope(document_ids=())
+    if mode != "selected":
         return None
     resource_ids = selected_files.get("resource_ids", [])
     if not isinstance(resource_ids, (list, tuple)):
