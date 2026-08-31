@@ -14,6 +14,7 @@ from data_intelligence_sdk.runtime.sandbox import (
 from data_intelligence_sdk.runtime.resource_manager import ResourceManager
 from data_intelligence_sdk.runtime.run_context import EngineRunContext
 from data_intelligence_sdk.runtime.selected_files import SelectedFilesScope
+from data_intelligence_sdk.runtime.skills import WorkspaceSkill
 from data_intelligence_sdk.internal_memory.context import InternalMemoryContext
 from data_intelligence_sdk.sandbox.artifacts import ArtifactStore, RunArtifactSession
 from data_intelligence_sdk.sandbox.executor import SandboxExecutor
@@ -40,6 +41,7 @@ class EngineRuntimeContext:
         default_factory=InternalMemoryContext
     )
     workspace_id: str | None = None
+    workspace_skills: tuple[WorkspaceSkill, ...] = ()
     selected_files_scope: SelectedFilesScope | None = None
     execution_files: tuple[dict[str, Any], ...] = ()
 

@@ -30,6 +30,7 @@ from data_intelligence_sdk.runtime.config import ConfigManager, get_config_manag
 from data_intelligence_sdk.runtime.deep_agent_backend import DeepAgentSandboxBackend
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.mcp_client import MCPToolError
+from data_intelligence_sdk.runtime.skills import render_workspace_skills
 from data_intelligence_sdk.tools import (
     create_execute_python_tool,
     create_internal_memory_tools,
@@ -498,6 +499,7 @@ class GeneralPurposeEngine:
         )
         selected_file_instructions = _selected_file_instructions(runtime)
         workspace_scope_instructions = _workspace_scope_instructions(runtime)
+        workspace_skill_instructions = render_workspace_skills(runtime.workspace_skills)
         internal_memory_instructions = (
             "Internal memory is available. The USER.md and MEMORY.md sections "
             "below are a frozen snapshot for this request. If they and the "
@@ -521,6 +523,7 @@ class GeneralPurposeEngine:
             f"{method_hub_instructions}"
             f"{uploaded_file_instructions}"
             f"{workspace_scope_instructions}"
+            f"{workspace_skill_instructions}"
             f"{selected_file_instructions}"
             f"{internal_memory_instructions}"
             f"{internal_memory_context}"

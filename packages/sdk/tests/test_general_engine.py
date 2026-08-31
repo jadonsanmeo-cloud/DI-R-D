@@ -3,6 +3,7 @@ from data_intelligence_sdk.engines.general import GeneralPurposeEngine
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 from data_intelligence_sdk.runtime.mcp_client import MCPToolDefinition
 from data_intelligence_sdk.runtime.selected_files import SelectedFilesScope
+from data_intelligence_sdk.runtime.skills import WorkspaceSkill
 
 
 def test_general_engine_prompt_keeps_method_hub_outside_sandbox() -> None:
@@ -34,6 +35,28 @@ def test_general_engine_prompt_explains_current_workspace_scope() -> None:
 
     assert "workspace-1" in prompt
     assert "do not ask the user for a workspace_id" in prompt.lower()
+
+
+def test_general_engine_prompt_injects_enabled_workspace_skills() -> None:
+    engine = GeneralPurposeEngine(llm=object())
+    prompt = engine._system_prompt(
+        ExecutionSpec(intent="general", objective="Validate the report."),
+        EngineRuntimeContext(
+            workspace_skills=(
+                WorkspaceSkill(
+                    skill_id="report-validation",
+                    name="Report validation",
+                    description="Validate reports before publishing.",
+                    body="# Report validation\nCheck source totals first.",
+                ),
+            ),
+        ),
+        UserQuery(text="Validate the report."),
+    )
+
+    assert "Enabled workspace skills" in prompt
+    assert "Report validation" in prompt
+    assert "Check source totals first." in prompt
 
 
 def test_general_engine_builds_llm_messages_from_conversation_history() -> None:
