@@ -73,7 +73,9 @@ class SkillRegistryClient:
                 WorkspaceSkill(
                     skill_id=str(payload.get("id") or item["id"]),
                     name=str(payload.get("name") or item.get("name") or item["id"]),
-                    description=str(payload.get("description") or item.get("description") or ""),
+                    description=str(
+                        payload.get("description") or item.get("description") or ""
+                    ),
                     body=body,
                 )
             )

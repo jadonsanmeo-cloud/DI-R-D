@@ -40,7 +40,9 @@ class _Http:
         )
 
 
-def test_skill_registry_client_loads_visible_skill_bodies_with_workspace_scope() -> None:
+def test_skill_registry_client_loads_visible_skill_bodies_with_workspace_scope() -> (
+    None
+):
     http = _Http()
     client = SkillRegistryClient(
         base_url="http://skills",
