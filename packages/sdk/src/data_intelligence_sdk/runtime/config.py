@@ -48,6 +48,14 @@ class InternalMemoryServiceSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SkillRegistryServiceSettings:
+    """Connection settings for optional workspace-skill prompt injection."""
+
+    endpoint: str = "http://skill-registry:9000"
+    enabled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxSettings:
     """Connection settings for an external sandbox execution service."""
 
@@ -225,6 +233,29 @@ class ConfigManager:
                 endpoint
                 or os.environ.get("INTERNAL_MEMORY_SERVICE_URL")
                 or "http://intelligence-service:8006/api/v1"
+            ),
+            enabled=enabled,
+        )
+
+    def skill_registry_service_settings(self) -> SkillRegistryServiceSettings:
+        """Resolve optional request-scoped workspace-skill integration."""
+
+        payload = self.load().get("skill_registry_service", {})
+        endpoint = _resolve_env_value(payload.get("endpoint"))
+        raw_enabled = payload.get(
+            "enabled", os.environ.get("SKILL_REGISTRY_ENABLED", "false")
+        )
+        enabled = str(_resolve_env_value(raw_enabled)).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        return SkillRegistryServiceSettings(
+            endpoint=str(
+                endpoint
+                or os.environ.get("SKILL_REGISTRY_SERVICE_URL")
+                or "http://skill-registry:9000"
             ),
             enabled=enabled,
         )

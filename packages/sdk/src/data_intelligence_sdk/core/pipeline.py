@@ -31,6 +31,10 @@ from data_intelligence_sdk.internal_memory.client import (
     InternalMemoryClient,
     create_internal_memory_client,
 )
+from data_intelligence_sdk.runtime.skills import (
+    SkillRegistryClient,
+    create_skill_registry_client,
+)
 from data_intelligence_sdk.registry.engine_registry import EngineRegistry
 from data_intelligence_sdk.registry.engine_selector import EngineSelectionRequest
 from data_intelligence_sdk.registry.engine_registry import SelectedEngine
@@ -124,6 +128,7 @@ class DataIntelligencePipeline:
         default_organization_id: str = "test-org",
         workspace_id: str | None = None,
         internal_memory_service_url: str | None = None,
+        skill_registry_service_url: str | None = None,
         execution_files: list[dict[str, Any]] | None = None,
     ) -> None:
         self.intent_analyzer = intent_analyzer
@@ -149,6 +154,7 @@ class DataIntelligencePipeline:
         self.default_organization_id = default_organization_id
         self.workspace_id = workspace_id
         self.internal_memory_service_url = internal_memory_service_url
+        self.skill_registry_service_url = skill_registry_service_url
         self.execution_files = tuple(execution_files or ())
 
     def _internal_memory_client(
@@ -159,6 +165,23 @@ class DataIntelligencePipeline:
             self.internal_memory_service_url,
             query,
         )
+
+    def _skill_registry_client(self, query: UserQuery) -> SkillRegistryClient | None:
+        return create_skill_registry_client(
+            self.skill_registry_service_url,
+            query,
+            workspace_id=self.workspace_id,
+        )
+
+    def _workspace_skills(self, query: UserQuery):
+        client = self._skill_registry_client(query)
+        if client is None:
+            return ()
+        try:
+            return client.load()
+        except (httpx.HTTPError, ValueError):
+            self._log("workspace_skills_unavailable")
+            return ()
 
     @staticmethod
     def _internal_memory_context(query: UserQuery) -> InternalMemoryContext:
@@ -553,6 +576,7 @@ class DataIntelligencePipeline:
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
                     workspace_id=self.workspace_id,
+                    workspace_skills=self._workspace_skills(prepared.query),
                     selected_files_scope=_selected_files_scope(
                         prepared.session_context
                     ),
@@ -688,6 +712,7 @@ class DataIntelligencePipeline:
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
                     workspace_id=self.workspace_id,
+                    workspace_skills=self._workspace_skills(prepared.query),
                     selected_files_scope=_selected_files_scope(
                         prepared.session_context
                     ),
@@ -838,6 +863,7 @@ class DataIntelligencePipeline:
                     ),
                     internal_memory_client=self._internal_memory_client(prepared.query),
                     workspace_id=self.workspace_id,
+                    workspace_skills=self._workspace_skills(prepared.query),
                     selected_files_scope=_selected_files_scope(
                         prepared.session_context
                     ),

@@ -60,3 +60,30 @@ def test_internal_memory_config_defaults_to_intelligence_service_api() -> None:
     settings = ConfigManager("missing-config.toml").internal_memory_service_settings()
 
     assert settings.endpoint == "http://intelligence-service:8006/api/v1"
+
+
+def test_pipeline_builds_workspace_skill_client_when_scope_is_complete() -> None:
+    pipeline = DataIntelligencePipeline(
+        intent_analyzer=object(),
+        spec_builder=object(),
+        spec_confirmation=object(),
+        engine_registry=object(),
+        workspace_id="workspace-a",
+        skill_registry_service_url="http://skills",
+    )
+
+    client = pipeline._skill_registry_client(
+        UserQuery(
+            text="Revenue",
+            user_id="user-a",
+            metadata={"organization_id": "tenant-a"},
+        )
+    )
+
+    assert client is not None
+
+
+def test_skill_registry_config_defaults_to_registry_service() -> None:
+    settings = ConfigManager("missing-config.toml").skill_registry_service_settings()
+
+    assert settings.endpoint == "http://skill-registry:9000"
