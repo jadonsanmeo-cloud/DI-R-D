@@ -15,7 +15,10 @@ from data_intelligence_api.infrastructure.workflow.gen_report_engine import (
 )
 
 WORKSPACE = Path(__file__).resolve().parents[4]
-GENREPORT_BACKEND = WORKSPACE / "GenReport" / "backend"
+GENREPORT_ROOT = WORKSPACE / "GenReport"
+GENREPORT_BACKEND = GENREPORT_ROOT / "backend"
+if not (GENREPORT_BACKEND / "main.py").is_file():
+    GENREPORT_BACKEND = GENREPORT_ROOT / "src"
 if str(GENREPORT_BACKEND) not in sys.path:
     sys.path.insert(0, str(GENREPORT_BACKEND))
 

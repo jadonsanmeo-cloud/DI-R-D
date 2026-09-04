@@ -163,6 +163,7 @@ class GenReportEngineTests(unittest.TestCase):
             execution_files=execution_files,
             workspace_id="workspace-1",
             discover_workspace_files=False,
+            all_inputs_primary=True,
             transport=httpx.MockTransport(handler),
         )
 
@@ -199,6 +200,7 @@ class GenReportEngineTests(unittest.TestCase):
         self.assertEqual(payload["language"], "en")
         self.assertEqual(payload["execution_context"], execution_context)
         self.assertEqual(payload["execution_files"], execution_files)
+        self.assertTrue(payload["all_inputs_primary"])
         self.assertEqual(
             payload["selected_files"],
             {
