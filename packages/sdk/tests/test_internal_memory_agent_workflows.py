@@ -96,20 +96,10 @@ def test_agent_can_write_a_durable_user_preference_with_memory_tool() -> None:
     assert "durable, high-value facts" in captured["system_prompt"]
 
 
-def test_agent_can_search_then_scroll_prior_conversation_messages() -> None:
-    calls: list[tuple[str, dict[str, Any]]] = []
-
+def test_general_agent_does_not_bind_session_history_tools() -> None:
     class Client:
         def session_search(self, query: str, *, limit: int):
-            calls.append(("session_search", {"query": query, "limit": limit}))
-            return [
-                {
-                    "conversation_id": "conversation-prior",
-                    "match_message_id": "msg-revenue",
-                    "snippet": "Revenue was 18% above plan.",
-                    "messages": [],
-                }
-            ]
+            raise AssertionError("session history must not be available to the agent")
 
         def session_scroll(
             self,
@@ -119,61 +109,19 @@ def test_agent_can_search_then_scroll_prior_conversation_messages() -> None:
             direction: str,
             limit: int,
         ):
-            calls.append(
-                (
-                    "session_scroll",
-                    {
-                        "conversation_id": conversation_id,
-                        "around_message_id": around_message_id,
-                        "direction": direction,
-                        "limit": limit,
-                    },
-                )
-            )
-            return [
-                {
-                    "message_id": "msg-explanation",
-                    "role": "assistant",
-                    "content": "Growth came from the enterprise segment.",
-                }
-            ]
+            raise AssertionError("session history must not be available to the agent")
 
-    question = "Trong báo cáo trước, vì sao doanh thu tăng?"
-
-    def script(tools: dict[str, Any], payload: dict[str, Any]) -> str:
-        assert payload["messages"][-1]["content"] == question
-        matches = tools["session_search"].invoke(
-            {"query": "Revenue above plan", "limit": 3}
-        )
-        tools["session_scroll"].invoke(
-            {
-                "conversation_id": matches[0]["conversation_id"],
-                "around_message_id": matches[0]["match_message_id"],
-                "direction": "forward",
-                "limit": 3,
-            }
-        )
-        return "Doanh thu tăng nhờ phân khúc enterprise."
+        def write(self, *, target, operation, content, match):
+            return {"memory_markdown": content}
 
     output, captured = _run_scripted_agent(
-        question=question,
+        question="Nhớ sở thích trả lời ngắn gọn.",
         client=Client(),
-        script=script,
+        script=lambda _tools, _payload: "Đã hiểu.",
     )
 
-    assert output.result == "Doanh thu tăng nhờ phân khúc enterprise."
-    assert calls == [
-        ("session_search", {"query": "Revenue above plan", "limit": 3}),
-        (
-            "session_scroll",
-            {
-                "conversation_id": "conversation-prior",
-                "around_message_id": "msg-revenue",
-                "direction": "forward",
-                "limit": 3,
-            },
-        ),
-    ]
-    assert "session_search" in captured["tool_names"]
-    assert "session_scroll" in captured["tool_names"]
-    assert "then `session_scroll`" in captured["system_prompt"]
+    assert output.result == "Đã hiểu."
+    assert "session_search" not in captured["tool_names"]
+    assert "session_scroll" not in captured["tool_names"]
+    assert "session_search" not in captured["system_prompt"]
+

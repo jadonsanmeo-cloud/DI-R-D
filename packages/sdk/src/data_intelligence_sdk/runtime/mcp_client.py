@@ -8,11 +8,16 @@ server's Python callables.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, AsyncContextManager, Callable
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MCPClientError(RuntimeError):
@@ -35,6 +40,14 @@ class MCPToolDefinition:
 
 
 SessionFactory = Callable[[], AsyncContextManager[Any]]
+
+
+def _authorization_fingerprint(authorization: str | None) -> str:
+    """Return a stable correlation value without exposing a user bearer token."""
+
+    if not authorization:
+        return "missing"
+    return hashlib.sha256(authorization.encode("utf-8")).hexdigest()[:12]
 
 
 class MCPMethodClient:
@@ -128,6 +141,13 @@ def _default_factory_for_endpoint(
                 headers["Authorization"] = user_authorization
             if organization_id:
                 headers["X-Org-ID"] = organization_id
+            LOGGER.info(
+                "opening Methods-Hub MCP session endpoint=%s "
+                "authorization_fingerprint=%s organization_id=%s",
+                endpoint,
+                _authorization_fingerprint(user_authorization),
+                organization_id or "missing",
+            )
             async with create_mcp_http_client(
                 headers=headers,
             ) as http_client:

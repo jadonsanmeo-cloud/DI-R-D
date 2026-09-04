@@ -2,7 +2,13 @@ from contextlib import asynccontextmanager
 
 from data_intelligence_sdk.runtime.mcp_client import (
     MCPMethodClient,
+    _authorization_fingerprint,
 )
+
+
+def test_authorization_fingerprint_redacts_the_bearer_value() -> None:
+    assert _authorization_fingerprint("Bearer user-token") == "b8f2c25d6e8d"
+    assert _authorization_fingerprint(None) == "missing"
 
 
 def test_mcp_session_forwards_user_authorization_header(monkeypatch) -> None:

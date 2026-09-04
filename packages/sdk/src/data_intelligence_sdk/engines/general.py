@@ -325,7 +325,10 @@ class GeneralPurposeEngine:
         )
         execute_python = create_execute_python_tool(runtime)
         mcp_tools = create_mcp_tools(runtime)
-        internal_memory_tools = create_internal_memory_tools(runtime)
+        internal_memory_tools = create_internal_memory_tools(
+            runtime,
+            include_session_history=False,
+        )
         self._register_minimal_profile()
         return self.agent_factory(
             model=self.llm,
@@ -502,10 +505,8 @@ class GeneralPurposeEngine:
         workspace_skill_instructions = render_workspace_skills(runtime.workspace_skills)
         internal_memory_instructions = (
             "Internal memory is available. The USER.md and MEMORY.md sections "
-            "below are a frozen snapshot for this request. If they and the "
-            "current conversation are insufficient, use `session_search` to find "
-            "prior conversation messages, then `session_scroll` to inspect their "
-            "neighbourhood. Use `memory` only for durable, high-value facts: "
+            "below are a frozen snapshot for this request. Use `memory` only for "
+            "durable, high-value facts: "
             "write stable user preferences to `user`, and durable agent/project "
             "knowledge to `memory`. Do not save transient task state, raw logs, "
             "or duplicate facts. `replace` and `remove` require the exact existing "

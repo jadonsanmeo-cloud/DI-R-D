@@ -7,7 +7,11 @@ from langchain_core.tools import BaseTool, tool
 from data_intelligence_sdk.runtime.engine_runtime import EngineRuntimeContext
 
 
-def create_internal_memory_tools(runtime: EngineRuntimeContext) -> list[BaseTool]:
+def create_internal_memory_tools(
+    runtime: EngineRuntimeContext,
+    *,
+    include_session_history: bool = True,
+) -> list[BaseTool]:
     """Create the internal-memory tools available during one agent run."""
 
     if runtime.internal_memory_client is None:
@@ -52,4 +56,6 @@ def create_internal_memory_tools(runtime: EngineRuntimeContext) -> list[BaseTool
             match=match,
         )
 
-    return [session_search, session_scroll, memory]
+    if include_session_history:
+        return [session_search, session_scroll, memory]
+    return [memory]
