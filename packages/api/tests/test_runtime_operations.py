@@ -155,6 +155,19 @@ class RuntimeOperationModelTests(unittest.TestCase):
     def test_runtime_input_exposes_explicit_workspace_discovery_policy(self):
         self.assertIn("discover_workspace_files", RuntimeInput.model_fields)
 
+    def test_runtime_input_exposes_explicit_primary_input_policy(self):
+        request = InstantExecutionRequest.model_validate(
+            {
+                **operation_payload(),
+                "runtime_input": {
+                    **runtime_input_payload(),
+                    "all_inputs_primary": True,
+                },
+            }
+        )
+
+        self.assertTrue(request.runtime_input.all_inputs_primary)
+
     def test_selected_files_survive_runtime_to_workflow_mapping(self):
         request = InstantExecutionRequest.model_validate(
             {
@@ -737,6 +750,7 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "language": "en",
                 "history": report_history_payload(),
                 "execution_context": execution_context_payload(),
+                "all_inputs_primary": True,
                 "selected_files": {
                     "mode": "selected",
                     "resource_ids": ["document-1"],
@@ -800,6 +814,7 @@ class RuntimeReportStreamingAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["history"], report_history_payload())
         self.assertEqual(captured["instruction"], "Create a report")
         self.assertEqual(captured["workflow"], "report")
+        self.assertTrue(captured["all_inputs_primary"])
         self.assertEqual(captured["selected_files"]["resource_ids"], ["document-1"])
         self.assertNotIn("service_token", captured)
 
