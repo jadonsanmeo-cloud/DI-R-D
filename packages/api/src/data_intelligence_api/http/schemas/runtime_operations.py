@@ -44,8 +44,13 @@ class RuntimeInput(BaseModel):
     execution_context: ExecutionContextRequest | None = None
     execution_files: list[ExecutionFileRequest] = Field(default_factory=list)
     primary_source_id: str | None = Field(default=None, max_length=2048)
+    primary_source_ids: list[str] = Field(default_factory=list, max_length=100)
     all_inputs_primary: bool = False
     discover_workspace_files: bool | None = None
+    workspace_discovery_instruction: str | None = Field(
+        default=None,
+        max_length=20_000,
+    )
     selected_files: SelectedFilesRequest | None = None
     internal_memory_context: dict[str, Any] | None = None
 

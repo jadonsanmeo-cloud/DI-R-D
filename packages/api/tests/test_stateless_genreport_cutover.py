@@ -42,6 +42,8 @@ def instant_request(
     primary_source: bool = False,
     method_hub_enabled: bool = False,
     discover_workspace_files: bool | None = None,
+    primary_source_ids: list[str] | None = None,
+    workspace_discovery_instruction: str | None = None,
 ) -> InstantExecutionRequest:
     execution_files: list[dict] = []
     primary_source_id: str | None = None
@@ -91,6 +93,10 @@ def instant_request(
     }
     if discover_workspace_files is not None:
         runtime_input["discover_workspace_files"] = discover_workspace_files
+    if primary_source_ids is not None:
+        runtime_input["primary_source_ids"] = primary_source_ids
+    if workspace_discovery_instruction is not None:
+        runtime_input["workspace_discovery_instruction"] = workspace_discovery_instruction
     return InstantExecutionRequest.model_validate(
         {
             "schema_version": "1",
@@ -235,6 +241,45 @@ class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(captured_engine_kwargs["primary_source_id"], "source-primary")
         self.assertTrue(captured_engine_kwargs["discover_workspace_files"])
+
+    async def test_forwards_primary_source_set_and_discovery_instruction(self):
+        captured_engine_kwargs: dict = {}
+
+        class FakeStreamingEngine:
+            def __init__(self, _base_url, **kwargs) -> None:
+                captured_engine_kwargs.update(kwargs)
+
+            async def stream_events(self, *, instruction, organization_id):
+                del instruction, organization_id
+                yield {
+                    "type": "report.completed",
+                    "payload": {"output_text": "Report ready.", "artifacts": []},
+                }
+
+        _ = [
+            event
+            async for event in stream_report_events(
+                instant_request(
+                    [],
+                    primary_source=True,
+                    discover_workspace_files=True,
+                    primary_source_ids=["source-primary"],
+                    workspace_discovery_instruction="Find supplementary workspace evidence.",
+                ),
+                instruction="Create a report",
+                settings=SimpleNamespace(
+                    gen_report_api_url="http://genreport.test",
+                    gen_report_public_url=None,
+                ),
+                engine_factory=FakeStreamingEngine,
+            )
+        ]
+
+        self.assertEqual(captured_engine_kwargs["primary_source_ids"], ["source-primary"])
+        self.assertEqual(
+            captured_engine_kwargs["workspace_discovery_instruction"],
+            "Find supplementary workspace evidence.",
+        )
 
     async def test_restart_uses_supplied_axiom_history_and_one_internal_path(self):
         captured_requests: list = []

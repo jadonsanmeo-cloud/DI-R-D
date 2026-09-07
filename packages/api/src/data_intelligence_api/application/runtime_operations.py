@@ -102,8 +102,10 @@ async def stream_report_events(
         ],
         workspace_id=runtime_input.workspace_id,
         primary_source_id=runtime_input.primary_source_id,
+        primary_source_ids=runtime_input.primary_source_ids,
         all_inputs_primary=runtime_input.all_inputs_primary,
         discover_workspace_files=_discover_workspace_files(runtime_input),
+        workspace_discovery_instruction=runtime_input.workspace_discovery_instruction,
         selected_files=(
             runtime_input.selected_files.model_dump(
                 mode="json",

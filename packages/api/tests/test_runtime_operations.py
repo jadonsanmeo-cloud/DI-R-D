@@ -155,18 +155,18 @@ class RuntimeOperationModelTests(unittest.TestCase):
     def test_runtime_input_exposes_explicit_workspace_discovery_policy(self):
         self.assertIn("discover_workspace_files", RuntimeInput.model_fields)
 
-    def test_runtime_input_exposes_explicit_primary_input_policy(self):
+    def test_runtime_input_accepts_explicit_primary_source_ids(self):
         request = InstantExecutionRequest.model_validate(
             {
                 **operation_payload(),
                 "runtime_input": {
                     **runtime_input_payload(),
-                    "all_inputs_primary": True,
+                    "primary_source_ids": ["source-a", "source-b"],
                 },
             }
         )
 
-        self.assertTrue(request.runtime_input.all_inputs_primary)
+        self.assertEqual(request.runtime_input.primary_source_ids, ["source-a", "source-b"])
 
     def test_selected_files_survive_runtime_to_workflow_mapping(self):
         request = InstantExecutionRequest.model_validate(

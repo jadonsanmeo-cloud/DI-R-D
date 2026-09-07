@@ -105,8 +105,10 @@ class GenReportEngine:
         execution_files: list[dict[str, Any]] | None = None,
         workspace_id: str | None = None,
         primary_source_id: str | None = None,
+        primary_source_ids: list[str] | None = None,
         all_inputs_primary: bool = False,
         discover_workspace_files: bool = False,
+        workspace_discovery_instruction: str | None = None,
         selected_files: dict[str, Any] | None = None,
         workflow: Literal["report", "dashboard_extraction"] = "report",
         timeout_seconds: float = 900.0,
@@ -126,8 +128,10 @@ class GenReportEngine:
         self.execution_files = list(execution_files or [])
         self.workspace_id = workspace_id
         self.primary_source_id = primary_source_id
+        self.primary_source_ids = list(primary_source_ids or [])
         self.all_inputs_primary = all_inputs_primary
         self.discover_workspace_files = discover_workspace_files
+        self.workspace_discovery_instruction = workspace_discovery_instruction
         self.selected_files = (
             dict(selected_files) if isinstance(selected_files, dict) else None
         )
@@ -299,9 +303,11 @@ class GenReportEngine:
             "execution_context": self.execution_context,
             "execution_files": self.execution_files,
             "primary_source_id": self.primary_source_id,
+            "primary_source_ids": self.primary_source_ids,
             "all_inputs_primary": self.all_inputs_primary,
             "runtime_gateway": self._runtime_gateway(),
             "discover_workspace_files": self.discover_workspace_files,
+            "workspace_discovery_instruction": self.workspace_discovery_instruction,
             "selected_files": self.selected_files,
         }
 
