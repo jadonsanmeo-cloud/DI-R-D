@@ -548,7 +548,7 @@ def create_example_pipeline(
     )
     resolved_mcp_tools = mcp_tools
     if method_hub_enabled is None and mcp_client is not None and not resolved_mcp_tools:
-        resolved_mcp_tools = tuple(mcp_client.list_tools())
+        resolved_mcp_tools = tuple(mcp_client.list_agent_tools())
     shared_llm_client = spec_llm_client
     if artifact_store is None:
         artifact_settings = resolved_config_manager.artifact_settings()

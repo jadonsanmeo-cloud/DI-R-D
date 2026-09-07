@@ -736,3 +736,14 @@ Stop the stack while retaining corpus data:
 ```bash
 docker compose -f docker/docker-compose.yaml down
 ```
+
+### Organization MethodHub tool bindings
+
+Agent runtime construction uses `MCPMethodClient.list_agent_tools()`, which filters
+MethodHub's full catalog against organization registrations. Raw `list_tools()` and
+`call_tool()` remain unchanged. Configure `TOOL_SUBSCRIPTIONS_API_URL` to the gateway
+GET endpoint `/authz-service/api/v1/authz/me/tool-subscriptions` (default origin
+`http://host.docker.internal:8007`). The user bearer and organization must match.
+No registrations means no MethodHub tools bound to the agent. Subscription service
+errors stop construction instead of falling back to all tools. Changes apply to
+new agents; the current agent retains its snapshot.

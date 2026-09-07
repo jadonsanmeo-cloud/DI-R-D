@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncContextManager, Callable
 
 
+from data_intelligence_sdk.runtime.tool_subscriptions import registered_tool_names
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -65,6 +67,7 @@ class MCPMethodClient:
         if not endpoint:
             raise ValueError("MCP endpoint must not be empty.")
         self.endpoint = endpoint
+        self.user_authorization = user_authorization
         self.organization_id = organization_id.strip() if organization_id else None
         self._session_factory = session_factory or _default_factory_for_endpoint(
             endpoint,
@@ -93,6 +96,18 @@ class MCPMethodClient:
         """Discover and normalize the server's current tool definitions."""
 
         return _run_sync(self._list_tools_async())
+
+    def list_agent_tools(self) -> list[MCPToolDefinition]:
+        """Return only the organization's registered tools for a new agent binding."""
+        return _run_sync(self._list_agent_tools_async())
+
+    async def _list_agent_tools_async(self) -> list[MCPToolDefinition]:
+        names = await registered_tool_names(
+            self.organization_id or "", self.user_authorization
+        )
+        if not names:
+            return []
+        return [tool for tool in await self._list_tools_async() if tool.name in names]
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         """Invoke one remote MCP tool and return structured result data."""

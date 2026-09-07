@@ -56,7 +56,7 @@ def resolve_method_hub(
         organization_id=organization_id,
     )
     try:
-        tools = tuple(client.list_tools())
+        tools = tuple(client.list_agent_tools())
         names: set[str] = set()
         for tool in tools:
             if tool.name == "execute_python" or tool.name in names:
