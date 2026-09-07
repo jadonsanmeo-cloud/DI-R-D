@@ -124,4 +124,3 @@ def test_general_agent_does_not_bind_session_history_tools() -> None:
     assert "session_search" not in captured["tool_names"]
     assert "session_scroll" not in captured["tool_names"]
     assert "session_search" not in captured["system_prompt"]
-

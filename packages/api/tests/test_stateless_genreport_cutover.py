@@ -96,7 +96,9 @@ def instant_request(
     if primary_source_ids is not None:
         runtime_input["primary_source_ids"] = primary_source_ids
     if workspace_discovery_instruction is not None:
-        runtime_input["workspace_discovery_instruction"] = workspace_discovery_instruction
+        runtime_input["workspace_discovery_instruction"] = (
+            workspace_discovery_instruction
+        )
     return InstantExecutionRequest.model_validate(
         {
             "schema_version": "1",
@@ -275,7 +277,9 @@ class StatelessGenReportCutoverTests(unittest.IsolatedAsyncioTestCase):
             )
         ]
 
-        self.assertEqual(captured_engine_kwargs["primary_source_ids"], ["source-primary"])
+        self.assertEqual(
+            captured_engine_kwargs["primary_source_ids"], ["source-primary"]
+        )
         self.assertEqual(
             captured_engine_kwargs["workspace_discovery_instruction"],
             "Find supplementary workspace evidence.",

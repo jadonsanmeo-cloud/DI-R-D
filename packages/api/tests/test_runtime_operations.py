@@ -166,7 +166,9 @@ class RuntimeOperationModelTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(request.runtime_input.primary_source_ids, ["source-a", "source-b"])
+        self.assertEqual(
+            request.runtime_input.primary_source_ids, ["source-a", "source-b"]
+        )
 
     def test_selected_files_survive_runtime_to_workflow_mapping(self):
         request = InstantExecutionRequest.model_validate(
